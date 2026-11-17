@@ -4,3 +4,4 @@ dist/
 screenshots/
 .cloud-attachments/
 .freebuff/
+*.zip
