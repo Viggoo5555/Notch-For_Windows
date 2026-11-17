@@ -1,0 +1,2049 @@
+/* ==========================================================================
+   Tokens
+   ========================================================================== */
+
+:root {
+  --accent: #7c9cff;
+  --ink: #f6f7fb;
+  --ink-2: rgba(240, 243, 250, 0.74);
+  --muted: rgba(233, 238, 249, 0.58);
+  --faint: rgba(228, 235, 248, 0.4);
+
+  --hair: rgba(255, 255, 255, 0.08);
+  --hair-strong: rgba(255, 255, 255, 0.14);
+  --surface: rgba(255, 255, 255, 0.05);
+  --surface-hover: rgba(255, 255, 255, 0.085);
+
+  --r-panel: 28px;
+  --r-tile: 12px;
+
+  --pill-w: 96px;
+  --pill-h: 26px;
+  --notch-inset: 0px;
+  --pill-radius: 0 0 13px 13px;
+  --panel-radius: 0 0 var(--r-panel) var(--r-panel);
+  --motion: 1;
+  --dur-open: calc(0.46s * var(--motion));
+  --dur-close: calc(0.34s * var(--motion));
+  --ease-open: var(--spring-open);
+  --ease-close: var(--spring-close);
+  --grain: 0.026;
+  --tint-o: 1;
+
+  --glass-w: 672px;
+  --glass-h: 440px;
+
+  /* Sampled springs: 0.46s settle with a 1.5% overshoot, and a critically
+     damped 0.34s close. */
+  --spring-open: linear(
+    0.0000,
+    0.0462 3.85%,
+    0.1516 7.69%,
+    0.2803 11.54%,
+    0.4111 15.38%,
+    0.5320 19.23%,
+    0.6373 23.08%,
+    0.7252 26.92%,
+    0.7963 30.77%,
+    0.8523 34.62%,
+    0.8952 38.46%,
+    0.9275 42.31%,
+    0.9512 46.15%,
+    0.9682 50.00%,
+    0.9802 53.85%,
+    0.9884 57.69%,
+    0.9938 61.54%,
+    0.9973 65.38%,
+    0.9995 69.23%,
+    1.0007 73.08%,
+    1.0013 76.92%,
+    1.0015 80.77%,
+    1.0015 84.62%,
+    1.0014 88.46%,
+    1.0012 92.31%,
+    1.0010 96.15%,
+    1.0000 100.00%
+  );
+  --spring-close: linear(
+    0.0000,
+    0.0315 3.85%,
+    0.1055 7.69%,
+    0.1998 11.54%,
+    0.3004 15.38%,
+    0.3988 19.23%,
+    0.4903 23.08%,
+    0.5726 26.92%,
+    0.6447 30.77%,
+    0.7068 34.62%,
+    0.7596 38.46%,
+    0.8039 42.31%,
+    0.8408 46.15%,
+    0.8713 50.00%,
+    0.8964 53.85%,
+    0.9168 57.69%,
+    0.9334 61.54%,
+    0.9468 65.38%,
+    0.9576 69.23%,
+    0.9663 73.08%,
+    0.9733 76.92%,
+    0.9788 80.77%,
+    0.9833 84.62%,
+    0.9868 88.46%,
+    0.9896 92.31%,
+    0.9918 96.15%,
+    1.0000 100.00%
+  );
+  --spring-micro: linear(
+    0.0000,
+    0.0877 7.69%,
+    0.2675 15.38%,
+    0.4602 23.08%,
+    0.6288 30.77%,
+    0.7607 38.46%,
+    0.8560 46.15%,
+    0.9204 53.85%,
+    0.9612 61.54%,
+    0.9852 69.23%,
+    0.9981 76.92%,
+    1.0018 80.77%,
+    1.0041 84.62%,
+    1.0061 92.31%,
+    1.0000 100.00%
+  );
+
+  --font: "SF Pro Display", "SF Pro Text", "Segoe UI Variable Display",
+    "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+html.ease-soft {
+  --ease-open: cubic-bezier(0.22, 0.86, 0, 1);
+  --ease-close: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+html.ease-linear {
+  --ease-open: linear;
+  --ease-close: linear;
+}
+
+/* Island notch: instead of hanging off the top edge, the pill and the panel
+   float a little below it with every corner rounded. */
+html.island {
+  --notch-inset: 8px;
+  --pill-radius: 13px;
+  --panel-radius: var(--r-panel);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+body {
+  font-family: var(--font);
+  color: var(--ink);
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+/* ==========================================================================
+   Demo backdrop (browser only)
+   ========================================================================== */
+
+html.demo body {
+  background:
+    radial-gradient(900px 620px at 22% 8%, rgba(64, 88, 156, 0.9), transparent 62%),
+    radial-gradient(780px 660px at 82% 22%, rgba(104, 62, 118, 0.78), transparent 64%),
+    radial-gradient(700px 520px at 52% 96%, rgba(26, 88, 86, 0.62), transparent 68%),
+    linear-gradient(158deg, #090d17 0%, #131019 52%, #060910 100%);
+}
+
+html.demo body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 0%, transparent 42%, rgba(0, 0, 0, 0.42));
+}
+
+.demo-hint {
+  display: none;
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  color: rgba(233, 238, 250, 0.3);
+  z-index: 1;
+  pointer-events: none;
+}
+
+html.demo .demo-hint {
+  display: block;
+}
+
+/* ==========================================================================
+   The notch
+   ========================================================================== */
+
+.notch {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: var(--glass-w);
+  height: var(--glass-h);
+  border-radius: var(--panel-radius);
+  background: transparent;
+  overflow: hidden;
+  isolation: isolate;
+  z-index: 2;
+  contain: layout paint;
+  /* The sheet is always full size; only the clip animates. Nothing is laid out
+     or re-rasterised mid-motion, which keeps the expansion near 60fps in a
+     software-composited transparent window. */
+  clip-path: inset(
+    var(--notch-inset) calc((var(--glass-w) - var(--pill-w)) / 2)
+      calc(var(--glass-h) - var(--pill-h) - var(--notch-inset))
+      calc((var(--glass-w) - var(--pill-w)) / 2) round var(--pill-radius)
+  );
+  transition: clip-path var(--dur-close) var(--ease-close);
+}
+
+.notch.open {
+  clip-path: inset(var(--notch-inset) 0 0 0 round var(--panel-radius));
+  transition: clip-path var(--dur-open) var(--ease-open);
+}
+
+/* Rasterise the panel while the window is still panel-sized and hidden, so
+   the first hover doesn't pay for the glass stack. */
+.notch.prewarm {
+  opacity: 0;
+  transition: none;
+}
+
+.notch.prewarm .expanded,
+.notch.prewarm .tile,
+.notch.prewarm .collapsed {
+  transition: none;
+}
+
+/* ==========================================================================
+   Liquid glass
+   ========================================================================== */
+
+.glass {
+  position: absolute;
+  /* Island mode lifts the whole glass stack with the visible panel, so the rim
+     and bevel follow the real top edge instead of being cut off by the clip. */
+  inset: var(--notch-inset) 0 0 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Real WebGL glass (ybouane/liquidglass, MIT). The pane's injected canvas
+   carries refraction, dispersion, Fresnel, specular and the inner rim; the
+   source image only feeds the shader. */
+.glass-root {
+  position: absolute;
+  inset: var(--notch-inset) 0 0 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.glass-source {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+}
+
+.glass-pane {
+  position: absolute;
+  inset: 0;
+}
+
+/* Attached: the lens' rounded top corners are pushed above the screen edge so
+   the panel and the pill meet the top of the display dead flat. The window
+   cuts everything past the edge, leaving square corners showing. */
+html:not(.island) #glassPane {
+  bottom: auto;
+  top: -30px;
+  height: calc(100% + 30px);
+}
+
+html:not(.island) .glass-pill-pane {
+  top: -14px;
+  height: calc(var(--pill-h) + 14px);
+}
+
+
+/* The folded pill is its own lens, not a slice of the panel: a pill-sized pane
+   at the top centre, so the shader can curve the whole 26px band. */
+.glass-pill-pane {
+  inset: 0 auto auto calc((var(--glass-w) - var(--pill-w)) / 2);
+  width: var(--pill-w);
+  height: var(--pill-h);
+  border-radius: var(--pill-radius);
+}
+
+/* The pill is a slice of the sheet: give the cut edge the pill's radius. */
+.notch:not(.open) .glass-root {
+  clip-path: inset(
+    var(--notch-inset) calc((var(--glass-w) - var(--pill-w)) / 2)
+      calc(var(--glass-h) - var(--pill-h) - var(--notch-inset))
+      calc((var(--glass-w) - var(--pill-w)) / 2) round var(--pill-radius)
+  );
+}
+
+/* When the shader is live it carries both shapes, so the CSS material layers
+   step aside entirely instead of stacking a second lens on top. */
+.notch.gl:not(.frost) .glass-backdrop,
+.notch.gl:not(.frost) .glass-ambient,
+.notch.gl:not(.frost) .glass-bevel,
+.notch.gl:not(.frost) .glass-spec,
+.notch.gl:not(.frost) .glass-rim,
+.notch.gl:not(.frost) .glass-thickness,
+.notch.gl:not(.frost) .glass-glow,
+.notch.gl:not(.frost) .glass-chroma {
+  display: none;
+}
+
+/* Only the lens that is on screen is painted: the panel pane folds away with
+   the pill, and the pill lens hides once the panel is out. */
+.notch:not(.open):not(.closing) #glassPane,
+.notch:is(.open, .closing) #glassPillPane {
+  visibility: hidden;
+}
+
+.notch.gl .glass-tint {
+  background:
+    linear-gradient(180deg, rgba(8, 10, 16, 0.2) 0%, rgba(6, 8, 12, 0.32) 46%, rgba(4, 6, 10, 0.4) 100%),
+    radial-gradient(86% 72% at 50% 44%, rgba(0, 0, 0, 0.2), transparent 72%);
+}
+
+/* Keep copy readable on top of the refracted desktop. */
+.notch.gl .tile {
+  background: linear-gradient(180deg, rgba(10, 12, 20, 0.22), rgba(8, 10, 16, 0.14));
+}
+
+.notch.gl .tile:hover {
+  background: linear-gradient(180deg, rgba(12, 14, 22, 0.26), rgba(8, 10, 16, 0.18));
+}
+
+.notch.gl .game,
+.notch.gl .clip {
+  background: rgba(10, 12, 20, 0.22);
+}
+
+.notch.gl .game:hover {
+  background: rgba(24, 28, 40, 0.34);
+}
+
+.notch.gl .search {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* A blurred, saturate-boosted sample of the desktop behind the notch. Fixed
+   size on purpose: the layer is rasterised once and merely clipped while the
+   notch resizes, which keeps the motion off the paint path. */
+.glass-backdrop {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: var(--glass-w);
+  height: var(--glass-h);
+  margin-left: calc(var(--glass-w) / -2);
+  background-position: center top;
+  background-size: cover;
+  filter: blur(30px) saturate(235%) brightness(1.04);
+  opacity: 0.94;
+  transform: scale(1.08);
+}
+
+html.demo .glass-backdrop {
+  background-image: none !important;
+  filter: none;
+  opacity: 1;
+  backdrop-filter: blur(28px) saturate(235%) brightness(1.04);
+}
+
+.glass-tint {
+  position: absolute;
+  inset: 0;
+  opacity: var(--tint-o, 1);
+  background:
+    linear-gradient(180deg, rgba(22, 24, 32, 0.2) 0%, rgba(10, 11, 16, 0.36) 46%, rgba(6, 7, 11, 0.48) 100%),
+    radial-gradient(120% 80% at 50% -10%, rgba(255, 255, 255, 0.09), transparent 60%),
+    radial-gradient(86% 72% at 50% 44%, rgba(0, 0, 0, 0.22), transparent 72%);
+}
+
+/* zRadius: the curved wall of thick glass, lit from above and below. */
+.glass-bevel {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 1px 2px rgba(255, 255, 255, 0.24),
+    inset 0 -1px 3px rgba(255, 255, 255, 0.12);
+}
+
+/* Full-depth bevel only at panel size — a 26px pill has no room for it. */
+.notch.open .glass-bevel {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 2px 20px rgba(255, 255, 255, 0.16),
+    inset 0 26px 40px -30px rgba(255, 255, 255, 0.38),
+    inset 0 -26px 38px -30px rgba(255, 255, 255, 0.2),
+    inset 0 0 74px rgba(0, 0, 0, 0.16);
+}
+
+/* A small pill only gets a hint of the top sheen. */
+.notch:not(.open) .glass-spec {
+  opacity: 0.34;
+}
+
+/* The pill is a clip of the same sheet, so its bottom glow has to live inside
+   the 26px band rather than below it. */
+.notch:not(.open) .glass-glow {
+  top: var(--notch-inset);
+  bottom: auto;
+  left: 0;
+  right: 0;
+  height: 26px;
+  background: radial-gradient(60% 100% at 50% 100%, rgba(255, 255, 255, 0.13), transparent 74%);
+  filter: none;
+}
+
+.glass-ambient {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: var(--glass-w);
+  height: var(--glass-h);
+  margin-left: calc(var(--glass-w) / -2);
+  background:
+    radial-gradient(120% 130% at 16% -24%, color-mix(in srgb, var(--accent) 38%, transparent), transparent 62%),
+    radial-gradient(90% 100% at 96% -6%, rgba(176, 214, 255, 0.18), transparent 58%);
+  opacity: 0.58;
+  filter: url(#liquid-lens);
+}
+
+.glass-spec {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 80%;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(255, 255, 255, 0.05) 34%,
+    transparent 74%
+  );
+  -webkit-mask-image: radial-gradient(130% 115% at 30% 0%, #000 0%, rgba(0, 0, 0, 0.5) 46%, transparent 74%);
+  mask-image: radial-gradient(130% 115% at 30% 0%, #000 0%, rgba(0, 0, 0, 0.5) 46%, transparent 74%);
+  opacity: 0.9;
+}
+
+/* One-pixel lens edge: bright where the curve catches light. */
+.glass-rim,
+.glass-chroma {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.glass-rim {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.26) 0%,
+    rgba(255, 255, 255, 0.1) 36%,
+    rgba(255, 255, 255, 0.2) 74%,
+    rgba(255, 255, 255, 0.44) 100%
+  );
+  opacity: 1;
+}
+
+/* A second, dimmer edge just inside the rim: the glass has thickness. */
+.glass-thickness {
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  padding: 1px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.09) 0%,
+    rgba(255, 255, 255, 0.02) 42%,
+    rgba(255, 255, 255, 0.16) 100%
+  );
+  opacity: 0.9;
+}
+
+/* Light pooling on the bottom curve, where the lens is thickest. */
+.glass-glow {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: -10px;
+  height: 46px;
+  background: radial-gradient(58% 100% at 50% 100%, rgba(255, 255, 255, 0.12), transparent 72%);
+  filter: blur(7px);
+  opacity: 0.85;
+}
+
+.glass-chroma {
+  background: conic-gradient(
+    from 200deg at 50% 58%,
+    rgba(126, 196, 255, 0.55),
+    rgba(126, 196, 255, 0) 22%,
+    rgba(255, 255, 255, 0) 70%,
+    rgba(255, 142, 226, 0.5)
+  );
+  filter: blur(1.2px);
+  opacity: 0.78;
+  mix-blend-mode: screen;
+}
+
+.glass-grain {
+  position: absolute;
+  inset: 0;
+  opacity: var(--grain, 0.026);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E");
+}
+
+.lens-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   Collapsed pill
+   ========================================================================== */
+
+.collapsed {
+  position: absolute;
+  top: var(--notch-inset);
+  left: 0;
+  right: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  white-space: nowrap;
+  transition:
+    opacity 0.12s ease,
+    transform calc(var(--dur-close) * 0.9) var(--ease-close);
+}
+
+/* Clipping is not enough: the compositor still rasterises the whole panel
+   behind a folded pill. Hide it outright until the notch starts to open. */
+.notch:not(.open):not(.closing) .expanded {
+  visibility: hidden;
+}
+
+.notch.open .collapsed {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  pointer-events: none;
+  transition:
+    opacity 0.09s ease,
+    transform calc(var(--dur-open) * 0.56) var(--ease-open);
+}
+
+/* No separate coat: the folded pill is the panel's own glass, just cut to the
+   pill. Only the copy gets a shadow so it stays legible on any wallpaper. */
+.notch:not(.open):not(.closing) .collapsed {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.42);
+}
+
+.notch:not(.open):not(.closing) .collapsed::after {
+  content: "";
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.09), transparent);
+}
+
+.status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
+  flex: 0 0 auto;
+  opacity: 0.9;
+  transition: opacity 0.3s ease;
+}
+
+.status-dot.idle {
+  opacity: 0.34;
+}
+
+.status-dot.live {
+  animation: breathe 3.4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.6;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+.pill-time {
+  font-size: 12.5px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  flex: 0 0 auto;
+}
+
+.pill-sep,
+.pill-date,
+.pill-gap,
+.battery,
+#focusMiniTime {
+  display: none;
+}
+
+.focus-mini {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.focus-mini svg {
+  width: 13px;
+  height: 13px;
+  transform: rotate(-90deg);
+}
+
+.ring-track {
+  stroke: rgba(255, 255, 255, 0.16);
+  stroke-width: 3;
+}
+
+.ring-fill {
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.4s linear;
+}
+
+/* Battery is only used in the expanded header, but keep shared paint here. */
+.batt-shell {
+  stroke: rgba(255, 255, 255, 0.3);
+  fill: none;
+  stroke-width: 1.2;
+}
+
+.batt-tip {
+  fill: rgba(255, 255, 255, 0.32);
+  stroke: none;
+}
+
+.batt-fill {
+  fill: #dbe4f7;
+  stroke: none;
+  transition: width 0.5s var(--spring-close);
+}
+
+.battery {
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.battery svg,
+.chip svg {
+  width: 20px;
+  height: 12px;
+}
+
+.battery.low .batt-fill,
+.chip.low .batt-fill {
+  fill: #ffbe6b;
+}
+
+.battery.charging .batt-fill,
+.chip.charging .batt-fill {
+  fill: #86e6b0;
+}
+
+.batt-text {
+  min-width: 20px;
+  text-align: right;
+}
+
+/* ==========================================================================
+   Expanded panel
+   ========================================================================== */
+
+.expanded {
+  position: absolute;
+  inset: var(--notch-inset) 0 0 0;
+  padding: 16px;
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition:
+    opacity 0.1s ease,
+    transform var(--dur-close) var(--ease-close);
+}
+
+.notch.open .expanded {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition:
+    opacity 0.22s ease 0.1s,
+    transform var(--dur-open) var(--ease-open) 0.06s;
+}
+
+.head {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  height: 60px;
+}
+
+.clock {
+  font-size: 34px;
+  font-weight: 590;
+  line-height: 1;
+  letter-spacing: -0.032em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.34);
+}
+
+.today {
+  margin-top: 5px;
+  font-size: 11.5px;
+  letter-spacing: 0.006em;
+  color: var(--muted);
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--hair);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip.charging {
+  color: #a4ecc4;
+  border-color: rgba(134, 230, 176, 0.24);
+  background: rgba(134, 230, 176, 0.08);
+}
+
+.chip.low {
+  color: #ffc98a;
+  border-color: rgba(255, 190, 107, 0.24);
+  background: rgba(255, 190, 107, 0.08);
+}
+
+.chip.charging .batt-fill,
+.chip.low .batt-fill {
+  fill: currentColor;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease,
+    transform 0.2s var(--spring-micro);
+}
+
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.icon-btn:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+  border-color: var(--hair);
+}
+
+.icon-btn:active {
+  transform: scale(0.94);
+}
+
+.icon-btn.on {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.icon-btn.on svg {
+  fill: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.notch.no-glow .glass-glow {
+  display: none;
+}
+
+.notch.frost .glass-root {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ sheet */
+
+.sheet {
+  position: absolute;
+  inset: calc(16px + var(--notch-inset)) 16px 16px;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  border: 1px solid var(--hair-strong);
+  background: linear-gradient(180deg, #15171f, #0a0b10);
+  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.9);
+  overflow: hidden;
+  animation: sheetIn 0.22s var(--spring-micro) both;
+}
+
+@keyframes sheetIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.99);
+  }
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--hair);
+  flex: 0 0 auto;
+}
+
+.sheet-title {
+  font-size: 12px;
+  font-weight: 590;
+  letter-spacing: 0.01em;
+}
+
+.sheet-note {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 14px 16px;
+  scrollbar-width: thin;
+}
+
+.set-action {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--hair-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.set-action:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.set-group {
+  margin: 14px 0 2px;
+  font-size: 9px;
+  font-weight: 560;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.set-row:last-child {
+  border-bottom: 0;
+}
+
+.set-key {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.set-val {
+  font-size: 10px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.set-row input[type="range"] {
+  width: 148px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--hair);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.seg button {
+  height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.seg button.on {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--ink);
+}
+
+.swatches {
+  display: flex;
+  gap: 7px;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  transition: transform 0.18s var(--spring-micro);
+}
+
+.swatch.on {
+  transform: scale(1.14);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45), 0 2px 8px -2px rgba(0, 0, 0, 0.6);
+}
+
+.set-switch {
+  appearance: none;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  flex: 0 0 auto;
+}
+
+.set-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.22s var(--spring-micro);
+}
+
+.set-switch:checked {
+  background: var(--accent);
+}
+
+.set-switch:checked::after {
+  transform: translateX(12px);
+}
+
+/* ------------------------------------------------------------------- menu */
+
+.menu {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  width: 220px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--hair-strong);
+  background: linear-gradient(180deg, rgba(34, 37, 46, 0.98), rgba(15, 16, 21, 0.98));
+  box-shadow: 0 20px 44px -16px rgba(0, 0, 0, 0.86);
+  z-index: 6;
+  animation: menuIn 0.24s var(--spring-micro) both;
+  transform-origin: 100% 0;
+}
+
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-row:hover {
+  background: var(--surface-hover);
+}
+
+.menu-key {
+  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.menu input[type="checkbox"] {
+  appearance: none;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  flex: 0 0 auto;
+}
+
+.menu input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.26s var(--spring-micro);
+}
+
+.menu input[type="checkbox"]:checked {
+  background: var(--accent);
+}
+
+.menu input[type="checkbox"]:checked::after {
+  transform: translateX(12px);
+}
+
+.menu-foot {
+  display: flex;
+  justify-content: space-between;
+  margin: 4px 10px 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hair);
+  color: var(--faint);
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+}
+
+/* ------------------------------------------------------------------- grid */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: 108px;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tile {
+  position: relative;
+  padding: 12px;
+  border-radius: var(--r-tile);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.022));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.1s ease,
+    transform var(--dur-close) var(--ease-close),
+    background 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.notch.open .tile {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.2s ease calc(0.1s + var(--i) * 24ms),
+    transform var(--dur-open) var(--ease-open) calc(0.09s + var(--i) * 24ms),
+    background 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.16s ease;
+}
+
+/* Press-in: the tile sinks under the cursor and springs back on release. */
+.notch.open .tile:active {
+  transform: scale(0.986);
+  box-shadow: inset 0 3px 14px rgba(0, 0, 0, 0.34);
+  transition: transform 0.09s ease, box-shadow 0.09s ease;
+}
+
+.tile-system {
+  cursor: grab;
+}
+
+.tile-system:active,
+.tile-system.detaching {
+  cursor: grabbing;
+}
+
+.notch.open .tile-system.detaching {
+  transform: scale(0.96);
+  border-color: color-mix(in srgb, var(--accent) 48%, transparent);
+  box-shadow: 0 14px 34px -14px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.tile:hover {
+  border-color: var(--hair-strong);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.068), rgba(255, 255, 255, 0.024));
+}
+
+.tile-games {
+  grid-column: span 7;
+  grid-row: span 2;
+  display: flex;
+  flex-direction: column;
+}
+
+.tile-focus,
+.tile-system {
+  grid-column: span 5;
+}
+
+.tile-clip {
+  grid-column: span 12;
+}
+
+.tile-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.tile-title {
+  font-size: 10px;
+  font-weight: 560;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.tile-count {
+  font-size: 10.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.tile-meta {
+  font-size: 10.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.005em;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.mini-btn {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.2s var(--spring-micro);
+}
+
+.mini-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.mini-btn:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.mini-btn:active {
+  transform: scale(0.9);
+}
+
+.mini-btn.spin svg {
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------- library */
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  margin-top: 8px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--hair);
+  background: rgba(0, 0, 0, 0.2);
+  flex: 0 0 auto;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.search svg {
+  width: 12px;
+  height: 12px;
+  color: var(--faint);
+  flex: 0 0 auto;
+}
+
+.search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 11.5px;
+  letter-spacing: 0.004em;
+}
+
+.search input::placeholder {
+  color: var(--faint);
+}
+
+.game-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 64px;
+  gap: 8px;
+  margin-top: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.game-list::-webkit-scrollbar {
+  display: none;
+}
+
+.game {
+  position: relative;
+  display: grid;
+  /* The art is a 460x215 Steam header, so its slot is 52x24 instead of a
+     square: a square crops two thirds of the artwork away. */
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  height: 64px;
+  padding: 0 20px 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.022);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.24s var(--spring-micro);
+}
+
+.game:hover {
+  background: rgba(255, 255, 255, 0.075);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  transform: translateY(-1px);
+}
+
+.game:active {
+  transform: translateY(0) scale(0.992);
+}
+
+.game .art {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 24px;
+  border-radius: 7px;
+  font-size: 10.5px;
+  font-weight: 640;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.92);
+  background:
+    radial-gradient(120% 120% at 28% 0%, hsl(var(--h) 44% 60% / 0.5), transparent 72%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.035));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 2px 8px -4px rgba(0, 0, 0, 0.55);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+
+.game img.art {
+  display: block;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.05);
+  text-shadow: none;
+  /* Header art is bright; a hairline and a touch of dim keep it sitting in the
+     dark row instead of glowing out of it. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  filter: saturate(0.94) brightness(0.96);
+}
+
+.game:hover img.art {
+  filter: saturate(1) brightness(1);
+}
+
+.game-text {
+  min-width: 0;
+}
+
+.game-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 520;
+  letter-spacing: 0.002em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.game-source {
+  display: block;
+  margin-top: 3px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.game .play {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  margin-top: -5.5px;
+  width: 11px;
+  height: 11px;
+  color: var(--accent);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition:
+    opacity 0.2s ease,
+    transform 0.26s var(--spring-micro);
+  fill: currentColor;
+  stroke: none;
+}
+
+.game:hover .play {
+  opacity: 1;
+  transform: none;
+}
+
+.empty {
+  display: grid;
+  place-content: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  text-align: center;
+}
+
+.empty span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.empty small {
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+/* ------------------------------------------------------------------ focus */
+
+.focus-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  height: 60px;
+}
+
+.dial {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+}
+
+.dial svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.dial-track {
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 4;
+}
+
+.dial-fill {
+  stroke: var(--accent);
+  stroke-width: 4;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 45%, transparent));
+  transition: stroke-dashoffset 0.35s linear;
+}
+
+.dial-time {
+  font-size: 14px;
+  font-weight: 590;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-controls {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.presets {
+  display: flex;
+  gap: 4px;
+}
+
+.presets button {
+  flex: 1 1 0;
+  height: 24px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--hair);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease,
+    transform 0.2s var(--spring-micro);
+}
+
+.presets button:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.presets button:active {
+  transform: scale(0.95);
+}
+
+.presets button.is-on {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 44%, transparent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.focus-buttons {
+  display: flex;
+  gap: 5px;
+}
+
+.primary {
+  flex: 1 1 auto;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 80%, #000 20%),
+    color-mix(in srgb, var(--accent) 62%, #000 38%)
+  );
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 590;
+  letter-spacing: 0.006em;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 4px 12px -6px color-mix(in srgb, var(--accent) 80%, transparent);
+  transition:
+    filter 0.16s ease,
+    transform 0.2s var(--spring-micro);
+}
+
+.primary:hover {
+  filter: brightness(1.09);
+}
+
+.primary:active {
+  transform: scale(0.972);
+}
+
+/* ----------------------------------------------------------------- system */
+
+.meters {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.meter {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+  height: 15px;
+}
+
+.meter-label {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.meter-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.075);
+  overflow: hidden;
+}
+
+.meter-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  border-radius: 99px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 58%, #000 12%),
+    color-mix(in srgb, var(--accent) 92%, white 24%)
+  );
+  transition: width 0.65s var(--spring-close);
+}
+
+.meter-val {
+  font-size: 10.5px;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* -------------------------------------------------------------- clipboard */
+
+.clips {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  height: 60px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.clips::-webkit-scrollbar {
+  display: none;
+}
+
+.clip {
+  flex: 0 0 auto;
+  width: 168px;
+  height: 60px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.38;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease,
+    transform 0.22s var(--spring-micro);
+}
+
+.clip span {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.clip:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+  transform: translateY(-1px);
+}
+
+.clip:active {
+  transform: translateY(0) scale(0.992);
+}
+
+.clips-empty {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+/* ------------------------------------------------------------ detail views */
+
+/* A tile opens into this: one widget at a time, same panel, more of it. */
+.detail {
+  display: flex;
+  flex-direction: column;
+  height: 340px;
+  margin-top: 8px;
+  padding: 10px 12px 12px;
+  border-radius: var(--r-tile);
+  border: 1px solid var(--hair-strong);
+  /* A detail view is a reading surface, so it sits denser than a tile: the
+     same smoked panel as Settings, one level above the glass. */
+  background: linear-gradient(180deg, rgba(21, 23, 31, 0.9), rgba(10, 11, 16, 0.92));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 18px 40px -22px rgba(0, 0, 0, 0.85);
+  animation: detailIn 0.22s var(--spring-micro) both;
+}
+
+.detail[hidden],
+.grid[hidden] {
+  display: none;
+}
+
+@keyframes detailIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.996);
+  }
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  flex: 0 0 auto;
+}
+
+.detail-title {
+  font-size: 12px;
+  font-weight: 590;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+.detail-meta {
+  font-size: 10.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.detail-hint {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.detail-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.open-btn svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Library: the whole shelf, not just the first dozen. */
+.detail-games {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 64px;
+}
+
+/* Focus: one big dial. */
+.detail-focus {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 2px 8px;
+}
+
+.detail-dial {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 150px;
+  height: 150px;
+  flex: 0 0 auto;
+}
+
+.detail-dial svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.detail-dial .dial-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.09);
+  stroke-width: 6;
+}
+
+.detail-dial .dial-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.4s linear;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 45%, transparent));
+}
+
+.detail-dial-time {
+  font-size: 30px;
+  font-weight: 580;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.detail-focus-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.detail-note {
+  font-size: 11px;
+  color: var(--muted);
+  min-height: 14px;
+}
+
+/* System: full meters with real numbers. */
+.detail-system {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 8px 6px;
+}
+
+.detail-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-meter-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.detail-meter-label {
+  font-size: 10px;
+  font-weight: 560;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.detail-meter .meter-bar {
+  height: 8px;
+  border-radius: 999px;
+}
+
+.detail-meter .meter-val {
+  width: auto;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.detail-sub {
+  font-size: 10.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Clipboard: every copy, one tap to put it back. */
+.detail-clips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 2px 2px 2px 0;
+}
+
+.detail-clip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease;
+}
+
+.detail-clip:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+}
+
+.detail-clip-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.detail-clip-copy {
+  flex: 0 0 auto;
+  padding-top: 2px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* ------------------------------------------------------------------ toast */
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translate(-50%, 6px);
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--hair-strong);
+  background: rgba(22, 24, 31, 0.96);
+  font-size: 11px;
+  letter-spacing: 0.004em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 9;
+  box-shadow: 0 12px 28px -12px rgba(0, 0, 0, 0.85);
+  transition:
+    opacity 0.2s ease,
+    transform 0.34s var(--spring-micro);
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* ==========================================================================
+   Reduced motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+  }
+
+  .glass-ambient {
+    filter: none;
+  }
+}

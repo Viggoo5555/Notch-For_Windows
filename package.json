@@ -1,0 +1,17 @@
+{
+  "name": "notch",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A glass notch for Windows — hover the top of your screen.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "node dev-server.js"
+  },
+  "devDependencies": {
+    "electron": "45.3.3"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.7.3"
+  }
+}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';"
+    />
+    <title>Launcher</title>
+    <link rel="stylesheet" href="launcher.css" />
+  </head>
+  <body>
+    <div class="shell" id="shell">
+      <div class="tint" id="tint" aria-hidden="true"></div>
+      <img class="source" id="source" alt="" decoding="async" />
+      <div class="pane" id="pane"></div>
+
+      <div class="content">
+        <div class="search">
+          <svg class="magnifier" viewBox="0 0 20 20" aria-hidden="true">
+            <circle cx="9" cy="9" r="5.6" />
+            <path d="M13.2 13.2L17 17" />
+          </svg>
+          <input id="query" type="text" placeholder="Search apps…" spellcheck="false" autocomplete="off" />
+          <button class="esc" id="closeBtn" type="button" title="Close">Esc</button>
+        </div>
+
+        <div class="body" id="body">
+          <section class="section" id="pinnedSection">
+            <h2>Pinned</h2>
+            <div class="pinned" id="pinned"></div>
+          </section>
+          <section class="section" id="appsSection">
+            <h2 id="appsTitle">All apps</h2>
+            <div class="results" id="results"></div>
+          </section>
+          <div class="empty" id="empty" hidden>
+            <p>Nothing found.</p>
+            <span>Try a different word, or search the app’s folder name.</span>
+          </div>
+        </div>
+
+        <footer class="foot">
+          <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+          <span><kbd>↵</kbd> open</span>
+          <span><kbd>Esc</kbd> close</span>
+          <span class="grow"></span>
+          <span id="count"></span>
+        </footer>
+      </div>
+    </div>
+    <script type="module" src="launcher.js"></script>
+  </body>
+</html>

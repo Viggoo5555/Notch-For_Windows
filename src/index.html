@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    />
+    <title>Notch</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="notch" id="notch" aria-expanded="false">
+      <!-- Liquid glass: a lens built from layered light, after the technique
+           used by shuding/liquid-glass and ccl125/liquid-glass (SVG
+           displacement rim + specular edge + chromatic dispersion). -->
+      <div class="glass-root" id="glassRoot" aria-hidden="true">
+        <img class="glass-source" id="glassSource" alt="" decoding="async" />
+        <div class="glass-pane" id="glassPane"></div>
+        <div class="glass-pane glass-pill-pane" id="glassPillPane"></div>
+      </div>
+
+      <div class="glass" aria-hidden="true">
+        <span class="glass-backdrop"></span>
+        <span class="glass-tint"></span>
+        <span class="glass-bevel"></span>
+        <span class="glass-ambient"></span>
+        <span class="glass-spec"></span>
+        <span class="glass-rim"></span>
+        <span class="glass-thickness"></span>
+        <span class="glass-glow"></span>
+        <span class="glass-chroma"></span>
+        <span class="glass-grain"></span>
+      </div>
+
+      <div class="collapsed" id="collapsed">
+        <span class="status-dot" id="statusDot" aria-hidden="true"></span>
+        <span class="pill-time" id="pillTime">--:--</span>
+        <span class="focus-mini" id="focusMini" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <circle class="ring-track" cx="10" cy="10" r="7.6" />
+            <circle class="ring-fill" id="ringMini" cx="10" cy="10" r="7.6" />
+          </svg>
+          <span id="focusMiniTime">25:00</span>
+        </span>
+        <span class="pill-sep">·</span>
+        <span class="pill-date" id="pillDate">—</span>
+        <span class="pill-gap"></span>
+        <span class="battery" id="batteryPill">
+          <svg viewBox="0 0 24 14" aria-hidden="true">
+            <rect class="batt-shell" x="0.8" y="2.4" width="19.4" height="9.2" rx="2.8" />
+            <rect class="batt-fill" id="battFillPill" x="2.6" y="4.2" width="15.8" height="5.6" rx="1.4" />
+            <rect class="batt-tip" x="21.4" y="5.2" width="2" height="3.6" rx="1" />
+          </svg>
+          <span class="batt-text" id="battTextPill">—</span>
+        </span>
+      </div>
+
+      <div class="expanded" id="expanded">
+        <header class="head">
+          <div class="head-time">
+            <div class="clock" id="clock">--:--</div>
+            <div class="today" id="today">—</div>
+          </div>
+          <div class="head-actions">
+            <div class="chip" id="batteryChip">
+              <svg viewBox="0 0 24 14" aria-hidden="true">
+                <rect class="batt-shell" x="0.8" y="2.4" width="19.4" height="9.2" rx="2.8" />
+                <rect class="batt-fill" id="battFillChip" x="2.6" y="4.2" width="15.8" height="5.6" rx="1.4" />
+                <rect class="batt-tip" x="21.4" y="5.2" width="2" height="3.6" rx="1" />
+              </svg>
+              <span id="battText">—</span>
+            </div>
+            <button class="icon-btn" id="pinBtn" type="button" aria-label="Pin open" title="Pin open (Ctrl+Alt+N)">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M6 2.4h4l-.5 3.9 2.6 2.3v1.2H3.9V8.6l2.6-2.3L6 2.4Z" />
+                <path d="M8 9.8v3.6" />
+              </svg>
+            </button>
+            <button class="icon-btn" id="menuBtn" type="button" aria-label="Settings" title="Settings">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M2.5 5h11M2.5 11h11" />
+                <circle cx="6" cy="5" r="1.7" />
+                <circle cx="10.4" cy="11" r="1.7" />
+              </svg>
+            </button>
+          </div>
+          <div class="menu" id="menu" hidden>
+            <label class="menu-row">
+              <span>Start with Windows</span>
+              <input type="checkbox" id="loginToggle" />
+            </label>
+            <button class="menu-row" id="settingsBtn" type="button">
+              <span>Settings</span>
+              <span class="menu-key">›</span>
+            </button>
+            <button class="menu-row" id="quitBtn" type="button">
+              <span>Quit notch</span>
+              <span class="menu-key">⌃⌥Q</span>
+            </button>
+            <div class="menu-foot">
+              <span>notch</span>
+              <span id="version">1.0.0</span>
+            </div>
+          </div>
+        </header>
+
+        <div class="grid" id="grid">
+          <section class="tile tile-games" style="--i: 0" data-detail="library">
+            <div class="tile-head">
+              <span class="tile-title">Library</span>
+              <span class="tile-count" id="gameCount"></span>
+              <span class="spacer"></span>
+              <button class="mini-btn open-btn" data-detail="library" type="button" aria-label="Open Library details" title="Open details">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3.4 10.8 8l-4.6 4.6" /></svg>
+              </button>
+              <button class="mini-btn" id="addGame" type="button" aria-label="Add a game" title="Add a game">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6" /></svg>
+              </button>
+              <button class="mini-btn" id="rescan" type="button" aria-label="Rescan libraries" title="Rescan Steam and Epic">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M13 8a5 5 0 1 1-1.6-3.7" />
+                  <path d="M13.2 2.4v2.6h-2.6" />
+                </svg>
+              </button>
+            </div>
+            <label class="search">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="7" cy="7" r="4.4" />
+                <path d="m10.4 10.4 3 3" />
+              </svg>
+              <input id="gameSearch" type="text" placeholder="Search" autocomplete="off" spellcheck="false" />
+            </label>
+            <div class="game-list" id="gameList"></div>
+            <div class="empty" id="gameEmpty" hidden>
+              <span id="emptyTitle">No games found</span>
+              <small id="emptyHint">Steam and Epic libraries are scanned on launch.</small>
+            </div>
+          </section>
+
+          <section class="tile tile-focus" style="--i: 1" data-detail="focus">
+            <div class="tile-head">
+              <span class="tile-title">Focus</span>
+              <span class="spacer"></span>
+              <button class="mini-btn open-btn" data-detail="focus" type="button" aria-label="Open Focus details" title="Open details">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3.4 10.8 8l-4.6 4.6" /></svg>
+              </button>
+              <span class="tile-meta" id="focusState">25 min</span>
+            </div>
+            <div class="focus-body">
+              <div class="dial">
+                <svg viewBox="0 0 92 92" aria-hidden="true">
+                  <circle class="dial-track" cx="46" cy="46" r="39" />
+                  <circle class="dial-fill" id="dialFill" cx="46" cy="46" r="39" />
+                </svg>
+                <span class="dial-time" id="dialTime">25:00</span>
+              </div>
+              <div class="focus-controls">
+                <div class="presets" id="presets">
+                  <button type="button" data-min="5">5</button>
+                  <button type="button" data-min="15">15</button>
+                  <button type="button" data-min="25" class="is-on">25</button>
+                  <button type="button" data-min="45">45</button>
+                </div>
+                <div class="focus-buttons">
+                  <button type="button" class="primary" id="focusToggle">Start</button>
+                  <button type="button" class="mini-btn" id="focusReset" aria-label="Reset timer" title="Reset">
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M13 8a5 5 0 1 1-1.6-3.7" />
+                      <path d="M13.2 2.4v2.6h-2.6" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="tile tile-system" style="--i: 2" data-detail="system">
+            <div class="tile-head">
+              <span class="tile-title">System</span>
+              <span class="spacer"></span>
+              <button class="mini-btn open-btn" data-detail="system" type="button" aria-label="Open System details" title="Open details">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3.4 10.8 8l-4.6 4.6" /></svg>
+              </button>
+              <span class="tile-meta" id="uptime">—</span>
+            </div>
+            <div class="meters">
+              <div class="meter">
+                <span class="meter-label">CPU</span>
+                <span class="meter-bar"><i id="barCpu"></i></span>
+                <span class="meter-val" id="valCpu">—</span>
+              </div>
+              <div class="meter">
+                <span class="meter-label">Memory</span>
+                <span class="meter-bar"><i id="barRam"></i></span>
+                <span class="meter-val" id="valRam">—</span>
+              </div>
+              <div class="meter">
+                <span class="meter-label">Disk</span>
+                <span class="meter-bar"><i id="barDisk"></i></span>
+                <span class="meter-val" id="valDisk">—</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="tile tile-clip" style="--i: 3" data-detail="clip">
+            <div class="tile-head">
+              <span class="tile-title">Clipboard</span>
+              <span class="spacer"></span>
+              <button class="mini-btn open-btn" data-detail="clip" type="button" aria-label="Open Clipboard details" title="Open details">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3.4 10.8 8l-4.6 4.6" /></svg>
+              </button>
+              <span class="tile-meta" id="clipMeta"></span>
+            </div>
+            <div class="clips" id="clips"></div>
+          </section>
+        </div>
+
+        <section class="detail" id="detail" hidden aria-label="Widget details">
+          <header class="detail-head">
+            <button class="icon-btn" id="detailBack" type="button" aria-label="Back to widgets" title="Back (Esc)">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.8 3.4 5.2 8l4.6 4.6" /></svg>
+            </button>
+            <span class="detail-title" id="detailTitle">System</span>
+            <span class="detail-meta" id="detailMeta"></span>
+            <span class="spacer"></span>
+            <span class="detail-hint">Esc</span>
+          </header>
+          <div class="detail-body" id="detailBody"></div>
+        </section>
+      </div>
+
+      <section class="sheet" id="settingsSheet" hidden aria-label="Settings">
+        <header class="sheet-head">
+          <button class="icon-btn" id="settingsBack" type="button" aria-label="Back">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.8 3.4 5.2 8l4.6 4.6" /></svg>
+          </button>
+          <span class="sheet-title">Settings</span>
+          <span class="spacer"></span>
+          <span class="sheet-note">live</span>
+        </header>
+        <div class="sheet-body" id="settingsBody"></div>
+      </section>
+
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </main>
+
+    <svg class="lens-defs" width="0" height="0" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="liquid-lens" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.0075 0.012" numOctaves="2" seed="9" result="noise" />
+          <feGaussianBlur in="noise" stdDeviation="1.4" result="soft" />
+          <feDisplacementMap in="SourceGraphic" in2="soft" scale="22" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </defs>
+    </svg>
+
+    <p class="demo-hint">Hover the notch · browser demo</p>
+
+    <script src="app.js"></script>
+    <script type="module" src="glass.js"></script>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    />
+    <title>Taskbar</title>
+    <link rel="stylesheet" href="taskbar.css" />
+  </head>
+  <body>
+    <div class="tb" id="tbRoot" data-style="glass" data-shape="islands">
+      <img class="tb-source" id="tbSource" alt="" decoding="async" />
+      <div class="tb-bar" id="tbBar" hidden></div>
+      <div class="tb-row" id="tbRow"></div>
+    </div>
+    <script type="module" src="taskbar.js"></script>
+  </body>
+</html>

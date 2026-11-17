@@ -1,0 +1,411 @@
+:root {
+  --text: #eef1f8;
+  --muted: rgba(238, 241, 248, 0.56);
+  --faint: rgba(238, 241, 248, 0.34);
+  --line: rgba(255, 255, 255, 0.08);
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --font: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--font);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+.shell {
+  position: absolute;
+  inset: 0;
+  border-radius: 26px;
+  overflow: hidden;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 40px 90px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+/* Frosted fallback, used only when the shader could not start. */
+.tint {
+  position: absolute;
+  inset: 0;
+  background: rgba(12, 14, 20, 0.8);
+}
+
+.shell.gl .tint {
+  display: none;
+}
+
+/* The desktop sample the lens bends, kept invisible. */
+.source {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  opacity: 0;
+  transform-origin: 0 0;
+}
+
+.pane {
+  position: absolute;
+  inset: 0;
+  border-radius: 26px;
+  pointer-events: none;
+}
+
+.content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ------------------------------------------------------------------ search */
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.magnifier {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: rgba(238, 241, 248, 0.5);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+#query {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 17px;
+  font-weight: 450;
+  letter-spacing: -0.005em;
+  color: var(--text);
+  user-select: text;
+}
+
+#query::placeholder {
+  color: var(--faint);
+}
+
+.esc {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--faint);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.esc:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* -------------------------------------------------------------------- body */
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 10px 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+.body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.section {
+  padding: 8px 6px 4px;
+}
+
+.section h2 {
+  margin: 0 0 8px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.pinned {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+.pin-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px 9px;
+  border-radius: 13px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+  transition:
+    background 0.16s var(--ease),
+    border-color 0.16s var(--ease),
+    transform 0.16s var(--ease);
+}
+
+.pin-tile:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.pin-tile img,
+.pin-tile .letter {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.45));
+}
+
+.pin-tile .letter {
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pin-tile .label {
+  max-width: 100%;
+  font-size: 10.5px;
+  line-height: 1.2;
+  color: rgba(238, 241, 248, 0.8);
+  text-align: center;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.pin-tile .unpin {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(10, 12, 18, 0.72);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  line-height: 16px;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.14s var(--ease);
+}
+
+.pin-tile:hover .unpin {
+  opacity: 1;
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 42px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s var(--ease);
+}
+
+.row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.row.active {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.row img,
+.row .letter {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.row .letter {
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(238, 241, 248, 0.85);
+}
+
+.row .meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.row .name {
+  font-size: 13px;
+  color: rgba(238, 241, 248, 0.94);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .sub {
+  font-size: 10px;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .pin-btn {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--faint);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.14s var(--ease), color 0.14s var(--ease), background 0.14s var(--ease);
+}
+
+.row:hover .pin-btn,
+.row.active .pin-btn,
+.row .pin-btn.on {
+  opacity: 1;
+}
+
+.row .pin-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
+.row .pin-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.row .pin-btn.on {
+  color: #9ecbff;
+}
+
+.empty {
+  padding: 26px 10px;
+  text-align: center;
+}
+
+.empty p {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: rgba(238, 241, 248, 0.8);
+}
+
+.empty span {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+/* -------------------------------------------------------------------- foot */
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 18px 11px;
+  border-top: 1px solid var(--line);
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.foot .grow {
+  flex: 1;
+}
+
+kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  font-family: inherit;
+  font-size: 9.5px;
+  color: rgba(238, 241, 248, 0.66);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.001ms !important;
+  }
+}
