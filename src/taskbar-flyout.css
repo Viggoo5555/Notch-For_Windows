@@ -1,0 +1,85 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  user-select: none;
+  cursor: default;
+}
+
+.fx {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  height: 100%;
+  padding: 5px;
+  border-radius: 11px;
+  background: rgba(22, 24, 30, 0.92);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 18px 34px -18px rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(18px) saturate(1.1);
+  overflow: hidden;
+}
+
+.fx-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(236, 241, 250, 0.94);
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.fx-row:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.fx-row:active {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.fx-row img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.fx-letters {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 8.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.fx-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}

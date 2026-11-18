@@ -2,6 +2,12 @@
   box-sizing: border-box;
 }
 
+html {
+  /* Set from the renderer: it matches the right-hand cluster so the apps stay
+     centred on the display rather than on the bar. */
+  --side-w: 84px;
+}
+
 html,
 body {
   margin: 0;
@@ -44,7 +50,7 @@ body {
   overflow: hidden;
 }
 
-/* Islands: the bar is never shown; each item carries its own pane. */
+/* Islands: the bar is never shown; each zone carries its own pane. */
 .tb-row {
   position: absolute;
   left: 0;
@@ -54,23 +60,85 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 0 8px;
+  gap: 4px;
+  padding: 0 9px;
 }
 
 .tb[data-shape="islands"] .tb-row {
   bottom: 10px;
 }
 
+.tb-side {
+  flex: 0 0 auto;
+  height: 1px;
+}
+
+.tb-left {
+  width: var(--side-w);
+}
+
+/* A zone is the block of one island: apps, or tray + battery + clock. */
+.tb-zone {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 13px;
+}
+
+.tb-island {
+  padding: 5px;
+}
+
+.tb-apps {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  gap: 4px;
+}
+
+.tb-right {
+  flex: 0 0 auto;
+  gap: 2px;
+  padding-left: 8px;
+  padding-right: 6px;
+}
+
+/* One island per window: the bar holds a single zone, so there is no tray to
+   balance against and nothing to centre on. */
+.tb[data-zone="apps"] .tb-left,
+.tb[data-zone="tray"] .tb-left {
+  display: none;
+}
+
+.tb[data-zone="apps"] .tb-right,
+.tb[data-zone="tray"] .tb-apps {
+  display: none;
+}
+
+.tb[data-zone="apps"] .tb-row,
+.tb[data-zone="tray"] .tb-row {
+  gap: 0;
+  padding: 0 8px;
+}
+
+.tb[data-zone="apps"] .tb-apps {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+/* ------------------------------------------------------------------- apps */
+
 .tb-item {
   position: relative;
+  flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   padding: 0;
   border: 0;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   color: #eef1f8;
   cursor: pointer;
@@ -89,33 +157,53 @@ body {
 }
 
 /* Running windows carry a line under the icon, as on the Windows taskbar.
-   Hovering widens it instead of adding a second highlight. */
+   An app with several windows gets the split line Windows uses for a group. */
 .tb-item.tb-running::after {
   content: "";
   position: absolute;
   left: 50%;
-  bottom: 2px;
-  width: 15px;
+  bottom: 1px;
+  width: 14px;
   height: 3px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.78);
   transform: translateX(-50%);
   transition:
     width 0.16s ease,
     background 0.16s ease;
 }
 
-.tb-item.tb-running:hover::after {
-  width: 19px;
+.tb-item.tb-multi::after {
+  width: 22px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.85) 0 42%,
+    transparent 42% 58%,
+    rgba(255, 255, 255, 0.85) 58% 100%
+  );
+}
+
+.tb-item:hover::after {
+  width: 20px;
   background: #ffffff;
 }
 
-/* Islands: one pane per icon, inserted before the row. The glass library only
+.tb-item.tb-multi:hover::after {
+  width: 26px;
+  background: linear-gradient(
+    90deg,
+    #ffffff 0 42%,
+    transparent 42% 58%,
+    #ffffff 58% 100%
+  );
+}
+
+/* Islands: one pane per zone, inserted before the row. The glass library only
    takes panes that are direct children of the root, so they cannot live inside
-   the buttons. */
+   the zones. */
 .tb-pane {
   position: absolute;
-  border-radius: 12px;
+  border-radius: 13px;
   overflow: hidden;
   pointer-events: none;
 }
@@ -135,20 +223,17 @@ body {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
-/* A hairline between what is pinned and what is open. */
-.tb-divider {
-  flex: 0 0 1px;
-  width: 1px;
-  height: 18px;
-  border-radius: 1px;
-  background: rgba(255, 255, 255, 0.16);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+/* Islands keep their zones apart even with no lens: the tray needs its own
+   surface, not one merged with the apps. */
+.tb[data-shape="islands"][data-style="glass"]:not(.gl) .tb-island {
+  background: rgba(10, 12, 18, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 
 .tb-icon {
   position: relative;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
   pointer-events: none;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
@@ -159,24 +244,172 @@ body {
   position: absolute;
   right: -1px;
   bottom: -1px;
-  min-width: 12px;
-  height: 12px;
+  min-width: 11px;
+  height: 11px;
   padding: 0 2px;
   border-radius: 6px;
-  font-size: 8.5px;
+  font-size: 8px;
   font-weight: 640;
-  line-height: 12px;
+  line-height: 11px;
   text-align: center;
-  color: rgba(255, 255, 255, 0.78);
+  color: rgba(255, 255, 255, 0.7);
   background: rgba(0, 0, 0, 0.42);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
   pointer-events: none;
+  opacity: 0.55;
+}
+
+.tb-item:hover .tb-key {
+  opacity: 1;
 }
 
 .tb-initials {
   position: relative;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 620;
   letter-spacing: 0.02em;
   pointer-events: none;
+}
+
+/* ------------------------------------------------------------------- tray */
+
+.tb-tray {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.tb-tray-item {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  /* The same box as an app button on the other island, so both islands are the
+     same height. */
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.tb-tray-item:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.tb-tray-item img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  pointer-events: none;
+  filter: saturate(1.05) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.tb-tray-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* ------------------------------------------------------- battery and clock */
+
+.tb-battery {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 38px;
+  padding: 0 6px;
+  border-radius: 9px;
+  color: rgba(240, 244, 252, 0.92);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-battery:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tb-batt-icon {
+  position: relative;
+  display: block;
+  width: 20px;
+  height: 10px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1.4px rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+}
+
+/* The little nub on the right of a battery glyph. */
+.tb-batt-icon::after {
+  content: "";
+  position: absolute;
+  right: -4px;
+  top: 3px;
+  width: 2px;
+  height: 4px;
+  border-radius: 0 1px 1px 0;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.tb-batt-icon i {
+  position: absolute;
+  left: 1.4px;
+  top: 1.4px;
+  bottom: 1.4px;
+  border-radius: 1.5px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.tb-battery.charging .tb-batt-icon i {
+  background: #6fe3a0;
+}
+
+.tb-battery.low .tb-batt-icon i {
+  background: #ffb35c;
+}
+
+.tb-batt-text {
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.tb-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1px;
+  height: 38px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(244, 247, 253, 0.95);
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.tb-clock:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tb-time {
+  font-size: 12px;
+  font-weight: 580;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  /* The glass can land on a bright wallpaper here, so the clock carries its own
+     shadow the way the pill's copy does. */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+
+.tb-date {
+  font-size: 10.5px;
+  line-height: 1.15;
+  color: rgba(232, 237, 248, 0.82);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }

@@ -1,13 +1,14 @@
 {
   "name": "notch",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "A glass notch for Windows — hover the top of your screen.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "node dev-server.js",
-    "dist": "electron-builder --win portable"
+    "dist": "electron-builder --win",
+    "dist:installer": "electron-builder --win nsis"
   },
   "devDependencies": {
     "electron": "45.3.3",
@@ -40,12 +41,30 @@
     "win": {
       "target": [
         {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
           "target": "portable",
           "arch": [
             "x64"
           ]
         }
       ]
+    },
+    "nsis": {
+      "artifactName": "Notch-Setup-${version}.exe",
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Notch",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
     },
     "portable": {
       "artifactName": "Notch-${version}.exe",

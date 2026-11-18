@@ -4,8 +4,30 @@ A glass notch for Windows. The top of your screen becomes a slim pill showing th
 time and battery; hover it and it unfolds into a panel. The Windows key opens a
 search launcher instead of Start, and the taskbar lists everything you have open.
 
-Frameless, transparent, always on top, and built as a single Electron app — no
-installer, no browser, no web service.
+Frameless, transparent, always on top, and built as a single Electron app —
+installed in a few clicks or run as one portable file, no browser, no web
+service.
+
+## Download
+
+**[Notch-Setup-1.1.0.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.1.0/Notch-Setup-1.1.0.exe)**
+— the installer, about 270 MB.
+
+1. Run it. Windows may warn that the publisher is unknown (the build is not
+   code-signed): **More info → Run anyway**.
+2. Pick a folder — the default is fine — and finish. Choose *Create desktop
+   shortcut* if you want it on the desktop; the Start-menu entry is always made.
+3. Launch **Notch** from the Start menu or the desktop shortcut. The pill appears
+   at the top of the screen and the app sits in the tray.
+
+It installs for your user only, so it never asks for an administrator password.
+Remove it from *Settings → Apps → Notch*; your settings in
+`%APPDATA%\notch\notch.json` are left in place.
+
+No installer wanted? [Notch-1.1.0.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.1.0/Notch-1.1.0.exe)
+is the same app as a single portable file (~240 MB) — double-click and it runs.
+
+All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
 ## What you get
 
@@ -17,11 +39,13 @@ installer, no browser, no web service.
 - **Launcher** — tap the Windows key and a search sheet drops down over the desktop.
   It indexes your Start-menu apps, filters as you type, and opens with ↑ ↓ ↵ or a
   click. Pinned apps sit in their own row.
-- **Taskbar** — a floating bar with your pins plus every window that is open, in the
-  order they appeared, with their real icons. Click one to bring it forward. The
-  number badge on each button is its shortcut: `Win+1` … `Win+9`, `Win+0` for the
-  tenth. Optional auto-hide keeps it off-screen until you touch the bottom edge or
-  open the launcher.
+- **Taskbar** — two glass islands: the apps in the middle of the screen, the tray,
+  battery and clock against the right edge. Each app is one button with its real
+  icon, however many windows it has; hover a button with several and a Windows-style
+  list of its windows opens above the bar. Click a button to bring that app forward
+  (again to put it away). The number badge on each button is its shortcut: `Win+1`
+  … `Win+9`, `Win+0` for the tenth. Optional auto-hide keeps the bar off-screen
+  until you touch the bottom edge or open the launcher.
 - **Library** — scans Steam, Epic and your own shortcuts, shows the cover art, and
   launches a game with a click. Add a shortcut by hand if a launcher keeps it hidden.
 - **Jarvis** — an assistant panel with a chat model picker and push-to-talk voice
@@ -47,15 +71,17 @@ npm start
 The app starts with the pill on the top edge and sits in the tray. Nothing else is
 needed: no build step, no API keys.
 
-### A single executable
+### Build the download
 
 ```bash
 npm run dist
 ```
 
-writes `dist/Notch-1.0.0.exe` — one portable file with no installer and no Node.js
-on the target machine. It carries Electron, the Whisper loader and the Piper
-voice, so speech works offline out of the box. Ollama and the speech model are
+writes two files into `dist/`: `Notch-Setup-1.1.0.exe`, the installer said
+above, and `Notch-1.1.0.exe`, the same app as one portable file. Neither needs
+Node.js on the target machine. `npm run dist:installer` builds only the
+installer. The package carries Electron, the Whisper loader and the Piper voice,
+so speech works offline out of the box. Ollama and the speech model are
 downloaded on first use, and the Jarvis setup card offers to install Ollama for
 you. The voice files it bundles come from `tts/` (not in the repository; copy
 `piper/` and the `.onnx` voice there before building if you want it included).
@@ -146,6 +172,12 @@ and [ccl125/liquid-glass](https://github.com/ccl125/liquid-glass) — an SVG
 displacement rim with a specular edge and chromatic dispersion.
 
 ## Release
+
+**v1.1.0** — the taskbar split into two islands (apps centred, tray, battery and
+clock on the right), one button per app with a hover list of its windows, tray
+icons read off the notification area, and the glass following the live desktop.
+Shipped as a user-level installer with a Start-menu and desktop shortcut, plus
+the portable exe.
 
 **v1.0.0** — first release: notch panel, launcher, taskbar with shortcuts and
 auto-hide, game library, Jarvis assistant, detached widget, Windows-key hook.

@@ -393,7 +393,9 @@ async function captureDesktop() {
     // as capture exclusion, so the sample is the bare desktop — the pill and
     // the panel then refract the same pixels the open panel sees, with no
     // ghost of the pill baked into the source.
-    for (const surface of [win, ...widgetWins.values()]) {
+    // The islands sit over the desktop too, so they are shielded the same way:
+    // without that the bottom of every sample would be the bar's own glass.
+    for (const surface of [win, ...widgetWins.values(), ...taskbarZones().map((zone) => zone.win)]) {
       if (surface && !surface.isDestroyed() && surface.isVisible()) {
         surface.setContentProtection(true);
         shielded.push(surface);
@@ -422,6 +424,9 @@ async function captureDesktop() {
     desktopFrame = { image: source.thumbnail, display };
     const url = backdropDataUrl();
     if (url && win && !win.isDestroyed()) win.webContents.send('notch:backdrop', url);
+    // The islands refract the same sample, so they follow the desktop too when
+    // the backdrop is set to live.
+    sendTaskbarBackdrop();
   } catch {
     /* capture unavailable: the wallpaper sample stays as the fallback */
   } finally {
@@ -445,6 +450,18 @@ function startDesktopSampling() {
 function stopDesktopSampling() {
   clearInterval(desktopTimer);
   desktopTimer = null;
+}
+
+// Live glass needs frames while anything wearing it is on screen: the pill when
+// the pointer is near, and the taskbar islands whenever they are up.
+function samplingWanted() {
+  if (!usesLiveBackdrop() || isExpanded) return false;
+  return taskbarOn() || pointerNear;
+}
+
+function syncDesktopSampling() {
+  if (samplingWanted()) startDesktopSampling();
+  else stopDesktopSampling();
 }
 
 // ---------------------------------------------------------------- live values
@@ -646,8 +663,7 @@ function pollPointer() {
   const near = !isExpanded && usesLiveBackdrop() && (inside || nearRect(point, rect));
   if (near !== pointerNear) {
     pointerNear = near;
-    if (near) startDesktopSampling();
-    else stopDesktopSampling();
+    syncDesktopSampling();
   }
 }
 
@@ -2321,7 +2337,28 @@ function startWinHook() {
     while (line >= 0) {
       const text = buffer.slice(0, line).trim();
       buffer = buffer.slice(line + 1);
-      if (windowListBuffer) {
+      if (trayShotRequest && text.startsWith('IMG\t')) {
+        const [, shotW, shotH, shotData] = text.split('\t');
+        const pending = trayShotRequest;
+        trayShotRequest = null;
+        pending.resolve(
+          shotData ? { width: Number(shotW) || 0, height: Number(shotH) || 0, data: shotData } : null,
+        );
+      } else if (trayListBuffer) {
+        if (text === 'TE') {
+          const rows = trayListBuffer;
+          trayListBuffer = null;
+          if (trayRequest) trayRequest.finish(rows);
+        } else if (text === 'win') {
+          toggleLauncher();
+        } else if (text.startsWith('slot ')) {
+          activateTaskbarSlot(Number(text.slice(5)));
+        } else if (text.includes('\t')) {
+          trayListBuffer.push(text);
+        }
+      } else if (text === 'TB') {
+        trayListBuffer = [];
+      } else if (windowListBuffer) {
         if (text === 'WE') {
           const rows = windowListBuffer;
           windowListBuffer = null;
@@ -2510,12 +2547,12 @@ ipcMain.on('notch:expanded', (_event, expanded) => {
   }
   if (expanded) {
     startLiveData();
-    stopDesktopSampling();
   } else {
     stopLiveData();
-    if (pointerNear && usesLiveBackdrop()) setTimeout(startDesktopSampling, 700);
-    else stopDesktopSampling();
+    // Let the close animation finish before the next sample lands.
+    setTimeout(syncDesktopSampling, 700);
   }
+  syncDesktopSampling();
 });
 
 ipcMain.on('notch:pinned', (_event, value) => {
@@ -2548,10 +2585,9 @@ ipcMain.handle('notch:set-settings', (_event, patch) => {
     const url = panelBackdrop();
     if (url && win && !win.isDestroyed()) win.webContents.send('notch:backdrop', url);
     sendWidgetBackdrop();
-  } else if (pointerNear && !isExpanded) {
-    startDesktopSampling();
   }
   refreshTaskbar();
+  syncDesktopSampling();
   sendWidgetSurface();
   syncWinHook();
   return prefs.settings;
@@ -2850,13 +2886,39 @@ const TASKBAR_ITEM = 40;
 const TASKBAR_SEP = 6;
 const TASKBAR_PAD = 8;
 
-let taskbarWin = null;
+let taskbarWin = null; // apps island, or the whole bar when attached
+let taskbarTrayWin = null; // tray island, islands shape only
+let taskbarBuiltShape = '';
 let taskbarTimer = null;
 let taskbarItems = [];
+let taskbarApps = [];
 let taskbarBusy = false;
 let taskbarPeekTimer = null;
 let taskbarRevealed = false;
 let taskbarLeaveTimer = null;
+// Each window measures itself: the apps island in the middle, the tray island on
+// the right, and one bar when the shape is attached.
+let taskbarWidths = { apps: 300, tray: 250, both: 620 };
+
+// ------------------------------------------------------------------ tray
+
+let trayItems = [];
+let trayTimer = null;
+let trayBusy = false;
+let trayListBuffer = null;
+let trayRequest = null;
+let traySignature = '';
+let trayBattery = null;
+let trayShotRequest = null;
+
+// Hover list for an app with several windows, the way the Windows taskbar
+// stacks its thumbnails under one button.
+let flyoutWin = null;
+let flyoutKey = null;
+let flyoutPoll = null;
+let flyoutOutside = 0;
+let flyoutBounds = null;
+let flyoutLeft = 0;
 
 
 function taskbarOn() {
@@ -2888,20 +2950,22 @@ function taskbarAutoHide() {
   return !!prefs.settings.taskbarAutoHide;
 }
 
-function taskbarGeometry(hidden) {
+// Islands put the apps in the middle of the screen and the tray against the
+// right edge; attached is one bar holding both.
+function taskbarGeometry(hidden, zone = 'both') {
   const display = screen.getPrimaryDisplay();
-  const pinned = taskbarPinned().length;
-  const open = taskbarOpenItems().length;
-  const count = Math.max(1, pinned + open);
-  const divider = pinned > 0 && open > 0 ? TASKBAR_SEP + 1 : 0;
   const width = Math.min(
-    display.bounds.width - 24,
-    TASKBAR_PAD * 2 + count * TASKBAR_ITEM + (count - 1) * TASKBAR_SEP + divider,
+    display.bounds.width - 40,
+    Math.max(zone === 'tray' ? 140 : 200, Math.round(taskbarWidths[zone] || 300)),
   );
   const height = TASKBAR_H + TASKBAR_LIFT;
   const bottom = display.bounds.y + display.bounds.height;
+  const x =
+    zone === 'tray'
+      ? display.bounds.x + display.bounds.width - width - 10
+      : display.bounds.x + (display.bounds.width - width) / 2;
   return {
-    x: Math.round(display.bounds.x + (display.bounds.width - width) / 2),
+    x: Math.round(x),
     y: hidden ? bottom : bottom - height,
     width,
     height,
@@ -2909,8 +2973,17 @@ function taskbarGeometry(hidden) {
   };
 }
 
-function taskbarBounds() {
-  return taskbarGeometry(taskbarAutoHide() && !taskbarRevealed);
+function taskbarBounds(zone = 'both') {
+  return taskbarGeometry(taskbarAutoHide() && !taskbarRevealed, zone);
+}
+
+// The windows the bar currently lives in, with the zone each one draws.
+function taskbarZones() {
+  const islands = taskbarMode().shape === 'islands';
+  return [
+    { zone: islands ? 'apps' : 'both', win: taskbarWin },
+    { zone: 'tray', win: islands ? taskbarTrayWin : null },
+  ];
 }
 
 let windowListBuffer = null;
@@ -2993,7 +3066,12 @@ async function readTaskbarWindowsFromHelper() {
     if (!title || title === 'Program Manager') continue;
     const base = String(exe || '').split(/[\\/]/).pop().toLowerCase();
     if (SHELL_PROCESSES.has(base)) continue;
-    items.push({ hwnd, title: friendlyTitle(title, exe), icon: await iconForExe(exe) });
+    items.push({
+      hwnd,
+      title: friendlyTitle(title, exe),
+      icon: await iconForExe(exe),
+      exe: String(exe || ''),
+    });
   }
   return items;
 }
@@ -3078,27 +3156,425 @@ function taskbarBackdrop() {
 }
 
 function sendTaskbarBackdrop() {
-  if (!taskbarWin || taskbarWin.isDestroyed()) return;
   const backdrop = taskbarBackdrop();
-  if (backdrop) taskbarWin.webContents.send('taskbar:backdrop', backdrop);
+  if (!backdrop) return;
+  for (const { win } of taskbarZones()) {
+    if (win && !win.isDestroyed()) win.webContents.send('taskbar:backdrop', backdrop);
+  }
+}
+
+// ------------------------------------------------------------- taskbar tray
+
+function requestTrayList(timeout = 2500) {
+  const proc = hookProc;
+  if (!proc || proc.killed || !proc.stdin || proc.stdin.destroyed) return Promise.resolve(null);
+  if (trayRequest) return trayRequest.promise;
+  const request = { promise: null, finish: null, done: false };
+  request.promise = new Promise((resolve) => {
+    const timer = setTimeout(() => finish(null), timeout);
+    function finish(value) {
+      if (request.done) return;
+      request.done = true;
+      clearTimeout(timer);
+      if (trayRequest === request) trayRequest = null;
+      resolve(value);
+    }
+    request.finish = finish;
+    trayRequest = request;
+    trayListBuffer = [];
+    try {
+      proc.stdin.write('tray\n');
+    } catch {
+      finish(null);
+    }
+  });
+  return request.promise;
+}
+
+// The helper grabs a rectangle of the desktop with GDI. Ask it for the strip
+// that holds the tray icons; it answers with a base64 PNG.
+function requestTrayShot(rect, timeout = 2500) {
+  const proc = hookProc;
+  if (!proc || proc.killed || !proc.stdin || proc.stdin.destroyed) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (trayShotRequest === request) trayShotRequest = null;
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), timeout);
+    const request = { resolve: finish };
+    trayShotRequest = request;
+    try {
+      proc.stdin.write(`shot ${rect.x} ${rect.y} ${rect.width} ${rect.height}\n`);
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+// Icons are pixels, not API: the notification area draws them itself, so take
+// them off the screen once per change instead of asking for something Windows
+// does not hand out.
+async function captureTrayIcons() {
+  if (!trayItems.length) return;
+  const display = screen.getPrimaryDisplay();
+  const scale = display.scaleFactor || 1;
+  // The tray island sits over the notification area, and the capture is the
+  // composited desktop: any window of ours covering the icons has to step aside
+  // for the moment the screen is read, or we photograph our own bar.
+  const box = {
+    left: Math.min(...trayItems.map((row) => row.x)) - 2,
+    top: Math.min(...trayItems.map((row) => row.y)) - 2,
+    right: Math.max(...trayItems.map((row) => row.x + row.w)) + 2,
+    bottom: Math.max(...trayItems.map((row) => row.y + row.h)) + 2,
+  };
+  const stepped = [];
+  for (const { win } of taskbarZones()) {
+    if (!win || win.isDestroyed() || !win.isVisible()) continue;
+    const bounds = win.getBounds();
+    const x = bounds.x * scale;
+    const y = bounds.y * scale;
+    const w = bounds.width * scale;
+    const h = bounds.height * scale;
+    if (x < box.right && x + w > box.left && y < box.bottom && y + h > box.top) stepped.push(win);
+  }
+  for (const win of stepped) win.hide();
+  if (stepped.length) await new Promise((resolve) => setTimeout(resolve, 70));
+  try {
+    const strip = await requestTrayShot({
+      x: Math.round(box.left),
+      y: Math.round(box.top),
+      width: Math.round(box.right - box.left),
+      height: Math.round(box.bottom - box.top),
+    });
+    if (!strip || !strip.data) return;
+    const image = nativeImage.createFromBuffer(Buffer.from(strip.data, 'base64'));
+    if (image.isEmpty()) return;
+    const size = image.getSize();
+    // The strip comes back in the same space as the rects it was cut from; the
+    // ratio only guards against a scaled bitmap.
+    const ratioX = size.width / Math.max(1, strip.width);
+    const ratioY = size.height / Math.max(1, strip.height);
+    for (const item of trayItems) {
+      if (item.icon) continue;
+      const side = Math.max(8, Math.round(Math.min(item.w, item.h, 32) * ratioX));
+      const x = Math.round((item.x - box.left + item.w / 2) * ratioX - side / 2);
+      const y = Math.round((item.y - box.top + item.h / 2) * ratioY - side / 2);
+      if (x < 0 || y < 0 || x + side > size.width || y + side > size.height) continue;
+      const crop = image.crop({ x, y, width: side, height: side });
+      if (crop && !crop.isEmpty()) item.icon = crop.resize({ width: 36, height: 36 }).toDataURL();
+    }
+  } catch {
+    /* no capture rights: the tray falls back to tooltips only */
+  } finally {
+    for (const win of stepped) if (!win.isDestroyed() && !win.isVisible()) win.showInactive();
+  }
+}
+
+async function refreshTray(force) {
+  if (trayBusy) return;
+  trayBusy = true;
+  try {
+    const raw = await requestTrayList();
+    if (!raw) return;
+    // Keep the icons already in hand: a capture can fail (a busy desktop, a
+    // moment where the screen is not readable), and a dot is worse than a
+    // picture that is a second old.
+    const previous = new Map(trayItems.map((row) => [`${row.name}|${row.x}|${row.y}`, row.icon]));
+    const rows = [];
+    let clockLeft = null;
+    for (const line of raw) {
+      const [index, x, y, w, h, cls, ...rest] = String(line).split('\t');
+      const name = rest.join(' ').trim();
+      if (cls === 'SystemTray.OmniButton') {
+        clockLeft = Number(x);
+        continue;
+      }
+      if (cls === 'SystemTray.ShowDesktopButton') continue;
+      rows.push({
+        i: Number(index),
+        x: Number(x),
+        y: Number(y),
+        w: Number(w),
+        h: Number(h),
+        name: name.split(/\s{2,}/)[0],
+      });
+    }
+    // The battery lives in the tray, immediately left of the clock. Its tooltip
+    // carries the charge, and the bar draws that as its own chip instead of a
+    // second battery icon.
+    const power = clockLeft === null
+      ? []
+      : rows.filter((row) => Math.abs(row.x + row.w - clockLeft) <= 18);
+    for (const row of power) {
+      const match = /(\d{1,3})\s*%/.exec(row.name);
+      if (match) trayBattery = Number(match[1]);
+    }
+    trayItems = rows
+      .filter((row) => !power.includes(row))
+      .map((row) => ({ ...row, icon: previous.get(`${row.name}|${row.x}|${row.y}`) || null }));
+    // The charge comes from the battery icon's tooltip, so it belongs in the
+    // signature: the chip has to change when the percentage does.
+    const signature = `${trayBattery}|${trayItems.map((row) => `${row.i}:${row.x}:${row.name}`).join('|')}`;
+    if (signature !== traySignature) {
+      traySignature = signature;
+      await captureTrayIcons();
+      sendTaskbarUpdate();
+    } else if (force) {
+      sendTaskbarUpdate();
+    }
+  } finally {
+    trayBusy = false;
+  }
+}
+
+function startTrayPolling() {
+  if (trayTimer) return;
+  refreshTray();
+  trayTimer = setInterval(refreshTray, 6000);
+}
+
+function stopTrayPolling() {
+  clearInterval(trayTimer);
+  trayTimer = null;
+  trayItems = [];
+  traySignature = '';
+}
+
+// ------------------------------------------------------------ taskbar flyout
+
+function findTaskbarApp(key) {
+  if (!key) return null;
+  return taskbarApps.find((app) => app.key === key) || null;
+}
+
+function createFlyout() {
+  if (flyoutWin && !flyoutWin.isDestroyed()) return flyoutWin;
+  flyoutWin = new BrowserWindow({
+    width: 240,
+    height: 120,
+    x: 0,
+    y: 0,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    thickFrame: false,
+    roundedCorners: false,
+    // Resizable so the list can size itself to its rows; there is no frame to
+    // drag, so the user never sees that.
+    resizable: true,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    focusable: false,
+    show: false,
+    title: 'Taskbar menu',
+    webPreferences: {
+      preload: path.join(__dirname, 'taskbar-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      spellcheck: false,
+      backgroundThrottling: false,
+    },
+  });
+  flyoutWin.setMenu(null);
+  flyoutWin.setAlwaysOnTop(true, 'screen-saver');
+  flyoutWin.setSkipTaskbar(true);
+  flyoutWin.setFocusable(false);
+  flyoutWin.loadFile(path.join(__dirname, 'src', 'taskbar-flyout.html'));
+  flyoutWin.on('closed', () => {
+    flyoutWin = null;
+    stopFlyoutPoll();
+  });
+  return flyoutWin;
+}
+
+function stopFlyoutPoll() {
+  if (flyoutPoll) clearInterval(flyoutPoll);
+  flyoutPoll = null;
+  flyoutOutside = 0;
+}
+
+function hideFlyout() {
+  stopFlyoutPoll();
+  flyoutKey = null;
+  flyoutBounds = null;
+  if (flyoutWin && !flyoutWin.isDestroyed() && flyoutWin.isVisible()) flyoutWin.hide();
+}
+
+// The pointer decides: it stays while it is over the button or the list, and
+// closes a moment after it leaves both.
+function startFlyoutPoll() {
+  if (flyoutPoll) return;
+  flyoutOutside = 0;
+  flyoutPoll = setInterval(() => {
+    if (!flyoutWin || flyoutWin.isDestroyed() || !flyoutWin.isVisible() || !flyoutBounds) {
+      stopFlyoutPoll();
+      return;
+    }
+    const point = cursorDip();
+    const box = flyoutBounds;
+    const inList =
+      point.x >= box.x - 6 &&
+      point.x <= box.x + box.width + 6 &&
+      point.y >= box.y - 4 &&
+      point.y <= box.y + box.height + 10;
+    const bar = taskbarWin && !taskbarWin.isDestroyed() ? taskbarWin.getBounds() : null;
+    const inBar =
+      bar && point.y >= bar.y && point.y <= bar.y + bar.height && point.x >= bar.x && point.x <= bar.x + bar.width;
+    if (inList || inBar) {
+      flyoutOutside = 0;
+      return;
+    }
+    flyoutOutside += 1;
+    if (flyoutOutside >= 4) hideFlyout();
+  }, 80);
+}
+
+function showFlyout(app, left) {
+  if (!app || app.windows.length < 2 || !taskbarWin || taskbarWin.isDestroyed()) {
+    hideFlyout();
+    return;
+  }
+  const bar = taskbarWin.getBounds();
+  const rows = app.windows.slice(0, 8).map((item) => ({
+    hwnd: item.hwnd,
+    title: item.title,
+    icon: app.icon || null,
+  }));
+  const longest = rows.reduce((max, row) => Math.max(max, String(row.title || '').length), 0);
+  const width = Math.max(196, Math.min(320, 64 + longest * 6.4));
+  const height = 10 + rows.length * 36;
+  const x = Math.round(Math.min(Math.max(bar.x + left - width / 2, bar.x), bar.x + bar.width - width));
+  const y = Math.round(bar.y - height - 6);
+  const win = createFlyout();
+  flyoutBounds = { x, y, width, height };
+  flyoutKey = app.key;
+  flyoutLeft = left;
+  win.setBounds({ x, y, width, height }, false);
+  if (!win.isVisible()) win.showInactive();
+  win.webContents.send('flyout:rows', { rows, width });
+  startFlyoutPoll();
+}
+
+// A pin and a running app are one button, and several windows of the same app
+// are one button with a list, exactly like the Windows taskbar.
+function appLabel(item) {
+  const exe = String(item.exe || '')
+    .split(/[\\/]/)
+    .pop()
+    .replace(/\.exe$/i, '');
+  if (exe) return exe.charAt(0).toUpperCase() + exe.slice(1);
+  return String(item.title || 'App');
+}
+
+function groupTaskbarApps(items, pins) {
+  const groups = [];
+  const byKey = new Map();
+  for (const item of items) {
+    const key = String(item.exe || item.title || item.hwnd).toLowerCase();
+    let group = byKey.get(key);
+    if (!group) {
+      group = {
+        key,
+        exe: String(item.exe || ''),
+        name: appLabel(item),
+        icon: item.icon || null,
+        pin: null,
+        windows: [],
+      };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    if (!group.icon && item.icon) group.icon = item.icon;
+    group.windows.push({ hwnd: item.hwnd, title: item.title });
+  }
+  const used = new Set();
+  const apps = [];
+  for (const pin of pins) {
+    const base = String(pin.target || '')
+      .split(/[\\/]/)
+      .pop()
+      .replace(/\.exe$/i, '')
+      .toLowerCase();
+    let match = null;
+    if (base) {
+      match = groups.find(
+        (group) =>
+          !used.has(group) &&
+          String(group.exe)
+            .split(/[\\/]/)
+            .pop()
+            .replace(/\.exe$/i, '')
+            .toLowerCase() === base,
+      );
+    }
+    if (!match) {
+      match = groups.find(
+        (group) => !used.has(group) && group.name.toLowerCase() === String(pin.name || '').toLowerCase(),
+      );
+    }
+    if (match) {
+      used.add(match);
+      apps.push({ ...match, pin, name: pin.name || match.name, icon: match.icon || pin.icon });
+    } else {
+      apps.push({ key: `pin:${pin.id}`, name: pin.name, icon: pin.icon, pin, windows: [] });
+    }
+  }
+  for (const group of groups) if (!used.has(group)) apps.push({ ...group, pin: null });
+  return apps;
+}
+
+function taskbarBattery() {
+  let charging = true;
+  try {
+    charging = !powerMonitor.isOnBatteryPower();
+  } catch {
+    /* keep the default */
+  }
+  const percent = Number.isFinite(trayBattery) ? trayBattery : battery;
+  return { percent: Number.isFinite(percent) ? percent : null, charging };
+}
+
+function taskbarPayload() {
+  const items = taskbarOpenItems();
+  const pinned = taskbarPinned();
+  taskbarApps = groupTaskbarApps(items, pinned);
+  return {
+    apps: taskbarApps,
+    tray: trayItems.map((row) => ({ i: row.i, name: row.name, icon: row.icon || null })),
+    battery: taskbarBattery(),
+    ...taskbarMode(),
+  };
 }
 
 function sendTaskbarUpdate() {
   if (!taskbarWin || taskbarWin.isDestroyed()) return;
-  const mode = taskbarMode();
-  const items = taskbarOpenItems();
-  const pinned = taskbarPinned();
-  taskbarWin.webContents.send('taskbar:update', {
-    items,
-    pinned,
-    show: prefs.settings.taskbarShow || 'both',
-    ...mode,
-  });
-  taskbarWin.setBounds(taskbarBounds(), false);
-  if (!items.length && !pinned.length) {
+  const payload = taskbarPayload();
+  for (const { zone, win } of taskbarZones()) {
+    if (!win || win.isDestroyed()) continue;
+    win.webContents.send('taskbar:update', payload);
+    win.setBounds(taskbarBounds(zone), false);
+  }
+  // The apps island goes away when there is nothing on it; the tray island
+  // stays, because the clock lives there.
+  if (!taskbarApps.length) {
+    hideFlyout();
     if (taskbarWin.isVisible()) taskbarWin.hide();
   } else if (!taskbarWin.isVisible()) {
     taskbarWin.showInactive();
+    sendTaskbarBackdrop();
+  }
+  if (taskbarTrayWin && !taskbarTrayWin.isDestroyed() && !taskbarTrayWin.isVisible()) {
+    taskbarTrayWin.showInactive();
     sendTaskbarBackdrop();
   }
 }
@@ -3122,19 +3598,19 @@ function startTaskbarPolling() {
   if (taskbarTimer) return;
   setTimeout(pollTaskbar, 400);
   taskbarTimer = setInterval(pollTaskbar, 2500);
+  startTrayPolling();
 }
 
 function stopTaskbarPolling() {
   clearInterval(taskbarTimer);
   taskbarTimer = null;
   taskbarBusy = false;
+  stopTrayPolling();
 }
 
-function createTaskbar() {
-  if (taskbarWin) return;
-  const bounds = taskbarBounds();
-  taskbarWin = new BrowserWindow({
-    ...bounds,
+function createTaskbarWindow(zone) {
+  const win = new BrowserWindow({
+    ...taskbarBounds(zone),
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -3160,25 +3636,40 @@ function createTaskbar() {
       backgroundThrottling: false,
     },
   });
-  taskbarWin.setMenu(null);
-  taskbarWin.setAlwaysOnTop(true, 'screen-saver');
-  taskbarWin.setSkipTaskbar(true);
-  taskbarWin.setFocusable(false);
-  taskbarWin.loadFile(path.join(__dirname, 'src', 'taskbar.html'));
-  taskbarWin.once('ready-to-show', () => {
-    if (!taskbarWin || taskbarWin.isDestroyed()) return;
-    taskbarWin.setBounds(taskbarBounds(), false);
-    taskbarWin.showInactive();
-    sendTaskbarBackdrop();
+  win.setMenu(null);
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setSkipTaskbar(true);
+  win.setFocusable(false);
+  win.loadFile(path.join(__dirname, 'src', 'taskbar.html'), { query: { zone } });
+  win.once('ready-to-show', () => {
+    if (!win || win.isDestroyed()) return;
+    win.setBounds(taskbarBounds(zone), false);
+    win.showInactive();
+    const backdrop = taskbarBackdrop();
+    if (backdrop) win.webContents.send('taskbar:backdrop', backdrop);
   });
-  taskbarWin.on('closed', () => {
-    taskbarWin = null;
-    stopTaskbarPolling();
+  win.on('closed', () => {
+    if (taskbarWin === win) taskbarWin = null;
+    if (taskbarTrayWin === win) taskbarTrayWin = null;
   });
+  return win;
+}
+
+function createTaskbar() {
+  const islands = taskbarMode().shape === 'islands';
+  taskbarBuiltShape = taskbarMode().shape;
+  if (!taskbarWin || taskbarWin.isDestroyed()) taskbarWin = createTaskbarWindow(islands ? 'apps' : 'both');
+  if (islands) {
+    if (!taskbarTrayWin || taskbarTrayWin.isDestroyed()) taskbarTrayWin = createTaskbarWindow('tray');
+  } else if (taskbarTrayWin && !taskbarTrayWin.isDestroyed()) {
+    taskbarTrayWin.destroy();
+    taskbarTrayWin = null;
+  }
   startTaskbarPolling();
 }
 
 function destroyTaskbar() {
+  hideFlyout();
   stopTaskbarPolling();
   if (taskbarPeekTimer) clearInterval(taskbarPeekTimer);
   taskbarPeekTimer = null;
@@ -3188,6 +3679,9 @@ function destroyTaskbar() {
   taskbarItems = [];
   if (taskbarWin && !taskbarWin.isDestroyed()) taskbarWin.destroy();
   taskbarWin = null;
+  if (taskbarTrayWin && !taskbarTrayWin.isDestroyed()) taskbarTrayWin.destroy();
+  taskbarTrayWin = null;
+  taskbarBuiltShape = '';
 }
 
 function refreshTaskbar() {
@@ -3195,9 +3689,18 @@ function refreshTaskbar() {
     destroyTaskbar();
     return;
   }
-  if (!taskbarWin) createTaskbar();
+  // Switching shape moves the bar between one window and two, so rebuild.
+  if (taskbarWin && !taskbarWin.isDestroyed() && taskbarBuiltShape !== taskbarMode().shape) {
+    if (taskbarTrayWin && !taskbarTrayWin.isDestroyed()) taskbarTrayWin.destroy();
+    taskbarTrayWin = null;
+    taskbarWin.destroy();
+    taskbarWin = null;
+    taskbarBuiltShape = '';
+  }
+  if (!taskbarWin || taskbarWin.isDestroyed()) createTaskbar();
   else sendTaskbarUpdate();
   syncTaskbarPeek();
+  syncDesktopSampling();
 }
 
 // Auto-hide: the bar waits just past the bottom edge and comes up when the
@@ -3206,8 +3709,10 @@ function refreshTaskbar() {
 function setTaskbarRevealed(revealed) {
   if (taskbarRevealed === revealed) return;
   taskbarRevealed = revealed;
-  if (!taskbarWin || taskbarWin.isDestroyed() || !taskbarOn()) return;
-  taskbarWin.setBounds(taskbarBounds(), false);
+  if (!taskbarOn()) return;
+  for (const { zone, win } of taskbarZones()) {
+    if (win && !win.isDestroyed()) win.setBounds(taskbarBounds(zone), false);
+  }
 }
 
 function revealTaskbar() {
@@ -3226,15 +3731,13 @@ function tickTaskbarPeek() {
     taskbarLeaveTimer = null;
     return;
   }
-  const shown = taskbarGeometry(false);
+  const zones = taskbarZones();
+  const shown = zones.map(({ zone }) => taskbarGeometry(false, zone));
   const point = cursorDip();
-  const atEdge = point.y >= shown.bottom - 2;
-
-  const over =
-    point.x >= shown.x - 6 &&
-    point.x <= shown.x + shown.width + 6 &&
-    point.y >= shown.y - 2 &&
-    point.y <= shown.bottom;
+  const atEdge = point.y >= shown[0].bottom - 2;
+  const over = shown.some(
+    (box) => point.x >= box.x - 6 && point.x <= box.x + box.width + 6 && point.y >= box.y - 2 && point.y <= box.bottom,
+  );
   if (atEdge) {
     revealTaskbar();
     return;
@@ -3264,12 +3767,71 @@ function syncTaskbarPeek() {
   } else if (!taskbarPeekTimer) {
     taskbarPeekTimer = setInterval(tickTaskbarPeek, 120);
   }
-  if (taskbarWin && !taskbarWin.isDestroyed()) taskbarWin.setBounds(taskbarBounds(), false);
+  for (const { zone, win } of taskbarZones()) {
+    if (win && !win.isDestroyed()) win.setBounds(taskbarBounds(zone), false);
+  }
 }
 
-ipcMain.on('taskbar:ready', () => {
+ipcMain.on('taskbar:ready', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('taskbar:update', taskbarPayload());
+    const backdrop = taskbarBackdrop();
+    if (backdrop) win.webContents.send('taskbar:backdrop', backdrop);
+  }
   sendTaskbarUpdate();
-  sendTaskbarBackdrop();
+  refreshTray(true);
+});
+
+// Each island measures what it needs, so its window is exactly as wide as its
+// contents: the apps in the middle, the tray and clock against the right edge.
+ipcMain.on('taskbar:size', (event, payload) => {
+  const zone = payload && (payload.zone === 'tray' || payload.zone === 'apps' || payload.zone === 'both')
+    ? payload.zone
+    : 'both';
+  const next = Math.round(Number(payload && payload.width) || 0);
+  if (next < 120) return;
+  if (Math.abs(next - taskbarWidths[zone]) < 3) return;
+  taskbarWidths[zone] = next;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) win.setBounds(taskbarBounds(zone), false);
+});
+
+ipcMain.on('taskbar:hover', (_event, payload) => {
+  const key = payload && payload.key;
+  const left = Number(payload && payload.left) || 0;
+  showFlyout(findTaskbarApp(key), left);
+});
+
+ipcMain.on('taskbar:hover-end', () => hideFlyout());
+
+ipcMain.on('taskbar:group', (_event, key) => {
+  const app = findTaskbarApp(key);
+  if (!app) return;
+  hideFlyout();
+  if (app.windows.length) focusTaskbarWindow(app.windows[0].hwnd);
+  else if (app.pin) launchTarget(app.pin.target);
+});
+
+ipcMain.on('taskbar:tray', (_event, index) => {
+  if (!hookProc || !hookProc.stdin || hookProc.stdin.destroyed) return;
+  try {
+    hookProc.stdin.write(`trayclick ${Math.trunc(Number(index) || 0)}\n`);
+  } catch {
+    /* the helper is gone */
+  }
+});
+
+ipcMain.on('flyout:pick', (_event, hwnd) => {
+  hideFlyout();
+  focusTaskbarWindow(Number(hwnd));
+});
+
+ipcMain.on('flyout:ready', () => {
+  if (flyoutKey) {
+    const app = findTaskbarApp(flyoutKey);
+    if (app) showFlyout(app, flyoutLeft);
+  }
 });
 
 // Bring a window forward: restore it if minimised, then focus it.
@@ -3298,14 +3860,11 @@ ipcMain.on('taskbar:focus', (_event, handle) => focusTaskbarWindow(Number(handle
 // running windows, exactly like the buttons left to right.
 function activateTaskbarSlot(slot) {
   if (!Number.isFinite(slot) || slot < 1 || slot > 10) return;
-  const entries = [];
-  for (const pin of pinnedEntries()) entries.push({ pin });
-  for (const item of taskbarItems) entries.push({ item });
-  const entry = entries[slot - 1];
-  if (!entry) return;
+  const app = groupTaskbarApps(taskbarOpenItems(), taskbarPinned())[slot - 1];
+  if (!app) return;
   hideLauncher();
-  if (entry.pin) launchTarget(entry.pin.target);
-  else focusTaskbarWindow(entry.item.hwnd);
+  if (app.windows.length) focusTaskbarWindow(app.windows[0].hwnd);
+  else if (app.pin) launchTarget(app.pin.target);
 }
 
 function sendWidgetStats() {

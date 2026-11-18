@@ -1,5 +1,7 @@
-// The taskbar is the notch's glass laid along the bottom edge: one bar, one
-// island per app, or no surface at all. Items come from the main process.
+// The taskbar is the notch's glass laid along the bottom edge: apps in the
+// middle, the notification tray, battery and clock on the right. Apps come in
+// already grouped one-per-app; a group with several windows opens the hover
+// list in its own small window above the bar.
 
 import { LiquidGlass } from './vendor/liquidglass.js';
 
@@ -7,7 +9,22 @@ const root = document.querySelector('#tbRoot');
 const bar = document.querySelector('#tbBar');
 const row = document.querySelector('#tbRow');
 const source = document.querySelector('#tbSource');
+const leftPad = document.querySelector('#tbLeft');
+const appsEl = document.querySelector('#tbApps');
+const rightEl = document.querySelector('#tbRight');
+const trayEl = document.querySelector('#tbTray');
+const timeEl = document.querySelector('#tbTime');
+const dateEl = document.querySelector('#tbDate');
+const batteryEl = document.querySelector('#tbBattery');
 const api = window.taskbarAPI;
+
+// Islands are two windows: one draws the apps, one draws the tray, battery and
+// clock. Attached is a single window carrying both zones.
+const zone = (() => {
+  const value = new URLSearchParams(location.search).get('zone');
+  return value === 'apps' || value === 'tray' ? value : 'both';
+})();
+root.dataset.zone = zone;
 
 // Same glass as the notch panel. A 40px island has far less room for a bevel
 // than a long bar, so it gets a stronger rim to stay readable.
@@ -29,16 +46,19 @@ const BASE = {
   shadowOffsetY: 0,
 };
 
+// The bevel has to stay well short of half the island's height: at 48px a 16px
+// z-radius leaves the top and bottom rims almost touching and the island reads
+// as a bright bubble instead of a slab of glass.
 const ISLAND = {
   ...BASE,
   cornerRadius: 12,
-  zRadius: 16,
-  refraction: 1.5,
-  edgeHighlight: 0.3,
-  specular: 0.6,
-  fresnel: 1.25,
-  tintStrength: 0.3,
-  blurAmount: 0.3,
+  zRadius: 10,
+  refraction: 1.35,
+  edgeHighlight: 0.22,
+  specular: 0.5,
+  fresnel: 1.02,
+  tintStrength: 0.26,
+  blurAmount: 0.28,
 };
 
 function configFor(shape) {
@@ -46,12 +66,18 @@ function configFor(shape) {
 }
 
 let instance = null;
+let paneTimer = null;
 let pulseFrames = 0;
-let items = [];
-let pinned = [];
-let mode = { style: 'glass', shape: 'islands' };
+let apps = [];
+let tray = [];
+let battery = null;
+let mode = { style: 'glass', shape: 'attached' };
 let display = null;
 let built = '';
+let hoverTimer = null;
+
+const screenX = window.screenX || 0;
+const screenY = window.screenY || 0;
 
 function placeSource() {
   if (!display) {
@@ -79,117 +105,261 @@ function pulse() {
   requestAnimationFrame(step);
 }
 
+function initials(text) {
+  return String(text || '?')
+    .replace(/\.exe$/i, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function iconOrLetters(node, item) {
+  if (item.icon) {
+    const img = document.createElement('img');
+    img.className = 'tb-icon';
+    img.src = item.icon;
+    img.alt = '';
+    img.decoding = 'async';
+    node.appendChild(img);
+    return;
+  }
+  const label = document.createElement('span');
+  label.className = 'tb-initials';
+  label.textContent = initials(item.name || item.title);
+  node.appendChild(label);
+}
+
+function buildApps() {
+  appsEl.replaceChildren();
+  // Windows numbers the taskbar 1..0 for Win+<key>; show the same numbers.
+  let slot = 0;
+  for (const app of apps) {
+    slot += 1;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'tb-item';
+    button.dataset.key = app.key;
+    const open = app.windows.length > 0;
+    button.classList.toggle('tb-pin', !open);
+    button.classList.toggle('tb-running', open);
+    button.classList.toggle('tb-multi', app.windows.length > 1);
+    button.title = open ? `${app.name} — ${app.windows.length} window${app.windows.length > 1 ? 's' : ''}` : app.name;
+    button.setAttribute('aria-label', app.name || 'App');
+    iconOrLetters(button, app);
+    if (slot <= 10) {
+      const key = document.createElement('span');
+      key.className = 'tb-key';
+      key.textContent = slot === 10 ? '0' : String(slot);
+      button.appendChild(key);
+    }
+    button.addEventListener('click', () => {
+      if (api) api.group(app.key);
+    });
+    button.addEventListener('mouseenter', () => {
+      if (!api || app.windows.length < 2) return;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => {
+        const box = button.getBoundingClientRect();
+        api.hoverGroup({ key: app.key, left: box.left + box.width / 2 });
+      }, 130);
+    });
+    button.addEventListener('mouseleave', () => {
+      clearTimeout(hoverTimer);
+      if (api) api.hoverEnd();
+    });
+    appsEl.appendChild(button);
+  }
+}
+
+// Tray icons are pixels lifted off the notification area, so the taskbar they
+// sit on comes with them. Drop that background: sample the corners, then make
+// anything close to it transparent.
+async function keyOutIcon(src) {
+  const image = new Image();
+  image.src = src;
+  await image.decode();
+  const canvas = document.createElement('canvas');
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return src;
+  ctx.drawImage(image, 0, 0);
+  const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const pixels = frame.data;
+  const corners = [
+    0,
+    (canvas.width - 1) * 4,
+    (canvas.height - 1) * canvas.width * 4,
+    ((canvas.height - 1) * canvas.width + canvas.width - 1) * 4,
+  ];
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  for (const index of corners) {
+    r += pixels[index];
+    g += pixels[index + 1];
+    b += pixels[index + 2];
+  }
+  r /= corners.length;
+  g /= corners.length;
+  b /= corners.length;
+  for (let i = 0; i < pixels.length; i += 4) {
+    const distance =
+      Math.abs(pixels[i] - r) + Math.abs(pixels[i + 1] - g) + Math.abs(pixels[i + 2] - b);
+    if (distance < 40) pixels[i + 3] = 0;
+    else if (distance < 96) pixels[i + 3] = Math.round((pixels[i + 3] * (distance - 40)) / 56);
+  }
+  ctx.putImageData(frame, 0, 0);
+  return canvas.toDataURL('image/png');
+}
+
+const trayIconCache = new Map();
+
+function useTrayIcon(img, src) {
+  if (trayIconCache.has(src)) {
+    img.src = trayIconCache.get(src);
+    return;
+  }
+  img.src = src;
+  keyOutIcon(src)
+    .then((clean) => {
+      if (!clean) return;
+      trayIconCache.set(src, clean);
+      img.src = clean;
+    })
+    .catch(() => {
+      /* keep the raw crop */
+    });
+}
+
+function buildTray() {
+  trayEl.replaceChildren();
+  for (const item of tray) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'tb-tray-item';
+    button.title = item.name || 'System tray';
+    button.setAttribute('aria-label', item.name || 'System tray');
+    if (item.icon) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.decoding = 'async';
+      useTrayIcon(img, item.icon);
+      button.appendChild(img);
+    } else {
+      const dot = document.createElement('span');
+      dot.className = 'tb-tray-dot';
+      button.appendChild(dot);
+    }
+    button.addEventListener('click', () => {
+      if (api) api.trayClick(item.i);
+    });
+    trayEl.appendChild(button);
+  }
+}
+
+function paintBattery() {
+  const percent = battery && Number.isFinite(battery.percent) ? Math.round(battery.percent) : null;
+  if (percent === null) {
+    batteryEl.hidden = true;
+    return;
+  }
+  const pct = Math.max(0, Math.min(100, percent));
+  batteryEl.hidden = false;
+  batteryEl.classList.toggle('charging', !!battery.charging);
+  batteryEl.title = `Battery ${pct}%${battery.charging ? ' — charging' : ''}`;
+  batteryEl.innerHTML =
+    `<span class="tb-batt-icon" aria-hidden="true"><i style="width:${Math.max(6, pct)}%"></i></span>` +
+    `<span class="tb-batt-text">${pct}%</span>`;
+  batteryEl.classList.toggle('low', pct <= 20);
+}
+
+function paintClock() {
+  const now = new Date();
+  timeEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  dateEl.textContent = now.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+// Apps centred on the screen, not on the bar: the left gap matches the width of
+// the tray side exactly, which is what keeps them in the middle of the display.
+function measure() {
+  if (zone !== 'both') {
+    // One island alone in its window: the window is its content and the padding
+    // the row and the zone add around it.
+    const content = zone === 'tray' ? rightEl.offsetWidth : appsEl.offsetWidth;
+    const natural = Math.ceil(content + 26);
+    if (api && Math.abs(natural - window.innerWidth) > 3) api.resize({ zone, width: natural });
+    return;
+  }
+  const side = Math.max(84, Math.round(rightEl.offsetWidth));
+  document.documentElement.style.setProperty('--side-w', `${side}px`);
+  const natural = Math.ceil(appsEl.offsetWidth + side * 2 + 34);
+  if (api && Math.abs(natural - window.innerWidth) > 3) api.resize({ zone, width: natural });
+}
+
 function build() {
-  const signature = `${mode.style}|${mode.shape}|${pinned.map((pin) => pin.id).join(',')}|${items.map((item) => item.hwnd).join(',')}`;
-  if (signature === built) return;
+  const signature = JSON.stringify([
+    mode,
+    apps.map((app) => [app.key, app.name, app.windows.length, !!app.icon]),
+    tray.map((item) => [item.i, item.name, !!item.icon]),
+    battery && battery.percent,
+  ]);
+  if (signature === built) {
+    measure();
+    return;
+  }
   built = signature;
   root.dataset.shape = mode.shape;
   root.dataset.style = mode.style;
-
-  const glass = mode.style === 'glass';
   bar.hidden = mode.style === 'hidden' || mode.shape !== 'attached';
-  row.replaceChildren();
-  for (const pane of root.querySelectorAll('.tb-pane')) pane.remove();
-
-  // Windows numbers the taskbar 1..0 for Win+<key>; show the same numbers so the
-  // shortcut is visible on the bar instead of having to be remembered.
-  let slot = 0;
-  const addKeyBadge = (button) => {
-    slot += 1;
-    if (slot > 10) return;
-    const key = document.createElement('span');
-    key.className = 'tb-key';
-    key.textContent = slot === 10 ? '0' : String(slot);
-    button.appendChild(key);
-  };
-
-  for (const pin of pinned) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'tb-item tb-pin';
-    button.title = pin.name || 'App';
-    button.setAttribute('aria-label', pin.name || 'App');
-    if (pin.icon) {
-      const img = document.createElement('img');
-      img.className = 'tb-icon';
-      img.src = pin.icon;
-      img.alt = '';
-      img.decoding = 'async';
-      button.appendChild(img);
-    } else {
-      const label = document.createElement('span');
-      label.className = 'tb-initials';
-      label.textContent = String(pin.name || '?')
-        .replace(/[^\p{L}\p{N}]+/gu, ' ')
-        .trim()
-        .slice(0, 2)
-        .toUpperCase();
-      button.appendChild(label);
-    }
-    button.addEventListener('click', () => {
-      if (api) api.launch(pin.target);
-    });
-    addKeyBadge(button);
-    row.appendChild(button);
-  }
-
-  if (pinned.length && items.length) {
-    const divider = document.createElement('span');
-    divider.className = 'tb-divider';
-    row.appendChild(divider);
-  }
-
-  for (const item of items) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    // Everything past the divider is a running window: the line under the icon
-    // says so.
-    button.className = 'tb-item tb-running';
-    button.title = item.title || item.name || '';
-    button.setAttribute('aria-label', item.title || item.name || 'App');
-    if (item.icon) {
-      const img = document.createElement('img');
-      img.className = 'tb-icon';
-      img.src = item.icon;
-      img.alt = '';
-      img.decoding = 'async';
-      button.appendChild(img);
-    } else {
-      const label = document.createElement('span');
-      label.className = 'tb-initials';
-      label.textContent = String(item.title || '?')
-        .replace(/\.exe$/i, '')
-        .replace(/[^\p{L}\p{N}]+/gu, ' ')
-        .trim()
-        .slice(0, 2)
-        .toUpperCase();
-      button.appendChild(label);
-    }
-    button.addEventListener('click', () => {
-      if (api) api.focus(item.hwnd);
-    });
-    addKeyBadge(button);
-    row.appendChild(button);
-  }
-  if (mode.style !== 'hidden' && mode.shape === 'islands') placeIslandPanes();
+  buildApps();
+  buildTray();
+  paintBattery();
+  measure();
+  placeIslandPanes();
   rebuildGlass();
 }
 
-// One pane under each icon, copied from the laid-out buttons so the glass
-// tracks the row instead of duplicating its spacing rules. The library needs
-// panes to be direct children of the root, hence the insert into root.
+// One pane per zone (the apps island and the tray island), copied from the
+// laid-out zones so the glass tracks them instead of duplicating their spacing.
+// The library only accepts panes that are direct children of the root.
+// Returns whether the panes had to move: the window resizes to fit its zone, so
+// the glass has to be laid out again after every resize, not just after a build.
 function placeIslandPanes() {
-  const base = root.getBoundingClientRect();
-  for (const button of row.querySelectorAll('.tb-item')) {
-    const box = button.getBoundingClientRect();
+  const wanted = [];
+  if (mode.shape === 'islands' && mode.style !== 'hidden') {
+    const base = root.getBoundingClientRect();
+    for (const zone of [appsEl, rightEl]) {
+      if (!zone.offsetWidth) continue;
+      const box = zone.getBoundingClientRect();
+      wanted.push({
+        left: `${box.left - base.left}px`,
+        top: `${box.top - base.top}px`,
+        width: `${box.width}px`,
+        height: `${box.height}px`,
+      });
+    }
+  }
+  const current = [...root.querySelectorAll('.tb-pane')];
+  const same =
+    current.length === wanted.length &&
+    current.every(
+      (pane, index) =>
+        pane.style.left === wanted[index].left &&
+        pane.style.top === wanted[index].top &&
+        pane.style.width === wanted[index].width &&
+        pane.style.height === wanted[index].height,
+    );
+  if (same) return false;
+  for (const pane of current) pane.remove();
+  for (const box of wanted) {
     const pane = document.createElement('span');
     pane.className = 'tb-pane';
-    pane.style.left = `${box.left - base.left}px`;
-    pane.style.top = `${box.top - base.top}px`;
-    pane.style.width = `${box.width}px`;
-    pane.style.height = `${box.height}px`;
+    Object.assign(pane.style, box);
     root.insertBefore(pane, bar);
   }
+  return true;
 }
 
 async function rebuildGlass() {
@@ -222,10 +392,10 @@ async function rebuildGlass() {
 
 function apply(data) {
   if (!data) return;
-  items = Array.isArray(data.items) ? data.items : [];
-  pinned = Array.isArray(data.pinned) ? data.pinned : [];
-  const style =
-    data.style === 'hidden' ? 'hidden' : data.style === 'black' ? 'black' : 'glass';
+  apps = Array.isArray(data.apps) ? data.apps : [];
+  tray = Array.isArray(data.tray) ? data.tray : [];
+  battery = data.battery || null;
+  const style = data.style === 'hidden' ? 'hidden' : data.style === 'black' ? 'black' : 'glass';
   const shape = data.shape === 'islands' ? 'islands' : 'attached';
   if (style !== mode.style || shape !== mode.shape) built = '';
   mode = { style, shape };
@@ -240,9 +410,20 @@ function apply(data) {
 }
 
 window.addEventListener('resize', () => {
+  measure();
   placeSource();
-  if (instance) instance.markChanged(source);
+  // The window just grew or shrank to its zone, so the island's glass moved with
+  // it. Rebuilding costs a frame or two, hence the short wait for it to settle.
+  if (placeIslandPanes()) {
+    clearTimeout(paneTimer);
+    paneTimer = setTimeout(rebuildGlass, 60);
+  } else if (instance) {
+    instance.markChanged(source);
+  }
 });
+
+paintClock();
+setInterval(paintClock, 1000);
 
 if (api) {
   api.onUpdate(apply);

@@ -9,10 +9,15 @@ param([switch]$Test)
 # extra key suppresses Start, and the Win up clears the modifier so the keyboard
 # keeps working. Chords (Win+E, Win+D, Win+L) are untouched: their Win down was
 # never intercepted.
-Add-Type -TypeDefinition @"
+Add-Type -ReferencedAssemblies @('UIAutomationClient', 'UIAutomationTypes', 'WindowsBase', 'System.Drawing') -TypeDefinition @"
 using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
 using System.Text;
 using System.Runtime.InteropServices;
+using System.Windows.Automation;
 
 public class JarvisWinHook
 {
@@ -66,6 +71,10 @@ public class JarvisWinHook
     private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder name, ref int size);
     [DllImport("kernel32.dll")]
     private static extern bool CloseHandle(IntPtr handle);
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -182,6 +191,20 @@ public class JarvisWinHook
         }
     }
 
+    // Packaged apps (the Store Notepad, for one) refuse the image query, so the
+    // process name stands in: grouping needs an identity, not a full path.
+    private static string BareName(uint pid)
+    {
+        try
+        {
+            return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName + ".exe";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
     // Every real top-level app window, which Chromium's desktopCapturer misses
     // (Terminal and Explorer windows simply do not appear in its list).
     public static void ListWindows()
@@ -207,13 +230,125 @@ public class JarvisWinHook
             if (text.Length == 0) return true;
             uint pid;
             GetWindowThreadProcessId(hWnd, out pid);
+            string exe = ExeFor(pid);
+            if (exe.Length == 0) exe = BareName(pid);
             output.Append(((long)hWnd).ToString()).Append('\t').Append(pid).Append('\t')
-                .Append(text).Append('\t').Append(ExeFor(pid)).Append('\n');
+                .Append(text).Append('\t').Append(exe).Append('\n');
             return true;
         }, IntPtr.Zero);
         output.Append("WE");
         Console.WriteLine(output.ToString());
         Console.Out.Flush();
+    }
+
+    // The notification area (network, volume, privacy and input indicators, the
+    // hidden-icons chevron). The clock and the show-desktop sliver are skipped:
+    // the taskbar draws its own clock, and the sliver is not an icon.
+    private static List<AutomationElement> _tray = new List<AutomationElement>();
+
+    public static void ListTray()
+    {
+        _tray.Clear();
+        StringBuilder output = new StringBuilder();
+        output.Append("TB\n");
+        try
+        {
+            AutomationElement shell = AutomationElement.RootElement.FindFirst(
+                TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ClassNameProperty, "Shell_TrayWnd"));
+            if (shell != null)
+            {
+                AutomationElementCollection items = shell.FindAll(
+                    TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.AutomationIdProperty, "SystemTrayIcon"));
+                foreach (AutomationElement element in items)
+                {
+                    try
+                    {
+                        string cls = element.Current.ClassName ?? "";
+                        System.Windows.Rect box = element.Current.BoundingRectangle;
+                        if (box.Width <= 0 || box.Height <= 0) continue;
+                        string name = (element.Current.Name ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
+                        output.Append(_tray.Count).Append('\t')
+                            .Append((int)box.X).Append('\t').Append((int)box.Y).Append('\t')
+                            .Append((int)box.Width).Append('\t').Append((int)box.Height).Append('\t')
+                            .Append(cls).Append('\t').Append(name).Append('\n');
+                        _tray.Add(element);
+                    }
+                    catch
+                    {
+                        // an icon that vanished mid-walk: skip it
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // no automation: the bar just shows no tray icons
+        }
+        output.Append("TE");
+        Console.WriteLine(output.ToString());
+        Console.Out.Flush();
+    }
+
+    // Open a tray flyout the way a click on it would.
+    public static void ClickTray(int index)
+    {
+        if (index < 0 || index >= _tray.Count) return;
+        AutomationElement element = _tray[index];
+        try
+        {
+            object pattern;
+            if (element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern))
+            {
+                ((InvokePattern)pattern).Invoke();
+                return;
+            }
+        }
+        catch
+        {
+            // fall through to a physical click
+        }
+        try
+        {
+            System.Windows.Rect box = element.Current.BoundingRectangle;
+            if (box.Width <= 0) return;
+            SetCursorPos((int)(box.X + box.Width / 2), (int)(box.Y + box.Height / 2));
+            mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+            mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+        }
+        catch
+        {
+            // nothing else to try
+        }
+    }
+
+    // A strip of the screen as PNG, for the tray icons. GDI reads the desktop
+    // surface straight away, where the Chromium capturer waits for a composited
+    // frame that a still screen never delivers.
+    public static void Shot(int x, int y, int w, int h)
+    {
+        try
+        {
+            using (Bitmap bmp = new Bitmap(w, h))
+            {
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    g.CopyFromScreen(x, y, 0, 0, new Size(w, h), CopyPixelOperation.SourceCopy);
+                }
+                using (MemoryStream stream = new MemoryStream())
+                {
+                    bmp.Save(stream, ImageFormat.Png);
+                    Console.WriteLine("IMG\t" + w + "\t" + h + "\t" + Convert.ToBase64String(stream.ToArray()));
+                    Console.Out.Flush();
+                }
+            }
+        }
+        catch
+        {
+            Console.WriteLine("IMG\t0\t0\t");
+            Console.Out.Flush();
+        }
     }
 
     // A taskbar click: bring it up, or put it away when it is already in front.
@@ -251,6 +386,27 @@ public class JarvisWinHook
                 else if (text == "windows")
                 {
                     ListWindows();
+                }
+                else if (text == "tray")
+                {
+                    ListTray();
+                }
+                else if (text.StartsWith("trayclick "))
+                {
+                    int index;
+                    if (int.TryParse(text.Substring(10), out index)) ClickTray(index);
+                }
+                else if (text.StartsWith("shot "))
+                {
+                    string[] parts = text.Split(' ');
+                    int x, y, w, h;
+                    if (parts.Length == 5 &&
+                        int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y) &&
+                        int.TryParse(parts[3], out w) && int.TryParse(parts[4], out h) &&
+                        w > 0 && h > 0 && w <= 4000 && h <= 400)
+                    {
+                        Shot(x, y, w, h);
+                    }
                 }
                 else if (text.StartsWith("activate "))
                 {

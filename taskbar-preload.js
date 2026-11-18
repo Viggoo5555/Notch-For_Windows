@@ -6,6 +6,15 @@ contextBridge.exposeInMainWorld('taskbarAPI', {
   ready: () => ipcRenderer.send('taskbar:ready'),
   focus: (pid) => ipcRenderer.send('taskbar:focus', pid),
   launch: (target) => ipcRenderer.send('taskbar:launch', target),
+  group: (key) => ipcRenderer.send('taskbar:group', key),
+  trayClick: (index) => ipcRenderer.send('taskbar:tray', index),
+  resize: (payload) => ipcRenderer.send('taskbar:size', payload),
+  hoverGroup: (payload) => ipcRenderer.send('taskbar:hover', payload),
+  hoverEnd: () => ipcRenderer.send('taskbar:hover-end'),
   onUpdate: (callback) => ipcRenderer.on('taskbar:update', (_event, data) => callback(data)),
   onBackdrop: (callback) => ipcRenderer.on('taskbar:backdrop', (_event, data) => callback(data)),
+  // The hover list runs in its own small window above the bar.
+  onRows: (callback) => ipcRenderer.on('flyout:rows', (_event, data) => callback(data)),
+  flyoutReady: () => ipcRenderer.send('flyout:ready'),
+  pick: (hwnd) => ipcRenderer.send('flyout:pick', hwnd),
 });

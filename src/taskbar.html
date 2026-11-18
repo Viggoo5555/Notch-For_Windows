@@ -12,10 +12,21 @@
     <link rel="stylesheet" href="taskbar.css" />
   </head>
   <body>
-    <div class="tb" id="tbRoot" data-style="glass" data-shape="islands">
+    <div class="tb" id="tbRoot" data-style="glass" data-shape="attached">
       <img class="tb-source" id="tbSource" alt="" decoding="async" />
       <div class="tb-bar" id="tbBar" hidden></div>
-      <div class="tb-row" id="tbRow"></div>
+      <div class="tb-row" id="tbRow">
+        <div class="tb-side tb-left" id="tbLeft"></div>
+        <div class="tb-zone tb-island tb-apps" id="tbApps"></div>
+        <div class="tb-zone tb-island tb-right" id="tbRight">
+          <div class="tb-tray" id="tbTray"></div>
+          <div class="tb-battery" id="tbBattery" hidden></div>
+          <button class="tb-clock" id="tbClock" type="button">
+            <span class="tb-time" id="tbTime">--:--</span>
+            <span class="tb-date" id="tbDate"></span>
+          </button>
+        </div>
+      </div>
     </div>
     <script type="module" src="taskbar.js"></script>
   </body>
