@@ -12,7 +12,7 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.3.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.3/Notch-Setup-1.2.3.exe)**
+**[Notch-Setup-1.2.4.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.4/Notch-Setup-1.2.4.exe)**
 — the installer, about 340 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -26,12 +26,12 @@ It installs for your user only, so it never asks for an administrator password.
 Remove it from *Settings → Apps → Notch*; your settings in
 `%APPDATA%\notch\notch.json` are left in place.
 
-No installer wanted? [Notch-1.2.3.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.3/Notch-1.2.3.exe)
+No installer wanted? [Notch-1.2.4.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.4/Notch-1.2.4.exe)
 is the same app as a single portable file (~300 MB) — double-click and it runs.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
-### Upgrading from 1.2.2
+### Upgrading from 1.2.3
 
 Run the new installer over the old one; settings, pinned apps, the game library and
 the overlay's corner are kept. Nothing else is needed — the first start asks nothing.
@@ -43,9 +43,11 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   icon. The glass is a real liquid-glass treatment: a displacement rim, specular
   edge, chromatic dispersion and grain, sampled from your wallpaper (or the live
   desktop) behind it.
-- **Launcher** — tap the Windows key and a search sheet drops down over the desktop.
-  It indexes your Start-menu apps, filters as you type, and opens with ↑ ↓ ↵ or a
-  click. Pinned apps sit in their own row.
+- **Launcher** — tap the Windows key and a search sheet drops down over the desktop:
+  240 ms of eased fall with a couple of pixels of settle at the end, opacity and
+  transform only, so it is taking keys while it is still moving. It indexes your
+  Start-menu apps, filters as you type, and opens with ↑ ↓ ↵ or a click. Pinned apps
+  sit in their own row.
 - **Taskbar** — two glass islands: the apps in the middle of the screen, the tray,
   battery and clock against the right edge. One button per app with its real icon —
   read from the executable itself, so apps Chromium cannot name still show their
@@ -187,8 +189,8 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.3.exe`, the installer said above,
-and `Notch-1.2.3.exe`, the same app as one portable file. Neither needs Node.js on
+writes two files into `dist/`: `Notch-Setup-1.2.4.exe`, the installer said above,
+and `Notch-1.2.4.exe`, the same app as one portable file. Neither needs Node.js on
 the target machine. `npm run dist:installer` builds only the installer.
 
 The package carries Electron, the Whisper loader, `kokoro-js` and the Piper voice,
@@ -314,6 +316,14 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.4** — the Start sheet moves. Press the Windows key and the sheet now falls out
+from under the notch instead of blinking into place: 26 px of travel with a slight
+scale, a small overshoot and a settle, 240 ms of eased motion with the contents
+rising a beat behind it. Only transform and opacity are animated, so the movement is
+composited and the sheet is taking keys while it is still dropping; the reduced-motion
+setting turns it off, and no fill mode is used, so if the motion is ever skipped the
+sheet simply stands at rest rather than being left invisible at its first frame.
 
 **v1.2.3** — the Start sheet types the moment it appears. Pressing the Windows key
 and typing straight away could land letters in the previous window, or leave them

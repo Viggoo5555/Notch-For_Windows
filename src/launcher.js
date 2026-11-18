@@ -320,6 +320,11 @@ api.onShow(() => {
   els.query.focus();
   // The window can take focus a beat after the show message.
   setTimeout(() => els.query.focus(), 40);
+  // Restart the drop-in from the top even when two presses arrive back to back —
+  // the class has to leave and be re-applied in a frame that was laid out.
+  document.body.classList.remove('in');
+  void document.body.offsetWidth;
+  document.body.classList.add('in');
   placeSource();
   if (state.glass) {
     state.glass.markChanged(els.source);
