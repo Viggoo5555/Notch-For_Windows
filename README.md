@@ -12,7 +12,7 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.2.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.2/Notch-Setup-1.2.2.exe)**
+**[Notch-Setup-1.2.3.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.3/Notch-Setup-1.2.3.exe)**
 — the installer, about 340 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -26,12 +26,12 @@ It installs for your user only, so it never asks for an administrator password.
 Remove it from *Settings → Apps → Notch*; your settings in
 `%APPDATA%\notch\notch.json` are left in place.
 
-No installer wanted? [Notch-1.2.2.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.2/Notch-1.2.2.exe)
+No installer wanted? [Notch-1.2.3.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.3/Notch-1.2.3.exe)
 is the same app as a single portable file (~300 MB) — double-click and it runs.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
-### Upgrading from 1.2.1
+### Upgrading from 1.2.2
 
 Run the new installer over the old one; settings, pinned apps, the game library and
 the overlay's corner are kept. Nothing else is needed — the first start asks nothing.
@@ -187,8 +187,8 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.2.exe`, the installer said above,
-and `Notch-1.2.2.exe`, the same app as one portable file. Neither needs Node.js on
+writes two files into `dist/`: `Notch-Setup-1.2.3.exe`, the installer said above,
+and `Notch-1.2.3.exe`, the same app as one portable file. Neither needs Node.js on
 the target machine. `npm run dist:installer` builds only the installer.
 
 The package carries Electron, the Whisper loader, `kokoro-js` and the Piper voice,
@@ -309,6 +309,19 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.3** — the Start sheet types the moment it appears. Pressing the Windows key
+and typing straight away could land letters in the previous window, or leave them
+sitting in a queue for a third of a second, because the show path still did work
+while it was coming up: it encoded a full-screen JPEG for the glass on every press
+(a measured 78–113 ms of blocking work on this machine) and asked the keyboard
+helper for the focus before trying the cheap in-process path. The glass image is now
+encoded once and reused, prepared in the background after each show, the focus is
+taken in-process first, the helper is only asked if the sheet is still not taking
+keys a moment later, and the hidden sheet's renderer is no longer throttled. Ten
+presses against the same ten before: typing-ready in 31–122 ms (median ~95 ms)
+instead of 64–472 ms (median ~141 ms), with no press left waiting past 130 ms in the
+common case.
 
 **v1.2.2** — a performance overlay. *Menu → Performance overlay* puts four numbers on
 the screen with nothing behind them — frames per second, CPU, GPU and RAM — always

@@ -2748,7 +2748,9 @@ function createLauncher() {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: false,
-      backgroundThrottling: true,
+      // The sheet waits hidden between presses; a throttled renderer answers the
+      // first keystroke late, so it is kept awake.
+      backgroundThrottling: false,
     },
   });
   launcherWin.setMenu(null);
@@ -2776,8 +2778,12 @@ function sendLauncherState() {
   const window = launcherWin;
   if (!window || window.isDestroyed() || !window.isVisible()) return;
   window.webContents.send('launcher:show');
-  const backdrop = taskbarBackdrop();
-  if (backdrop) window.webContents.send('launcher:backdrop', backdrop);
+  const display = screen.getPrimaryDisplay();
+  const held = launcherBackdrop ? launcherBackdrop.payload : null;
+  const payload =
+    held && held.width === display.bounds.width && held.height === display.bounds.height ? held : null;
+  if (payload) window.webContents.send('launcher:backdrop', payload);
+  warmLauncherBackdrop();
 }
 
 // Windows will not give us the foreground just because we ask: the key that
@@ -2810,9 +2816,37 @@ function showLauncher() {
   window.setBounds(launcherBounds());
   window.show();
   window.moveTop();
+  // The sheet has to be taking keys the instant it is up, so the show path does no
+  // work that could hold the keyboard up: the glass image is the one encoded after
+  // the last show, and the focus is taken here, in-process.
+  window.focus();
   window.webContents.focus();
-  stealLauncherFocus(window);
+  app.focus({ steal: true });
   sendLauncherState();
+  // Windows hands the foreground back a beat after a window appears, so if the sheet
+  // is still not focused a moment later, the keyboard helper is asked to hand it
+  // over — it can attach to the thread that owns the foreground — and after that the
+  // focus is taken again in-process.
+  const started = Date.now();
+  let nudged = false;
+  const poll = setInterval(() => {
+    if (!window || window.isDestroyed() || window.webContents.isFocused()) {
+      clearInterval(poll);
+      return;
+    }
+    const waited = Date.now() - started;
+    if (waited > 800) {
+      clearInterval(poll);
+      return;
+    }
+    if (waited > 220) {
+      window.focus();
+      window.webContents.focus();
+    } else if (waited > 60 && !nudged) {
+      nudged = true;
+      stealLauncherFocus(window);
+    }
+  }, 20);
 }
 
 ipcMain.on('launcher:ready', sendLauncherState);
@@ -3123,6 +3157,7 @@ ipcMain.handle('notch:set-settings', (_event, patch) => {
     // hand the renderer the wallpaper slice in place of the desktop.
     stopDesktopSampling();
     desktopFrame = null;
+    launcherBackdrop = null;
     const url = panelBackdrop();
     if (url && win && !win.isDestroyed()) win.webContents.send('notch:backdrop', url);
     sendWidgetBackdrop();
@@ -3163,6 +3198,7 @@ ipcMain.handle('notch:pick-wallpaper', async () => {
   wallpaperSourceCache = undefined;
   wallpaperCache = undefined;
   wallpaperFittedCache.clear();
+  launcherBackdrop = null;
 
   stopDesktopSampling();
   desktopFrame = null;
@@ -3833,26 +3869,52 @@ function taskbarSignature(items) {
   return items.map((item) => `${item.hwnd}:${item.title}`).join(',');
 }
 
-function taskbarBackdrop() {
+// Encoding a full-screen frame for the sheet's glass blocks this thread for a tenth
+// of a second or more, and Chromium hands the keyboard over from here too — so a
+// show never waits for it. Each frame is encoded once, kept, and a fresh one is
+// prepared right after the sheet is up, ready for the next press.
+const backdropEncodings = new WeakMap();
+let launcherBackdrop = null;
+let backdropWarming = false;
+
+function backdropImage() {
   const display = screen.getPrimaryDisplay();
-  const fitted = wallpaperFitted(display);
-  if (usesLiveBackdrop() && desktopFrame) {
-    return {
-      url: `data:image/jpeg;base64,${desktopFrame.image.toJPEG(72).toString('base64')}`,
-      width: display.bounds.width,
-      height: display.bounds.height,
-      x: display.bounds.x,
-      y: display.bounds.y,
-    };
-  }
-  if (!fitted) return null;
-  return {
-    url: `data:image/jpeg;base64,${fitted.toJPEG(72).toString('base64')}`,
+  if (usesLiveBackdrop() && desktopFrame) return desktopFrame.image;
+  return wallpaperFitted(display);
+}
+
+function encodeBackdrop(image) {
+  const hit = backdropEncodings.get(image);
+  if (hit) return hit;
+  const display = screen.getPrimaryDisplay();
+  const payload = {
+    url: `data:image/jpeg;base64,${image.toJPEG(72).toString('base64')}`,
     width: display.bounds.width,
     height: display.bounds.height,
     x: display.bounds.x,
     y: display.bounds.y,
   };
+  backdropEncodings.set(image, payload);
+  return payload;
+}
+
+function taskbarBackdrop() {
+  const image = backdropImage();
+  return image ? encodeBackdrop(image) : null;
+}
+
+function warmLauncherBackdrop() {
+  if (backdropWarming) return;
+  backdropWarming = true;
+  setImmediate(() => {
+    try {
+      const image = backdropImage();
+      if (image) launcherBackdrop = { image, payload: encodeBackdrop(image) };
+    } catch {
+      /* the frame can be mid-swap; the one from last time still fits */
+    }
+    backdropWarming = false;
+  });
 }
 
 // The islands refract the desktop right behind them. A strip per window costs a
@@ -5103,8 +5165,10 @@ if (!app.requestSingleInstanceLock()) {
     applyLogin();
     refreshTaskbar();
     syncWinHook();
-    // Warm the launcher and its app index so the first Windows key is instant.
+    // Warm the launcher, its app index and its glass frame so the first Windows
+    // key is instant.
     createLauncher();
+    setTimeout(warmLauncherBackdrop, 2500);
     buildAppIndex().catch(() => {});
     // A fullscreen game takes the whole machine, including this shell.
     watchForGames();
