@@ -216,6 +216,19 @@ public class JarvisWinHook
         Console.Out.Flush();
     }
 
+    // A taskbar click: bring it up, or put it away when it is already in front.
+    private static void ToggleWindow(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero || !IsWindow(hWnd)) return;
+        if (hWnd == GetForegroundWindow())
+        {
+            ShowWindow(hWnd, 6); // SW_MINIMIZE
+            return;
+        }
+        ShowWindow(hWnd, 9); // SW_RESTORE
+        FocusWindow(hWnd);
+    }
+
     // The app talks to us on stdin: "focus <hwnd>".
     private static void ReadCommands()
     {
@@ -229,6 +242,11 @@ public class JarvisWinHook
                 {
                     long value;
                     if (long.TryParse(text.Substring(6), out value)) FocusWindow((IntPtr)value);
+                }
+                else if (text.StartsWith("toggle "))
+                {
+                    long value;
+                    if (long.TryParse(text.Substring(7), out value)) ToggleWindow((IntPtr)value);
                 }
                 else if (text == "windows")
                 {

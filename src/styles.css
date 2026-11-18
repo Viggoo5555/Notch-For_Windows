@@ -2047,3 +2047,110 @@ html.demo .glass-backdrop {
     filter: none;
   }
 }
+
+/* ------------------------------------------------------------- solid black look */
+
+/* The surface option that mirrors the Settings sheet: one flat smoked panel and
+   no glass at all, so the backdrop shader and the desktop sampling stop too. */
+.notch.solid {
+  background: linear-gradient(180deg, #12141a, #08090e 62%);
+}
+
+.notch.solid .glass,
+.notch.solid .glass-root {
+  display: none;
+}
+
+.notch.solid .tile {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+.notch.solid .tile:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.notch.solid .taskbar-note {
+  color: var(--faint);
+}
+
+/* ------------------------------------------------------- process breakdown rows */
+
+.detail-proc-head {
+  margin-top: 10px;
+  font-weight: 560;
+  color: var(--ink-2);
+}
+
+.detail-procs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.detail-proc-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.detail-proc-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.detail-proc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.detail-proc {
+  display: grid;
+  grid-template-columns: minmax(0, 76px) minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+.detail-proc-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.detail-proc-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.detail-proc-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.detail-proc-val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+}
+
+/* The System view can hold two process lists, so let the body scroll instead of
+   spilling past the detail card. */
+.detail-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}

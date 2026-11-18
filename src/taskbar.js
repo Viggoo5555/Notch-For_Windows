@@ -87,7 +87,7 @@ function build() {
   root.dataset.style = mode.style;
 
   const glass = mode.style === 'glass';
-  bar.hidden = !(glass && mode.shape === 'attached');
+  bar.hidden = mode.style === 'hidden' || mode.shape !== 'attached';
   row.replaceChildren();
   for (const pane of root.querySelectorAll('.tb-pane')) pane.remove();
 
@@ -142,7 +142,9 @@ function build() {
   for (const item of items) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'tb-item';
+    // Everything past the divider is a running window: the line under the icon
+    // says so.
+    button.className = 'tb-item tb-running';
     button.title = item.title || item.name || '';
     button.setAttribute('aria-label', item.title || item.name || 'App');
     if (item.icon) {
@@ -169,7 +171,7 @@ function build() {
     addKeyBadge(button);
     row.appendChild(button);
   }
-  if (glass && mode.shape === 'islands') placeIslandPanes();
+  if (mode.style !== 'hidden' && mode.shape === 'islands') placeIslandPanes();
   rebuildGlass();
 }
 
@@ -222,7 +224,8 @@ function apply(data) {
   if (!data) return;
   items = Array.isArray(data.items) ? data.items : [];
   pinned = Array.isArray(data.pinned) ? data.pinned : [];
-  const style = data.style === 'hidden' ? 'hidden' : 'glass';
+  const style =
+    data.style === 'hidden' ? 'hidden' : data.style === 'black' ? 'black' : 'glass';
   const shape = data.shape === 'islands' ? 'islands' : 'attached';
   if (style !== mode.style || shape !== mode.shape) built = '';
   mode = { style, shape };

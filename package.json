@@ -6,12 +6,50 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "node dev-server.js"
+    "dev": "node dev-server.js",
+    "dist": "electron-builder --win portable"
   },
   "devDependencies": {
-    "electron": "45.3.3"
+    "electron": "45.3.3",
+    "electron-builder": "^26.18.0"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.7.3"
+  },
+  "build": {
+    "appId": "com.notch.windows",
+    "productName": "Notch",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "games.js",
+      "*-preload.js",
+      "winhook.ps1",
+      "src/**/*",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "tts",
+        "to": "tts"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "Notch-${version}.exe",
+      "requestExecutionLevel": "user"
+    }
   }
 }

@@ -46,7 +46,17 @@ async function pickDevice(requested) {
     const info = adapter.info || {};
     const vendor = String(info.vendor || '').toLowerCase();
     const architecture = String(info.architecture || '').toLowerCase();
-    if (vendor.includes('microsoft') || architecture.includes('warp')) return 'wasm';
+    // Software adapters and integrated Intel GPUs either crawl or never answer
+    // at all; plain WASM is slower on paper but always finishes.
+    if (
+      vendor.includes('microsoft') ||
+      vendor.includes('intel') ||
+      architecture.includes('warp') ||
+      architecture.includes('gen-9') ||
+      architecture.includes('software')
+    ) {
+      return 'wasm';
+    }
     return 'webgpu';
   } catch {
     return 'wasm';
@@ -75,12 +85,16 @@ async function load(model, fallback, requested) {
     }
   };
 
+  const device = await pickDevice(requested);
+  // Quantised weights are a CPU optimisation; a GPU wants full precision.
   const options = {
-    dtype: { encoder_model: 'q8', decoder_model_merged: 'q8' },
+    dtype:
+      device === 'webgpu'
+        ? { encoder_model: 'fp32', decoder_model_merged: 'fp32' }
+        : { encoder_model: 'q8', decoder_model_merged: 'q8' },
     progress_callback: progress,
   };
 
-  const device = await pickDevice(requested);
   if (device === 'webgpu') {
     try {
       asr = await withTimeout(

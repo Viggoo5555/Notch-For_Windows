@@ -88,6 +88,28 @@ body {
   transform: scale(0.94);
 }
 
+/* Running windows carry a line under the icon, as on the Windows taskbar.
+   Hovering widens it instead of adding a second highlight. */
+.tb-item.tb-running::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 15px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.8);
+  transform: translateX(-50%);
+  transition:
+    width 0.16s ease,
+    background 0.16s ease;
+}
+
+.tb-item.tb-running:hover::after {
+  width: 19px;
+  background: #ffffff;
+}
+
 /* Islands: one pane per icon, inserted before the row. The glass library only
    takes panes that are direct children of the root, so they cannot live inside
    the buttons. */
@@ -96,6 +118,21 @@ body {
   border-radius: 12px;
   overflow: hidden;
   pointer-events: none;
+}
+
+/* The bar wears the notch's surface: black stays black. */
+.tb[data-style="black"] .tb-pane,
+.tb[data-style="black"] .tb-bar {
+  background: linear-gradient(180deg, #12141a, #08090e 62%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+
+/* Glass with no lens to draw it yet (no backdrop sampled): still needs a
+   surface, or the icons float in nothing. */
+.tb[data-style="glass"]:not(.gl) .tb-pane,
+.tb[data-style="glass"]:not(.gl) .tb-bar {
+  background: rgba(10, 12, 18, 0.62);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 /* A hairline between what is pinned and what is open. */

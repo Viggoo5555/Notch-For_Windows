@@ -45,6 +45,7 @@ const state = {
   },
   filter: '',
   clips: [],
+  processes: null,
   login: false,
   detaching: false,
   stats: {
@@ -412,6 +413,17 @@ function renderFocus() {
   dot.classList.toggle('idle', !focus.running);
 
   renderDetailFocusStats(remaining, progress, started);
+
+  // A detached Focus card mirrors the same timer; the panel stays the owner.
+  if (api.focusState) {
+    api.focusState({
+      minutes: focus.minutes,
+      total: focus.total,
+      remaining: focus.running ? remaining : focus.remaining,
+      endsAt: focus.endsAt,
+      running: focus.running,
+    });
+  }
 }
 
 function renderDetailFocusStats(remaining, progress, started) {
@@ -519,7 +531,16 @@ const SETTINGS_SCHEMA = [
     type: 'swatch',
     options: ['#7c9cff', '#bf8cff', '#6fe3b0', '#ff8fb8', '#ffb86b'],
   },
-  { key: 'material', label: 'Glass', type: 'segment', options: [['liquid', 'Liquid'], ['frost', 'Frosted']] },
+  {
+    key: 'material',
+    label: 'Surface',
+    type: 'segment',
+    options: [
+      ['liquid', 'Liquid'],
+      ['frost', 'Frosted'],
+      ['black', 'Black'],
+    ],
+  },
   { key: 'tint', label: 'Tint', type: 'range', min: 0, max: 100, step: 5, suffix: '%' },
   { key: 'blur', label: 'Blur', type: 'range', min: 0, max: 100, step: 5, suffix: '%' },
   { key: 'grain', label: 'Grain', type: 'toggle' },
@@ -604,8 +625,14 @@ function applySettings() {
   requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
   const notch = $('#notch');
   notch.classList.toggle('no-glow', !s.glow);
-  notch.classList.toggle('frost', s.material !== 'liquid');
-  if (window.notchGlass) window.notchGlass.apply({ tint: s.tint, blur: s.blur });
+  notch.classList.toggle('frost', s.material === 'frost');
+  notch.classList.toggle('solid', s.material === 'black');
+  if (window.notchGlass) {
+    window.notchGlass.apply({ tint: s.tint, blur: s.blur });
+    // Black draws no glass at all, so park the shader; switching back resumes it.
+    if (s.material === 'black') window.notchGlass.setPaused(true);
+    else window.notchGlass.refresh();
+  }
 }
 
 // Rapid edits (drag a slider, then tap a toggle) are coalesced into one patch;
@@ -754,9 +781,14 @@ function renderSettings() {
 
 // Drag the System tile out of the panel and it becomes its own always-on-top
 // window; a plain press only hints that it can be pulled out.
-function bindSystemDetach() {
-  const tile = document.querySelector('.tile-system');
-  if (!tile) return;
+function bindTileDetach() {
+  for (const tile of document.querySelectorAll('.tile')) {
+    const kind = tile.dataset.detail;
+    if (kind) bindDetach(tile, kind);
+  }
+}
+
+function bindDetach(tile, kind) {
   let drag = null;
 
   const end = (event) => {
@@ -785,7 +817,7 @@ function bindSystemDetach() {
       drag.started = true;
       state.detaching = true;
       tile.classList.add('detaching');
-      if (api.detachSystem) api.detachSystem({ x: event.screenX, y: event.screenY });
+      if (api.detachTile) api.detachTile({ tile: kind, x: event.screenX, y: event.screenY });
     }
   });
 
@@ -812,11 +844,13 @@ function openDetail(kind) {
   $('#detail').hidden = false;
   $('#detailTitle').textContent = DETAIL_TITLES[kind];
   renderDetail();
+  if (api.detail) api.detail(kind);
 }
 
 function closeDetail() {
   if (!state.detail) return;
   state.detail = null;
+  if (api.detail) api.detail(null);
   $('#detail').hidden = true;
   $('#grid').hidden = false;
   $('#detailBody').replaceChildren();
@@ -973,8 +1007,65 @@ function renderDetailSystemView(body) {
   hint.className = 'detail-sub';
   hint.textContent = 'Drag the System tile out of the notch to keep it on screen.';
   wrap.appendChild(hint);
+
+  const procHint = document.createElement('div');
+  procHint.className = 'detail-sub detail-proc-head';
+  procHint.textContent = 'What is using it';
+  wrap.appendChild(procHint);
+
+  const procWrap = document.createElement('div');
+  procWrap.className = 'detail-procs';
+  for (const [key, label] of [
+    ['cpu', 'Top CPU'],
+    ['ram', 'Top memory'],
+  ]) {
+    const block = document.createElement('div');
+    block.className = 'detail-proc-block';
+    const head = document.createElement('div');
+    head.className = 'detail-proc-label';
+    head.textContent = label;
+    const list = document.createElement('div');
+    list.className = 'detail-proc-list';
+    list.id = `proc-${key}`;
+    block.append(head, list);
+    procWrap.appendChild(block);
+  }
+  wrap.appendChild(procWrap);
   body.appendChild(wrap);
   renderStats();
+  renderProcesses();
+}
+
+// Process rows arrive from the main process while the System view is open.
+function renderProcesses(data) {
+  if (data) state.processes = data;
+  for (const key of ['cpu', 'ram']) {
+    const list = document.getElementById(`proc-${key}`);
+    if (!list) continue;
+    list.replaceChildren();
+    for (const row of (state.processes && state.processes[key]) || []) {
+      const item = document.createElement('div');
+      item.className = 'detail-proc';
+
+      const name = document.createElement('span');
+      name.className = 'detail-proc-name';
+      name.textContent = row.name;
+      name.title = row.name;
+
+      const track = document.createElement('span');
+      track.className = 'detail-proc-bar';
+      const fill = document.createElement('i');
+      fill.style.width = `${Math.max(2, Math.min(100, (row.share || 0) * 100))}%`;
+      track.appendChild(fill);
+
+      const value = document.createElement('span');
+      value.className = 'detail-proc-val';
+      value.textContent = row.label;
+
+      item.append(name, track, value);
+      list.appendChild(item);
+    }
+  }
 }
 
 function renderDetailClips(body) {
@@ -1093,7 +1184,7 @@ function bindEvents() {
     if (!event.target.closest('.menu') && !event.target.closest('#menuBtn')) hideMenu();
   });
 
-  bindSystemDetach();
+  bindTileDetach();
 
   // Any tile opens into a single-widget view; its little chevron does the same
   // explicitly. Controls inside a tile keep their own behaviour.
@@ -1175,6 +1266,18 @@ function bindEvents() {
     state.stats = stats;
     if (state.open) renderStats();
   });
+  api.onProcesses((data) => {
+    state.processes = data;
+    if (state.detail === 'system') renderProcesses();
+  });
+  if (api.onFocusAction) {
+    api.onFocusAction((action) => {
+      const text = String(action || '');
+      if (text === 'reset') resetFocus();
+      else if (text.startsWith('minutes:')) setFocusMinutes(Number(text.split(':')[1]) || 25);
+      else toggleFocus();
+    });
+  }
   api.onClips((clips) => {
     state.clips = clips;
     if (state.open) renderClips();

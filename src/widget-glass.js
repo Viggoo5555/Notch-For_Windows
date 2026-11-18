@@ -30,6 +30,8 @@ let instance = null;
 let starting = false;
 let display = null;
 let position = { x: 0, y: 0 };
+// 'black' parks the lens and lets the CSS surface show, exactly like the panel.
+let surface = 'glass';
 
 function place() {
   if (!display) {
@@ -43,8 +45,19 @@ function place() {
   source.style.transform = `translate3d(${display.x - position.x}px, ${display.y - position.y}px, 0)`;
 }
 
+function stop() {
+  if (!instance) return;
+  try {
+    instance.setPaused(true);
+  } catch {
+    /* already stopped */
+  }
+  root.classList.remove('gl');
+}
+
 async function start() {
   if (instance || starting) return;
+  if (surface === 'black') return;
   if (!source.getAttribute('src')) return;
   starting = true;
   try {
@@ -65,6 +78,28 @@ async function start() {
 }
 
 window.widgetGlass = {
+  surface(name) {
+    const next = name === 'black' ? 'black' : 'glass';
+    if (next === surface) return;
+    surface = next;
+    document.body.dataset.surface = surface;
+    if (surface === 'black') {
+      stop();
+      return;
+    }
+    if (instance) {
+      try {
+        instance.setPaused(false);
+      } catch {
+        /* the lens may need reseeding below */
+      }
+      root.classList.add('gl');
+      place();
+      instance.markChanged(source);
+      return;
+    }
+    start();
+  },
   backdrop(data) {
     if (!data || !data.url) return;
     display =

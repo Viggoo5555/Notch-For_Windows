@@ -58,15 +58,20 @@
           <div class="setup-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M4 8.5A2.5 2.5 0 016.5 6h11A2.5 2.5 0 0120 8.5v7a2.5 2.5 0 01-2.5 2.5h-11A2.5 2.5 0 014 15.5v-7z" /><path d="M8 12h8" /></svg>
           </div>
-          <h2 id="setupTitle">Ollama is not running</h2>
+          <h2 id="setupTitle">Set up Jarvis</h2>
           <p id="setupText">
-            Jarvis runs the model itself. Install Ollama once and it stays local — no account, nothing sent anywhere.
+            One click installs Ollama and fetches the model that fits this PC — no account, nothing sent anywhere.
           </p>
+          <p class="setup-hw" id="setupHw"></p>
           <div class="setup-actions">
-            <button class="btn primary" id="setupInstall" type="button">Get Ollama</button>
+            <button class="btn primary" id="setupInstall" type="button">Install Ollama</button>
             <button class="btn ghost" id="setupRetry" type="button">I installed it — check again</button>
           </div>
-          <p class="setup-foot" id="setupFoot">Or start it yourself with <code>ollama serve</code>.</p>
+          <div class="setup-progress" id="setupProgress" hidden>
+            <div class="setup-track"><span id="setupBar"></span></div>
+            <p class="setup-status" id="setupStatus">Starting…</p>
+          </div>
+          <p class="setup-foot" id="setupFoot">Uses winget · no administrator prompt.</p>
         </div>
       </div>
 
@@ -108,7 +113,7 @@
 
           <section class="group">
             <h3>Download a model</h3>
-            <p class="muted">4–5 GB is the sweet spot for 8 GB of VRAM. Bigger models spill onto the CPU.</p>
+            <p class="muted" id="hwLine">Checking what this machine can run…</p>
             <div class="presets" id="presets"></div>
             <form class="pull" id="pullForm">
               <input id="pullName" type="text" placeholder="Or pull any Ollama tag, e.g. gemma3:4b" spellcheck="false" />
@@ -130,6 +135,7 @@
               <span>Voice</span>
               <select id="voiceSelect"></select>
             </label>
+            <p class="muted">Jarvis is a small neural voice that runs on this machine — calm, British, and nothing sent to a server. The Windows voices are the plain fallback.</p>
             <label class="field-row">
               <span>Speed</span>
               <input type="range" id="rateRange" min="-6" max="6" step="1" />

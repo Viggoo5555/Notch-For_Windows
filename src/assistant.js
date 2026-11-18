@@ -21,6 +21,10 @@ const els = {
   setupInstall: $('setupInstall'),
   setupRetry: $('setupRetry'),
   setupFoot: $('setupFoot'),
+  setupHw: $('setupHw'),
+  setupProgress: $('setupProgress'),
+  setupBar: $('setupBar'),
+  setupStatus: $('setupStatus'),
   input: $('input'),
   sendBtn: $('sendBtn'),
   micBtn: $('micBtn'),
@@ -44,12 +48,15 @@ const els = {
   testVoice: $('testVoice'),
   wakeToggle: $('wakeToggle'),
   sttLine: $('sttLine'),
+  hwLine: $('hwLine'),
   toast: $('toast'),
   suggestions: $('suggestions'),
 };
 
 const state = {
-  settings: { model: '', voice: '', rate: 0, speak: true, wake: false },
+  settings: { model: '', voice: '', engine: 'neural', neuralVoice: '', rate: 0, speak: true, wake: false },
+  neural: { available: false, voices: [] },
+  sttPlan: null,
   status: { running: false, version: '', models: [] },
   presets: [],
   voices: [],
@@ -61,13 +68,18 @@ const state = {
 };
 
 const SYSTEM_PROMPT = [
-  'You are Jarvis, a calm, capable assistant living in a small glass window on a Windows desktop.',
-  'Be direct and warm. Keep answers short unless asked for depth — two or three sentences usually.',
-  'Use plain language and fenced code blocks for code. Never invent facts; say when you are unsure.',
+  'You are Jarvis, a calm British assistant living in a small window on a Windows desktop.',
+  'Speak the way a good butler would: short, dry, precise, never flustered. Use "sir" now and then, not in every sentence.',
+  'Keep answers to two or three sentences unless asked for depth. Plain language; fenced code blocks only when code is wanted.',
+  'Never invent facts; say plainly when you are unsure.',
 ].join(' ');
 
-const STT_MODELLING = 'onnx-community/whisper-base.en';
-const STT_FALLBACK = 'Xenova/whisper-tiny.en';
+// Moonshine is built for short clips on a CPU: the same sentence takes ~2 s here,
+// where whisper-tiny needed 25 s without WASM threads. Main sends a better plan
+// (whisper on WebGPU) when the machine has a real GPU.
+const STT_MODELLING = 'onnx-community/moonshine-tiny-ONNX';
+const STT_FALLBACK = '';
+const STT_TIMEOUT = 20000;
 
 // ------------------------------------------------------------------ utilities
 
@@ -156,8 +168,183 @@ function setBusy(busy) {
 function setConnected(connected, version = '') {
   document.body.dataset.connected = connected ? 'true' : 'false';
   els.statusText.textContent = connected ? (version ? `Local · ${version.split(' ')[0]}` : 'Local') : 'Offline';
-  els.setup.hidden = connected;
-  if (connected) els.setup.hidden = true;
+  // Running without a downloaded model is still setup: there is nothing to talk
+  // to yet.
+  const ready = connected && state.status.models.length > 0;
+  els.setup.hidden = ready;
+  if (!ready) refreshSetupCard(connected);
+}
+
+// The first-run card: what this PC is, whether Ollama is here, and which model
+// fits. One button does whichever of those is missing.
+function refreshSetupCard(connected = state.status.running) {
+  if (state.setupBusy || state.pulling) return;
+  const recName = state.recommended ? modelLabel(state.recommended.name) : '';
+  const hw = state.hardware;
+  if (hw) {
+    const bits = [`${hw.cores} CPU threads`, `${hw.ramGb} GB RAM`];
+    if (hw.gpu) bits.push(hw.gpu);
+    els.setupHw.textContent = `This PC: ${bits.join(' · ')}${recName ? ` · best fit: ${recName}` : ''}`;
+  }
+  if (connected) {
+    els.setupTitle.textContent = 'Get the model for this PC';
+    els.setupText.textContent = recName
+      ? `${recName} is the largest model that still answers quickly here. It is downloaded once and stays on this machine.`
+      : 'Download a model to start talking.';
+    els.setupInstall.textContent = recName ? `Download ${recName}` : 'Download the model';
+  } else {
+    els.setupTitle.textContent = 'Set up Jarvis';
+    els.setupText.textContent =
+      'One click installs Ollama and fetches the model that fits this PC — no account, nothing sent anywhere.';
+    els.setupInstall.textContent = 'Install Ollama';
+  }
+}
+
+// Install, start, then download the model this machine was sized for.
+async function runSetup() {
+  if (state.setupBusy) return;
+  state.setupBusy = true;
+  els.setupInstall.disabled = true;
+  els.setupRetry.disabled = true;
+  els.setupProgress.hidden = false;
+  els.setupBar.style.width = '4%';
+  els.setupStatus.textContent = 'Looking for Ollama…';
+  try {
+    if (!state.status.running) {
+      els.setupTitle.textContent = 'Setting up';
+      const result = await api.installEngine().catch(() => null);
+      if (!result || !result.ok) {
+        els.setupTitle.textContent = 'Almost there';
+        els.setupStatus.textContent =
+          result && result.reason === 'winget'
+            ? 'The Windows Package Manager is missing — opening the download page instead.'
+            : 'The installer did not finish. Finish it, then press “I installed it”.';
+        if (result && result.url) api.open(result.url);
+        return;
+      }
+      await refreshStatus();
+    }
+    const name = state.recommended ? state.recommended.name : '';
+    if (!name || state.status.models.length) {
+      els.setupBar.style.width = '100%';
+      els.setupStatus.textContent = 'Ready.';
+      return;
+    }
+    els.setupBar.style.width = '8%';
+    els.setupStatus.textContent = `Downloading ${modelLabel(name)}…`;
+    await pull(name);
+  } finally {
+    state.setupBusy = false;
+    els.setupInstall.disabled = false;
+    els.setupRetry.disabled = false;
+  }
+}
+
+// Progress from typing goes to the sheet; the same numbers feed the first-run
+// card while it is on screen.
+function mirrorSetupProgress(text, pct) {
+  if (els.setup.hidden) return;
+  els.setupProgress.hidden = false;
+  if (typeof pct === 'number') {
+    els.setupBar.style.width = `${Math.max(2, Math.min(100, pct))}%`;
+  }
+  if (text) els.setupStatus.textContent = text;
+}
+
+if (api.onInstall) {
+  api.onInstall((data) => {
+    if (!data) return;
+    if (data.stage === 'error') toast(data.message || 'The install did not finish.');
+    mirrorSetupProgress(data.message, data.pct);
+  });
+}
+
+// ---------------------------------------------------------------- the voice
+
+// One player at a time: a new reply cuts the old one off, the way a person
+// would not talk over themselves.
+let player = null;
+
+function stopAudio() {
+  if (!player) return;
+  try {
+    player.pause();
+    player.removeAttribute('src');
+    player.load();
+  } catch {
+    /* already stopped */
+  }
+  player = null;
+}
+
+// Resolves when the clip is done, so a long reply can be spoken sentence by
+// sentence without the next one cutting off the one before it.
+function playFileWhenDone(url) {
+  return new Promise((resolve) => {
+    stopAudio();
+    const audio = new Audio(url);
+    player = audio;
+    const finish = () => {
+      if (player === audio) player = null;
+      resolve();
+    };
+    audio.addEventListener('ended', finish);
+    audio.addEventListener('error', finish);
+    audio.play().catch(finish);
+  });
+}
+
+function playFile(url) {
+  stopAudio();
+  const audio = new Audio(url);
+  player = audio;
+  audio.addEventListener('ended', () => {
+    if (player === audio) player = null;
+    setVoiceState('idle');
+  });
+  audio.play().catch(() => {
+    // Autoplay refused or the file vanished: fall back to the system voice.
+    if (player === audio) player = null;
+    api.speak(stripForSpeech(els.thread.innerText).slice(-400));
+  });
+}
+
+let speakTimer = 0;
+// One utterance at a time, in order. The first sentence of a reply goes out
+// while the rest of it is still being written.
+let speechChain = Promise.resolve();
+
+function say(text) {
+  const value = stripForSpeech(text);
+  if (!value) return speechChain;
+  if (window.__jarvis) {
+    window.__jarvis.spoke.push({ t: Date.now(), text: value.slice(0, 48) });
+    if (window.__jarvis.spoke.length > 20) window.__jarvis.spoke.shift();
+  }
+  speechChain = speechChain.then(() => speakOne(value)).catch(() => {});
+  return speechChain;
+}
+
+async function speakOne(value) {
+  setVoiceState('speaking');
+  if (state.settings.engine !== 'system' && state.neural.available) {
+    const result = await api.speakNeural(value).catch(() => null);
+    if (result && result.ok && result.url) {
+      await playFileWhenDone(result.url);
+      setVoiceState('idle');
+      return;
+    }
+  }
+  api.speak(value);
+  // The system voice gives no end signal, so guess from the length of the text.
+  const words = value.split(/\s+/).filter(Boolean).length;
+  clearTimeout(speakTimer);
+  await new Promise((resolve) => {
+    speakTimer = setTimeout(() => {
+      setVoiceState('idle');
+      resolve();
+    }, Math.max(1400, (words / 2.6) * 1000));
+  });
 }
 
 function modelLabel(name) {
@@ -185,6 +372,22 @@ async function send(text) {
   const prompt = String(text || '').trim();
   if (!prompt) return;
   if (state.busy) return;
+
+  // "open spotify" is an order, not a question: do it, then say so.
+  const action = await api.act(prompt).catch(() => null);
+  if (action && action.handled) {
+    const reply = action.say || 'Done.';
+    els.input.value = '';
+    autosize();
+    addMessage('user', prompt);
+    addMessage('assistant', reply);
+    state.history.push({ role: 'user', content: prompt }, { role: 'assistant', content: reply });
+    trimHistory();
+    if (state.settings.speak) say(reply);
+    else setVoiceState('idle');
+    return;
+  }
+
   if (!state.status.running) {
     openSheet();
     toast('Start Ollama first — the gear has a button for it.');
@@ -201,6 +404,7 @@ async function send(text) {
   addMessage('user', prompt);
   state.history.push({ role: 'user', content: prompt });
   trimHistory();
+  setVoiceState('thinking');
 
   const body = addTyping();
   let acc = '';
@@ -219,6 +423,7 @@ async function send(text) {
 function finishStream(text, aborted) {
   if (!state.stream) return;
   const { body } = state.stream;
+  const spokenAt = state.stream.spokenAt || 0;
   state.stream = null;
   setBusy(false);
 
@@ -230,14 +435,31 @@ function finishStream(text, aborted) {
     state.history.push({ role: 'assistant', content: text });
     trimHistory();
     trimHistory();
-    if (state.settings.speak && !aborted) api.speak(stripForSpeech(text));
+    if (state.settings.speak && !aborted) {
+      const rest = text.slice(spokenAt).trim();
+      if (rest) say(rest);
+      else if (!spokenAt) say(text);
+    } else setVoiceState('idle');
+  } else {
+    setVoiceState('idle');
   }
   scrollDown();
+}
+
+// Speak the first finished sentence before the reply is complete: waiting for
+// the last token is what made the assistant feel slow to answer.
+function speakFirstSentence(stream) {
+  if (!state.settings.speak || stream.spokenAt) return;
+  const match = stream.text.match(/^([\s\S]{24,}?[.!?])(?:\s|$)/);
+  if (!match) return;
+  stream.spokenAt = match[1].length;
+  say(match[1]);
 }
 
 api.onDelta((chunk) => {
   if (!state.stream) return;
   state.stream.text += chunk;
+  speakFirstSentence(state.stream);
   const body = state.stream.body;
   body.textContent = state.stream.text;
   const caret = document.createElement('span');
@@ -337,14 +559,15 @@ function renderPresets() {
     const card = document.createElement('button');
     card.type = 'button';
     const isInstalled = installed.has(preset.name);
-    card.className = `preset${isInstalled ? ' installed' : ''}`;
+    const isRecommended = !!preset.recommended;
+    card.className = `preset${isInstalled ? ' installed' : ''}${isRecommended ? ' rec' : ''}`;
     card.innerHTML = '';
     const label = document.createElement('span');
     label.className = 'label';
     label.textContent = preset.label;
     const note = document.createElement('span');
     note.className = 'note';
-    note.textContent = isInstalled ? 'Installed' : preset.note;
+    note.textContent = isInstalled ? 'Installed' : isRecommended ? 'Best for this PC' : preset.note;
     const size = document.createElement('span');
     size.className = 'size';
     size.textContent = preset.size;
@@ -359,6 +582,29 @@ function renderPresets() {
     });
     els.presets.appendChild(card);
   }
+}
+
+function showHardware() {
+  const hw = state.hardware;
+  const rec = state.recommended;
+  if (!hw) return;
+  const bits = [`${hw.cores} CPU threads`, `${hw.ramGb} GB RAM`, hw.integrated ? `${hw.gpu} (integrated)` : `${hw.gpu} (${hw.vramGb} GB)`];
+  const recName = rec ? (state.presets.find((p) => p.name === rec.name) || {}).label || rec.name : '';
+  els.hwLine.textContent = rec
+    ? `${bits.join(' · ')}. ${rec.reason} Suggested: ${recName}.`
+    : `${bits.join(' · ')}.`;
+}
+
+// Nothing installed yet? Fetch the model this machine was made for.
+let autoPullStarted = false;
+function maybeAutoPull() {
+  if (autoPullStarted || state.pulling) return;
+  if (!state.status.running || !state.recommended) return;
+  if (state.status.models.length) return;
+  autoPullStarted = true;
+  const preset = state.presets.find((p) => p.name === state.recommended.name);
+  toast(`Downloading ${preset ? preset.label : state.recommended.name} — the model that fits this PC.`, 5000);
+  pull(state.recommended.name);
 }
 
 function selectModel(name) {
@@ -391,13 +637,18 @@ async function refreshStatus() {
     api.save({ model: '' });
   }
   if (state.status.running && !state.settings.model && state.status.models.length) {
+    // Whatever fits this machine wins over whatever happens to be installed.
+    const wanted = state.recommended && state.recommended.name;
     const preferred =
-      state.status.models.find((m) => m.name.includes('qwen2.5:7b')) || state.status.models[0];
+      (wanted && state.status.models.find((m) => m.name === wanted)) ||
+      state.status.models.find((m) => m.name.includes('1.5b')) ||
+      state.status.models[0];
     selectModel(preferred.name);
   }
   renderModels();
   renderPresets();
   refreshModelChip();
+  maybeAutoPull();
 }
 
 async function pull(name) {
@@ -433,27 +684,57 @@ api.onPull((payload) => {
   if (payload.status === 'done' || payload.status === 'success') {
     els.pullBar.style.width = '100%';
     els.pullText.textContent = 'Done — loading the model.';
+    mirrorSetupProgress('Done — loading the model.', 100);
     return;
   }
   if (payload.total > 0) {
     const pct = Math.max(2, Math.min(100, Math.round((payload.completed / payload.total) * 100)));
     els.pullBar.style.width = `${pct}%`;
     els.pullText.textContent = `${payload.status || 'Downloading'} · ${pct}% of ${formatSize(payload.total)}`;
+    mirrorSetupProgress(`${payload.status || 'Downloading'} · ${pct}% of ${formatSize(payload.total)}`, pct);
   } else {
     els.pullBar.style.width = '8%';
     els.pullText.textContent = payload.status || 'Working…';
+    mirrorSetupProgress(payload.status || 'Working…');
   }
   if (payload.error) toast(payload.error);
 });
 
 // ---------------------------------------------------------------------- voice
 
+// A model load can wedge (a busy first second, a slow disk): throw the worker
+// away and start another one instead of pretending to listen forever.
+function dropStt(worker, why) {
+  clearTimeout(worker && worker.loadTimer);
+  try {
+    worker.terminate();
+  } catch {
+    /* already gone */
+  }
+  if (state.stt !== worker) return;
+  state.stt = null;
+  if (state.sttAttempts >= 3) {
+    els.sttLine.textContent = 'Speech model unavailable — the microphone still types nothing, sorry.';
+    return;
+  }
+  if (why) els.sttLine.textContent = why;
+  setTimeout(() => {
+    if (!state.stt) ensureStt();
+  }, 1500);
+}
+
 function ensureStt() {
   if (state.stt) return state.stt;
-  state.stt = new Worker(new URL('./assistant-stt.worker.js', import.meta.url), { type: 'module' });
-  state.stt.pending = null;
-  state.stt.ready = false;
-  state.stt.onmessage = (event) => {
+  state.sttAttempts = (state.sttAttempts || 0) + 1;
+  const worker = new Worker(new URL('./assistant-stt.worker.js', import.meta.url), { type: 'module' });
+  state.stt = worker;
+  worker.pending = null;
+  worker.ready = false;
+  worker.loadTimer = setTimeout(() => {
+    if (!worker.ready) dropStt(worker, 'Speech model was slow to start — trying again.');
+  }, 45000);
+  worker.onerror = () => dropStt(worker, 'Speech model failed to start — trying again.');
+  worker.onmessage = (event) => {
     const data = event.data || {};
     if (data.type === 'progress') {
       els.sttLine.textContent = `Loading speech model · ${data.pct}%`;
@@ -464,7 +745,8 @@ function ensureStt() {
       return;
     }
     if (data.type === 'ready') {
-      state.stt.ready = true;
+      worker.ready = true;
+      clearTimeout(worker.loadTimer);
       els.sttLine.textContent = 'Speech model ready.';
       return;
     }
@@ -479,7 +761,13 @@ function ensureStt() {
       resolve(data.text || '');
     }
   };
-  state.stt.postMessage({ type: 'init', model: STT_MODELLING, fallback: STT_FALLBACK });
+  const plan = state.sttPlan || {};
+  state.stt.postMessage({
+    type: 'init',
+    model: plan.model || STT_MODELLING,
+    fallback: plan.fallback ?? STT_FALLBACK,
+    device: plan.device || 'auto',
+  });
   return state.stt;
 }
 
@@ -490,10 +778,43 @@ function transcribe(samples) {
       resolve('');
       return;
     }
-    worker.pending = resolve;
-    const copy = new Float32Array(samples);
+    let done = false;
+    const finish = (text) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (worker.pending === finish) worker.pending = null;
+      resolve(text);
+    };
+    worker.pending = finish;
+    // A wedged inference must never block every later phrase: start over. The
+    // first call can include loading the model, so it gets a longer rope.
+    const timer = setTimeout(() => {
+      finish('');
+      dropStt(worker, 'Speech model stopped answering — restarting it.');
+      state.sttAnnounced = false;
+    }, worker.ready ? STT_TIMEOUT : 60000);
+    const copy = normalizeAudio(samples);
     worker.postMessage({ type: 'transcribe', audio: copy }, [copy.buffer]);
   });
+}
+
+// Quiet speech is the usual reason a phrase comes back wrong. Lift it to a
+// sensible level (without clipping) before the model sees it.
+function normalizeAudio(samples) {
+  const out = new Float32Array(samples);
+  let peak = 0;
+  for (let i = 0; i < out.length; i += 1) {
+    const value = Math.abs(out[i]);
+    if (value > peak) peak = value;
+  }
+  if (peak > 0.004 && peak < 0.85) {
+    const gain = Math.min(6, 0.9 / peak);
+    for (let i = 0; i < out.length; i += 1) {
+      out[i] = Math.max(-1, Math.min(1, out[i] * gain));
+    }
+  }
+  return out;
 }
 
 let audio = null;
@@ -501,7 +822,8 @@ let audio = null;
 async function ensureAudio() {
   if (audio) return audio;
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+    // Automatic gain keeps a quiet speaker as audible as a loud one.
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
   const context = new AudioContext({ sampleRate: 16000 });
   const source = context.createMediaStreamSource(stream);
@@ -512,13 +834,16 @@ async function ensureAudio() {
   return audio;
 }
 
-function recorderStart() {
+function recorderStart(threshold = 0.012) {
   const a = audio;
   if (!a) return;
   a.buffers = [];
+  a.levels = [];
+  a.threshold = threshold;
   a.voice = false;
   a.silence = 0;
   a.blocks = 0;
+  a.loud = 0;
   a.processor = a.context.createScriptProcessor(4096, 1, 1);
   a.processor.onaudioprocess = (event) => {
     const data = event.inputBuffer.getChannelData(0);
@@ -526,9 +851,12 @@ function recorderStart() {
     let sum = 0;
     for (let i = 0; i < data.length; i += 1) sum += data[i] * data[i];
     const rms = Math.sqrt(sum / data.length);
-    if (rms > 0.012) {
+    a.levels.push(rms);
+    a.level = rms;
+    if (rms > threshold) {
       a.voice = true;
       a.silence = 0;
+      a.loud += 1;
     } else if (a.voice) {
       a.silence += 1;
     }
@@ -549,18 +877,89 @@ function recorderStop() {
   }
   a.processor = null;
   const total = a.buffers.reduce((sum, chunk) => sum + chunk.length, 0);
-  const out = new Float32Array(total);
+  let out = new Float32Array(total);
   let offset = 0;
   for (const chunk of a.buffers) {
     out.set(chunk, offset);
     offset += chunk.length;
   }
+  // Cut the silent head and tail: whisper's cost is linear in audio length, and
+  // a short blip inside a long recording should not pay for the quiet parts.
+  const levels = a.levels || [];
+  const floor = a.threshold || 0.012;
+  let first = -1;
+  let last = -1;
+  for (let i = 0; i < levels.length; i += 1) {
+    if (levels[i] > floor) {
+      if (first < 0) first = i;
+      last = i;
+    }
+  }
+  if (first >= 0) {
+    const start = Math.max(0, first - 1) * 4096;
+    const end = Math.min(out.length, (last + 2) * 4096);
+    if (end > start) out = out.slice(start, end);
+  }
   a.buffers = [];
+  a.levels = [];
   return out;
 }
 
 function setListening(value) {
   document.body.dataset.listening = value ? 'true' : 'false';
+}
+
+// A small two-note chime for the moment it hears its name. Cheaper and quicker
+// than saying "yes", and short enough that the microphone does not mistake it
+// for the start of a command.
+let chimeCtx = null;
+
+function wakeChime() {
+  try {
+    chimeCtx = chimeCtx || new AudioContext();
+    if (chimeCtx.state === 'suspended') chimeCtx.resume();
+    const now = chimeCtx.currentTime + 0.02;
+    const notes = [
+      { freq: 784, at: 0, gain: 0.24 },
+      { freq: 1175, at: 0.11, gain: 0.17 },
+    ];
+    for (const note of notes) {
+      const osc = chimeCtx.createOscillator();
+      const amp = chimeCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(note.freq, now + note.at);
+      amp.gain.setValueAtTime(0.0001, now + note.at);
+      amp.gain.exponentialRampToValueAtTime(note.gain, now + note.at + 0.02);
+      amp.gain.exponentialRampToValueAtTime(0.0001, now + note.at + 0.34);
+      osc.connect(amp);
+      amp.connect(chimeCtx.destination);
+      osc.start(now + note.at);
+      osc.stop(now + note.at + 0.38);
+    }
+  } catch {
+    /* no audio device, no chime — listening still works */
+  }
+}
+
+// ------------------------------------------------------- the presence on screen
+
+// Listening, thinking, speaking. The HUD at the bottom of the screen follows
+// this, and the microphone level is posted with it so the light moves with the
+// voice instead of looping blindly.
+let voiceState = 'idle';
+let voiceMeter = 0;
+
+function setVoiceState(next) {
+  if (voiceState === next) return;
+  voiceState = next;
+  api.voiceState({ state: next });
+  clearInterval(voiceMeter);
+  if (next === 'listening') {
+    voiceMeter = setInterval(() => {
+      const level = audio ? Math.min(1, (audio.level || 0) * 4.5) : 0;
+      api.voiceLevel(level);
+    }, 90);
+  }
 }
 
 async function listenOnce() {
@@ -577,6 +976,7 @@ async function listenOnce() {
   if (audio.context.state === 'suspended') await audio.context.resume();
 
   setListening(true);
+  setVoiceState('listening');
   recorderStart();
 
   const samples = await new Promise((resolve) => {
@@ -595,6 +995,7 @@ async function listenOnce() {
   setListening(false);
 
   if (!samples.length || samples.length < 1600) {
+    setVoiceState('idle');
     toast('I did not catch that.');
     return;
   }
@@ -602,6 +1003,7 @@ async function listenOnce() {
   const text = await transcribe(samples);
   const clean = String(text || '').trim();
   if (!clean) {
+    setVoiceState('idle');
     toast('I did not catch that.');
     return;
   }
@@ -610,6 +1012,21 @@ async function listenOnce() {
   els.input.value = command;
   autosize();
   send(command);
+}
+
+// Whisper does not spell "Jarvis" the same way twice, so accept the near misses
+// and the greeting in front of the name.
+const WAKE_LEAD = /\b(?:hey|hej|hi|hello|ok(?:ay)?|yo)\b[\s,.:;-]*/i;
+const WAKE_WORD = /^(?:jarvis|jarv[ie]s|javis|jarwis|charvis)\b[\s,.:;!?-]*/i;
+
+function wakeCommand(text) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!value) return null;
+  const lead = value.match(WAKE_LEAD);
+  const rest = lead ? value.slice(lead.index + lead[0].length) : value;
+  const hit = rest.match(WAKE_WORD);
+  if (!hit) return null;
+  return rest.slice(hit[0].length).trim();
 }
 
 let wakeTimer = 0;
@@ -631,12 +1048,16 @@ async function wakeLoop() {
   if (audio.context.state === 'suspended') await audio.context.resume();
 
   setListening(true);
-  recorderStart();
+  // A much higher gate than the mic button: the room has to actually be loud
+  // enough to be a voice before whisper is asked to look at it.
+  recorderStart(0.05);
   const samples = await new Promise((resolve) => {
     const started = Date.now();
     const tick = setInterval(() => {
       const elapsed = Date.now() - started;
-      if ((audio.voice && audio.silence >= 3) || elapsed > 9000) {
+      // Silence is cheap: stop after ~2.5 s and skip the transcription entirely.
+      // Speech gets four seconds — enough for "hey jarvis, open spotify".
+      if ((audio.voice && audio.silence >= 3) || elapsed > (audio.voice ? 4200 : 2600)) {
         clearInterval(tick);
         resolve(recorderStop());
       }
@@ -644,11 +1065,15 @@ async function wakeLoop() {
   });
   setListening(false);
 
-  if (samples.length > 4000) {
+  // Only loud speech is worth the CPU: whisper on an empty room pegs the fans.
+  // Three loud blocks is about a fifth of a second of real sound.
+  if (audio.voice && audio.loud >= 4 && samples.length > 4000) {
     const text = String(await transcribe(samples)).trim();
-    const match = text.match(/^(?:hey|hi|okay|ok)?[,\s]*jarvis[,\s.!:-]*(.*)$/i);
-    if (match) {
-      const command = (match[1] || '').trim();
+    const command = wakeCommand(text);
+    if (command !== null) {
+      // The name was spoken: a chime answers, and the orb appears while it listens.
+      wakeChime();
+      setVoiceState('listening');
       if (command.length > 1) {
         els.input.value = command;
         autosize();
@@ -659,7 +1084,7 @@ async function wakeLoop() {
       }
     }
   }
-  if (state.settings.wake) wakeTimer = setTimeout(wakeLoop, 900);
+  if (state.settings.wake) wakeTimer = setTimeout(wakeLoop, 1200);
 }
 
 // ------------------------------------------------------------------- settings
@@ -681,18 +1106,28 @@ function closeSheet() {
 
 function fillVoices() {
   els.voiceSelect.replaceChildren();
-  const voices = state.voices.length ? state.voices : [{ name: 'Microsoft Zira Desktop', culture: 'en-US' }];
-  for (const voice of voices) {
+  const neural = state.neural.available ? state.neural.voices : [];
+  for (const voice of neural) {
     const option = document.createElement('option');
-    option.value = voice.name;
+    option.value = `neural:${voice.id}`;
+    option.textContent = `${voice.label} · ${voice.note}`;
+    els.voiceSelect.appendChild(option);
+  }
+  for (const voice of state.voices) {
+    const option = document.createElement('option');
+    option.value = `system:${voice.name}`;
     option.textContent = `${voice.name.replace('Microsoft ', '').replace(' Desktop', '')} · ${voice.culture}`;
     els.voiceSelect.appendChild(option);
   }
-  const chosen = state.settings.voice || voices[0]?.name || '';
-  els.voiceSelect.value = chosen;
-  if (!state.settings.voice && chosen) {
-    state.settings.voice = chosen;
-    api.save({ voice: chosen });
+  const useNeural = state.settings.engine !== 'system' && neural.length > 0;
+  if (useNeural) {
+    const wanted = `neural:${state.settings.neuralVoice || neural[0].id}`;
+    els.voiceSelect.value = wanted;
+    if (!els.voiceSelect.value) els.voiceSelect.value = `neural:${neural[0].id}`;
+  } else if (state.voices.length) {
+    const wanted = `system:${state.settings.voice || state.voices[0].name}`;
+    els.voiceSelect.value = wanted;
+    if (!els.voiceSelect.value) els.voiceSelect.value = `system:${state.voices[0].name}`;
   }
 }
 
@@ -736,9 +1171,26 @@ els.micBtn.addEventListener('click', () => {
 
 els.gearBtn.addEventListener('click', openSheet);
 els.sheetClose.addEventListener('click', closeSheet);
-els.hideBtn.addEventListener('click', () => api.hide());
+els.hideBtn.addEventListener('click', () => {
+  stopAudio();
+  setVoiceState('idle');
+  api.hide();
+});
 els.modelChip.addEventListener('click', openSheet);
-els.setupInstall.addEventListener('click', () => api.open('https://ollama.com/download/windows'));
+els.setupInstall.addEventListener('click', () => {
+  // Running already? The missing piece is the model, not the engine.
+  if (state.status.running && state.status.models.length === 0) {
+    const name = state.recommended ? state.recommended.name : '';
+    if (name) {
+      els.setupProgress.hidden = false;
+      els.setupBar.style.width = '6%';
+      els.setupStatus.textContent = `Downloading ${modelLabel(name)}…`;
+      pull(name);
+      return;
+    }
+  }
+  runSetup();
+});
 els.setupRetry.addEventListener('click', async () => {
   els.setupTitle.textContent = 'Checking…';
   els.setupText.textContent = 'Looking for Ollama on this machine.';
@@ -781,13 +1233,25 @@ els.pullForm.addEventListener('submit', (event) => {
 els.speakToggle.addEventListener('change', () => {
   state.settings.speak = els.speakToggle.checked;
   api.save({ speak: state.settings.speak });
-  if (!state.settings.speak) api.hush();
+  if (!state.settings.speak) {
+    stopAudio();
+    api.hush();
+    setVoiceState('idle');
+  }
 });
 
 els.voiceSelect.addEventListener('change', () => {
-  state.settings.voice = els.voiceSelect.value;
-  api.save({ voice: state.settings.voice });
-  api.speak('This is how I sound.');
+  const value = els.voiceSelect.value || '';
+  if (value.startsWith('neural:')) {
+    state.settings.engine = 'neural';
+    state.settings.neuralVoice = value.slice('neural:'.length);
+    api.save({ engine: 'neural', neuralVoice: state.settings.neuralVoice });
+  } else if (value.startsWith('system:')) {
+    state.settings.engine = 'system';
+    state.settings.voice = value.slice('system:'.length);
+    api.save({ engine: 'system', voice: state.settings.voice });
+  }
+  say('At your service, sir.');
 });
 
 els.rateRange.addEventListener('input', () => {
@@ -796,7 +1260,7 @@ els.rateRange.addEventListener('input', () => {
 });
 
 els.testVoice.addEventListener('click', () => {
-  api.speak('All systems nominal. I am ready when you are.');
+  say('All systems nominal, sir. The model is ready when you are.');
 });
 
 els.wakeToggle.addEventListener('change', () => {
@@ -830,6 +1294,7 @@ document.addEventListener('keydown', (event) => {
       closeSheet();
       return;
     }
+    stopAudio();
     api.hide();
     return;
   }
@@ -844,6 +1309,15 @@ window.addEventListener('focus', () => {
   refreshStatus();
 });
 
+// A hook for testing the wake word with recorded audio (no microphone needed).
+window.__jarvis = {
+  transcribe,
+  wakeCommand,
+  chime: wakeChime,
+  spoke: [],
+  setup: { run: runSetup, refresh: refreshSetupCard },
+};
+
 // ----------------------------------------------------------------------- boot
 
 (async function boot() {
@@ -852,6 +1326,10 @@ window.addEventListener('focus', () => {
   state.settings = { ...state.settings, ...(data.settings || {}) };
   state.status = data.status || state.status;
   state.presets = data.presets || [];
+  state.hardware = data.hardware || null;
+  state.recommended = data.recommended || null;
+  state.neural = data.neural || { available: false, voices: [] };
+  state.sttPlan = data.stt || null;
   state.voices = data.voices || [];
   state.history = [{ role: 'system', content: SYSTEM_PROMPT }];
 
@@ -861,14 +1339,26 @@ window.addEventListener('focus', () => {
   refreshModelChip();
   renderModels();
   renderPresets();
+  showHardware();
   if (state.status.models.length && !state.settings.model) {
-    selectModel(state.status.models[0].name);
+    const wanted = state.recommended && state.recommended.name;
+    const match = wanted && state.status.models.find((m) => m.name === wanted);
+    selectModel((match || state.status.models[0]).name);
   }
-  if (!state.status.running) {
-    els.setupTitle.textContent = 'Ollama is not running';
-    els.setupText.textContent =
-      'Jarvis runs the model itself. Install Ollama once and it stays local — no account, nothing sent anywhere.';
+  maybeAutoPull();
+  // Load the voice model now so the first spoken reply is not slow.
+  if (state.neural.available) api.warmVoice().catch(() => {});
+  // Warm the speech model once, a beat after boot: loading it while the window
+  // is still settling is what used to leave it stuck at 100%, and without this
+  // the first phrase you say pays the whole 20-second load.
+  setTimeout(() => {
+    if (!state.stt) ensureStt();
+  }, 2500);
+  // The wake word survives restarts: pick listening back up where it left off.
+  if (state.settings.wake) {
+    wakeLoop();
   }
+  refreshSetupCard();
   els.input.focus();
 })();
 

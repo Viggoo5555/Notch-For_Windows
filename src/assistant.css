@@ -725,6 +725,42 @@ body[data-listening="true"] .mic .mic-ring {
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* What this machine is, so the suggested model is explainable rather than
+   magic numbers picked in the dark. */
+.setup-hw {
+  margin-top: 12px !important;
+  font-size: 11px !important;
+  line-height: 1.5 !important;
+  color: var(--faint) !important;
+}
+
+.setup-progress {
+  margin-top: 16px;
+  text-align: left;
+}
+
+.setup-track {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+
+.setup-track span {
+  display: block;
+  width: 2%;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #7c9cff, #a9baff);
+  transition: width 0.25s ease;
+}
+
+.setup-status {
+  margin-top: 7px !important;
+  font-size: 11.5px !important;
+  color: var(--muted) !important;
+}
+
 /* ------------------------------------------------------------------- buttons */
 
 .btn {
@@ -962,6 +998,15 @@ body[data-listening="true"] .mic .mic-ring {
   border-color: rgba(79, 211, 154, 0.28);
   background: rgba(79, 211, 154, 0.07);
   cursor: default;
+}
+
+.preset.rec {
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.preset.rec .note {
+  color: color-mix(in srgb, var(--accent) 82%, white 18%);
 }
 
 .preset .label {

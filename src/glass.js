@@ -47,6 +47,10 @@ function pillConfig(overrides = {}) {
   return { ...PILL, ...overrides };
 }
 
+function isSolid() {
+  return !!document.querySelector('.notch.solid');
+}
+
 async function start() {
   if (instance || starting) return;
   if (!source.getAttribute('src')) return;
@@ -61,7 +65,8 @@ async function start() {
       defaults: CONFIG,
     });
     notch.classList.add('gl');
-    if (notch.classList.contains('open')) instance.setPaused(false);
+    if (isSolid()) instance.setPaused(true);
+    else if (notch.classList.contains('open')) instance.setPaused(false);
     else pulse();
   } catch (error) {
     console.warn('Liquid glass unavailable, keeping the CSS material', error);
@@ -104,6 +109,11 @@ function apply({ tint, blur } = {}) {
 // frame, so the glass costs nothing while the cursor is away.
 function pulse() {
   if (!instance) return;
+  // The black surface draws no glass, so the shader stays parked.
+  if (isSolid()) {
+    instance.setPaused(true);
+    return;
+  }
   if (notch.classList.contains('open') || notch.classList.contains('closing')) {
     instance.setPaused(false);
     return;
@@ -121,8 +131,9 @@ function pulse() {
 }
 
 function setPaused(value) {
-  if (instance && typeof instance.setPaused === 'function') instance.setPaused(!!value);
-  if (!value) pulseFrames = 0;
+  const paused = isSolid() ? true : !!value;
+  if (instance && typeof instance.setPaused === 'function') instance.setPaused(paused);
+  if (!paused) pulseFrames = 0;
 }
 
 window.notchGlass = {

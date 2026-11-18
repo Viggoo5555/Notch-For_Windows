@@ -27,6 +27,10 @@ const { execFile, execFileSync, spawn } = require('node:child_process');
 
 const isWin = process.platform === 'win32';
 
+// Settings live in the same folder whether the app runs from a checkout or from
+// the packaged executable, so an install keeps the setup you already had.
+app.setPath('userData', path.join(app.getPath('appData'), 'notch'));
+
 // Trim Electron's baseline footprint: cap the V8 heap, because this window only
 // ever draws a small overlay. (Electron already suppresses the spare renderer.)
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=192 --max-semi-space-size=2');
@@ -106,6 +110,8 @@ function loadPrefs() {
 // 'live' samples the desktop behind the notch; 'wallpaper' pins one image and
 // never shows what is actually behind the window.
 function usesLiveBackdrop() {
+  // A black surface has no glass to feed, so the desktop sampling stops entirely.
+  if (prefs.settings.material === 'black') return false;
   return prefs.settings.backdrop !== 'wallpaper';
 }
 
@@ -387,7 +393,7 @@ async function captureDesktop() {
     // as capture exclusion, so the sample is the bare desktop — the pill and
     // the panel then refract the same pixels the open panel sees, with no
     // ghost of the pill baked into the source.
-    for (const surface of [win, widgetWin]) {
+    for (const surface of [win, ...widgetWins.values()]) {
       if (surface && !surface.isDestroyed() && surface.isVisible()) {
         surface.setContentProtection(true);
         shielded.push(surface);
@@ -817,6 +823,8 @@ const JARVIS_H = 736;
 const ASSISTANT_DEFAULTS = {
   model: '',
   voice: '',
+  engine: 'neural',
+  neuralVoice: 'en_GB-alan-medium',
   rate: 0,
   speak: true,
   wake: false,
@@ -891,6 +899,263 @@ async function assistantStatus() {
   }
 }
 
+// ------------------------------------------------------ hardware + commands
+
+// What the machine can actually run, so the model pick isn't a guess.
+let hardwareCache = null;
+
+function detectHardware() {
+  if (hardwareCache) return hardwareCache;
+  const cpus = os.cpus();
+  const cores = cpus.length || 1;
+  const ramGb = Math.round((os.totalmem() / 1024 ** 3) * 10) / 10;
+  const cpu = String((cpus[0] && cpus[0].model) || '').replace(/\s+/g, ' ').trim();
+  let gpu = '';
+  let vramGb = 0;
+  try {
+    const raw = execFileSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        "Get-CimInstance Win32_VideoController | Sort-Object -Property @{e={[int64]$_.AdapterRAM}} -Descending | Select-Object -First 1 Name,@{n='vram';e={[int64]$_.AdapterRAM}} | ConvertTo-Json -Compress",
+      ],
+      { encoding: 'utf8', windowsHide: true, timeout: 8000 },
+    );
+    const parsed = JSON.parse(String(raw).trim() || 'null');
+    if (parsed) {
+      gpu = String(parsed.Name || '').trim();
+      vramGb = Math.round(((Number(parsed.vram) || 0) / 1024 ** 3) * 10) / 10;
+    }
+  } catch {
+    /* no video controller info: treat it as CPU only */
+  }
+  // Integrated graphics borrow system RAM, so they count as no model space.
+  const integrated = !gpu || /intel|uhd|iris|radeon\(tm\) graphics|radeon graphics|vega \d+ graphics/i.test(gpu);
+  hardwareCache = {
+    cpu: cpu || 'Unknown CPU',
+    cores,
+    ramGb,
+    gpu: gpu || 'unknown graphics',
+    vramGb,
+    integrated,
+    gpuMemoryGb: integrated ? 0 : vramGb,
+  };
+  return hardwareCache;
+}
+
+// Which speech model the machine can afford. A real GPU gets the more accurate
+// whisper on WebGPU; everything else gets moonshine, the only thing fast enough
+// on a CPU without WASM threads.
+function recommendStt(hardware = detectHardware()) {
+  if (!hardware.integrated && hardware.gpuMemoryGb >= 4) {
+    return {
+      model: 'onnx-community/whisper-base',
+      fallback: 'onnx-community/moonshine-tiny-ONNX',
+      device: 'auto',
+      note: `${hardware.gpu} with ${hardware.gpuMemoryGb} GB of VRAM runs the larger, more accurate model on the GPU.`,
+    };
+  }
+  return {
+    model: 'onnx-community/moonshine-tiny-ONNX',
+    fallback: '',
+    device: 'wasm',
+    note: `${hardware.cores} CPU threads and no dedicated GPU: the small model on the CPU, which answers in about two seconds.`,
+  };
+}
+
+function recommendModel(hardware = detectHardware()) {
+  const vram = hardware.gpuMemoryGb;
+  const { cores, ramGb } = hardware;
+  if (vram >= 8) {
+    return {
+      name: 'qwen2.5:7b',
+      reason: `${hardware.gpu} has ${vram} GB of video memory, so a 7B model fits on the GPU and still feels instant.`,
+    };
+  }
+  if (vram >= 4) {
+    return {
+      name: 'qwen2.5:3b',
+      reason: `${vram} GB of video memory holds a 3B model fully on the GPU.`,
+    };
+  }
+  if (cores >= 8 && ramGb >= 16) {
+    return {
+      name: 'qwen2.5:7b',
+      reason: `${cores} CPU cores and ${ramGb} GB of RAM are enough to run a 7B model on the processor.`,
+    };
+  }
+  if (cores >= 6 || ramGb >= 16) {
+    return {
+      name: 'qwen2.5:3b',
+      reason: `${cores} CPU cores, ${ramGb} GB of RAM and no dedicated GPU — 3B is the largest that still answers quickly.`,
+    };
+  }
+  return {
+          name: 'qwen2.5:1.5b',
+    reason: `${cores} CPU threads, ${ramGb} GB of RAM and integrated graphics: a 1.5B model is the one that stays instant here. Bigger models would answer in minutes.`,
+  };
+}
+
+// Spoken names people use, mapped to the Start-menu entries they mean.
+const APP_SPOKEN_NAMES = [
+  [/^(browser|internet|browseren)$/i, ['Google Chrome', 'Microsoft Edge', 'Firefox']],
+  [/^(files|file explorer|explorer|stifinder)$/i, ['File Explorer']],
+  [/^(terminal|cmd|command prompt|powershell|konsol)$/i, ['Terminal', 'Windows PowerShell']],
+  [/^(task manager|aktivitetsstyring)$/i, ['Task Manager']],
+  [/^(calculator|calc|regnebræt|regner)$/i, ['Calculator']],
+  [/^(vs ?code|visual studio code|kode)$/i, ['Visual Studio Code']],
+  [/^(store|microsoft store)$/i, ['Microsoft Store']],
+  [/^(music|musik|spotify)$/i, ['Spotify']],
+  [/^(steam)$/i, ['Steam']],
+  [/^(notepad|notes|notesblok)$/i, ['Notepad']],
+  [/^(paint)$/i, ['Paint']],
+];
+
+// Things Windows ships that are not always in the Start menu index.
+const SYSTEM_APPS = [
+  [/^(calculator|calc|regnebræt|regner|udregner)$/i, 'calc.exe', 'Calculator'],
+  [/^(notepad|notes|notesblok)$/i, 'notepad.exe', 'Notepad'],
+  [/^(paint|mspaint)$/i, 'mspaint.exe', 'Paint'],
+  [/^(file explorer|explorer|files|stifinder)$/i, 'explorer.exe', 'File Explorer'],
+  [/^(command prompt|cmd|kommandoprompt)$/i, 'cmd.exe', 'Command Prompt'],
+  [/^(task manager|aktivitetsstyring)$/i, 'taskmgr.exe', 'Task Manager'],
+  [/^(control panel|kontrolpanel)$/i, 'control.exe', 'Control Panel'],
+  [/^(snipping tool|klippeværktøj)$/i, 'snippingtool.exe', 'Snipping Tool'],
+];
+
+const ASSISTANT_SITES = [
+  [/^(youtube)$/i, 'https://www.youtube.com', 'YouTube'],
+  [/^(google)$/i, 'https://www.google.com', 'Google'],
+  [/^(github)$/i, 'https://github.com', 'GitHub'],
+  [/^(gmail|mail|email)$/i, 'https://mail.google.com', 'Gmail'],
+  [/^(reddit)$/i, 'https://www.reddit.com', 'Reddit'],
+  [/^(twitch)$/i, 'https://www.twitch.tv', 'Twitch'],
+  [/^(chatgpt)$/i, 'https://chat.openai.com', 'ChatGPT'],
+  [/^(maps)$/i, 'https://maps.google.com', 'Google Maps'],
+];
+
+const normaliseName = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 æøå]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+async function findAppByName(rawName) {
+  const wanted = String(rawName || '').trim();
+  if (!wanted) return null;
+  const rows = await buildAppIndex();
+  const candidates = [];
+  for (const [pattern, names] of APP_SPOKEN_NAMES) {
+    if (pattern.test(wanted)) candidates.push(...names);
+  }
+  candidates.push(wanted);
+  for (const name of candidates) {
+    const key = normaliseName(name);
+    if (!key) continue;
+    let best = null;
+    let bestScore = 0;
+    for (const row of rows) {
+      const rowKey = normaliseName(row.name);
+      if (!rowKey) continue;
+      let score = 0;
+      if (rowKey === key) score = 100;
+      else if (rowKey.startsWith(key)) score = 80 - Math.min(20, rowKey.length - key.length);
+      else if (rowKey.includes(key)) score = 55;
+      else if (key.includes(rowKey) && rowKey.length > 3) score = 40;
+      if (score > bestScore) {
+        bestScore = score;
+        best = row;
+      }
+    }
+    if (best && bestScore >= 40) return best;
+  }
+  return null;
+}
+
+// "hey jarvis, open spotify" -> actually does it, and hands back what to say.
+async function performAssistantAction(rawText) {
+  const text = String(rawText || '')
+    .replace(/^\s*(?:hey|hi|ok|okay|hej|hallo)?[\s,]*jarvis[\s,.:!-]*/i, '')
+    .trim();
+  if (!text) return { handled: false };
+
+  if (/^(?:what(?:'s| is) the time|what time is it|hvad er klokken)[?.!]*$/i.test(text)) {
+    const now = new Date();
+    const time = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    return { handled: true, say: `It is ${time}.` };
+  }
+
+  const openMatch = text.match(
+    /^(?:please\s+)?(?:open|launch|start|run|åbn|vis)\s+(?:op\s+)?(?:the\s+|my\s+|min\s+|mit\s+|en\s+)?(.+?)[.!?]*$/i,
+  );
+  if (openMatch) {
+    const asked = openMatch[1].replace(/\s+(?:app|program|programmet)$/i, '').trim();
+    if (/^(settings|indstillinger)$/i.test(asked)) {
+      shell.openExternal('ms-settings:');
+      return { handled: true, say: 'Opening Settings.' };
+    }
+    const system = SYSTEM_APPS.find(([pattern]) => pattern.test(asked));
+    if (system) {
+      try {
+        execFile(system[1], [], { windowsHide: true }, () => {});
+        return { handled: true, say: `Opening ${system[2]}.` };
+      } catch {
+        /* fall through to the index */
+      }
+    }
+    const found = await findAppByName(asked);
+    if (found) {
+      const launched = launchTarget(found.target);
+      if (launched.ok) {
+        return { handled: true, say: `Opening ${String(found.name).replace(/\.lnk$/i, '')}.` };
+      }
+    }
+    const site = ASSISTANT_SITES.find(([pattern]) => pattern.test(asked));
+    if (site) {
+      shell.openExternal(site[1]);
+      return { handled: true, say: `Opening ${site[2]}.` };
+    }
+    if (/^[\w-]+(\.[\w-]+)+$/.test(asked)) {
+      shell.openExternal(`https://${asked}`);
+      return { handled: true, say: `Opening ${asked}.` };
+    }
+    return { handled: true, say: `I could not find “${asked}” on this machine.` };
+  }
+
+  const searchMatch = text.match(
+    /^(?:search|look up|google|søg(?:\s+efter)?)\s+(?:on\s+|på\s+)?(youtube|google|github|wikipedia)?\s*(?:for\s+|efter\s+)?(.+?)[.!?]*$/i,
+  );
+  if (searchMatch) {
+    const where = String(searchMatch[1] || 'google').toLowerCase();
+    const query = searchMatch[2].trim();
+    const urls = {
+      youtube: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
+      google: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+      github: `https://github.com/search?q=${encodeURIComponent(query)}`,
+      wikipedia: `https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(query)}`,
+    };
+    shell.openExternal(urls[where] || urls.google);
+    const label = where.charAt(0).toUpperCase() + where.slice(1);
+    return { handled: true, say: `Searching ${label} for ${query}.` };
+  }
+
+  const playMatch = text.match(/^(?:play|afspil|spil)\s+(.+?)[.!?]*$/i);
+  if (playMatch) {
+    const query = playMatch[1].trim();
+    if (/^(music|musik|something|noget)$/i.test(query)) {
+      shell.openExternal('https://open.spotify.com');
+      return { handled: true, say: 'Opening Spotify.' };
+    }
+    shell.openExternal(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`);
+    return { handled: true, say: `Playing ${query} on YouTube.` };
+  }
+
+  return { handled: false };
+}
+
 function findOllamaBinary() {
   const candidates = [
     path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama.exe'),
@@ -924,6 +1189,98 @@ function startOllama() {
     return { ok: false, reason: String(error && error.message) };
   }
 }
+
+// --------------------------------------------------------------- first run
+
+function wingetAvailable() {
+  try {
+    execFileSync('winget', ['--version'], { windowsHide: true, timeout: 10000, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForOllama(limitMs = 45000) {
+  const until = Date.now() + limitMs;
+  while (Date.now() < until) {
+    const status = await assistantStatus();
+    if (status.running) return status;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+  }
+  return assistantStatus();
+}
+
+let installTask = null;
+
+// One click gets a working assistant: winget installs Ollama into the user
+// profile (no admin prompt), it is started, and the renderer then pulls the
+// model this machine was sized for.
+function installOllama(sender) {
+  if (installTask) return installTask;
+  const emit = (data) => sendTo(sender, 'assistant:install', data);
+  const task = (async () => {
+    if (findOllamaBinary()) {
+      emit({ stage: 'start', message: 'Ollama is installed — starting it…' });
+      startOllama();
+      const status = await waitForOllama(20000);
+      emit({ stage: 'ready', message: status.running ? 'Ollama is running.' : 'Ollama is not answering.' });
+      return { ok: status.running, installed: true, already: true };
+    }
+    if (!wingetAvailable()) {
+      emit({ stage: 'error', message: 'The Windows Package Manager is not available.' });
+      return { ok: false, installed: false, reason: 'winget', url: 'https://ollama.com/download/windows' };
+    }
+    emit({ stage: 'install', message: 'Downloading Ollama…', pct: 2 });
+    const code = await new Promise((resolve) => {
+      let child;
+      try {
+        child = spawn(
+          'winget',
+          [
+            'install',
+            '--id',
+            'Ollama.Ollama',
+            '-e',
+            '--silent',
+            '--accept-package-agreements',
+            '--accept-source-agreements',
+            '--disable-interactivity',
+          ],
+          { windowsHide: true },
+        );
+      } catch {
+        resolve(-1);
+        return;
+      }
+      // winget redraws a progress bar with \r; only the percentage matters.
+      const scan = (chunk) => {
+        const match = /(\d{1,3})\s?%/.exec(String(chunk));
+        if (match) emit({ stage: 'install', message: 'Downloading Ollama…', pct: Number(match[1]) });
+      };
+      child.stdout.on('data', scan);
+      child.stderr.on('data', scan);
+      child.on('error', () => resolve(-1));
+      child.on('exit', (value) => resolve(value === null ? -1 : value));
+    });
+    const binary = findOllamaBinary();
+    if (!binary && code !== 0) {
+      emit({ stage: 'error', message: 'The installer did not finish.' });
+      return { ok: false, installed: false, reason: 'installer', url: 'https://ollama.com/download/windows' };
+    }
+    emit({ stage: 'start', message: 'Installed — starting Ollama…', pct: 100 });
+    startOllama();
+    const status = await waitForOllama();
+    emit({ stage: 'ready', message: status.running ? 'Ollama is running.' : 'Ollama is not answering yet.' });
+    return { ok: status.running, installed: true, already: false };
+  })();
+  installTask = task.finally(() => {
+    installTask = null;
+  });
+  return installTask;
+}
+
+ipcMain.handle('assistant:install', (event) => installOllama(event.sender));
 
 function jarvisBounds() {
   const display = screen.getPrimaryDisplay();
@@ -959,7 +1316,11 @@ function createJarvis() {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: false,
-      // Hidden means hidden: pause its animations and timers when minimised.
+      // The wake chime and spoken replies play while the window is hidden, so
+      // audio must not wait for a click the user never made.
+      autoplayPolicy: 'no-user-gesture-required',
+      // Hidden means hidden: no painting while it sits in the background. The
+      // wake word runs on the audio thread, which throttling does not touch.
       backgroundThrottling: true,
     },
   });
@@ -1038,6 +1399,280 @@ function speak(text) {
   }
 }
 
+// ---------------------------------------------------------------- neural voice
+
+// Piper runs a small neural voice locally: a British male that sounds like a
+// person instead of a screen reader, with nothing sent to a server. The binary
+// and the voice live next to the app's data, and the process stays warm so a
+// reply does not wait for the model to load.
+// The voice travels inside the packaged app, so a fresh machine speaks without
+// downloading anything; a copy in the data folder serves a dev checkout.
+const PIPER_DIR = (() => {
+  const bundled = path.join(process.resourcesPath || '', 'tts');
+  try {
+    if (app.isPackaged && fs.existsSync(path.join(bundled, 'piper', 'piper.exe'))) return bundled;
+  } catch {
+    /* fall through to the data folder */
+  }
+  return path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'notch', 'tts');
+})();
+const PIPER_BIN = path.join(PIPER_DIR, 'piper', 'piper.exe');
+
+const NEURAL_VOICES = [
+  {
+    id: 'en_GB-alan-medium',
+    label: 'Jarvis',
+    note: 'British male · calm',
+    file: 'en_GB-alan-medium.onnx',
+    // Under 1 speaks faster than the model's default pace; 0.82 is brisk but
+    // still calm enough for a butler.
+    length: 0.82,
+    noise: 0.55,
+  },
+];
+
+let piperProc = null;
+let piperQueue = Promise.resolve();
+let piperIdleTimer = 0;
+let piperSeq = 0;
+
+function neuralVoice() {
+  const wanted = assistantSettings().neuralVoice;
+  return NEURAL_VOICES.find((voice) => voice.id === wanted) || NEURAL_VOICES[0];
+}
+
+function neuralVoiceAvailable() {
+  try {
+    return fs.existsSync(PIPER_BIN) && fs.existsSync(path.join(PIPER_DIR, neuralVoice().file));
+  } catch {
+    return false;
+  }
+}
+
+function stopPiper() {
+  clearTimeout(piperIdleTimer);
+  if (!piperProc) return;
+  try {
+    piperProc.stdin.end();
+    piperProc.kill();
+  } catch {
+    /* already gone */
+  }
+  piperProc = null;
+}
+
+function piperProcess() {
+  if (piperProc && !piperProc.killed) return piperProc;
+  if (!neuralVoiceAvailable()) return null;
+  const voice = neuralVoice();
+  try {
+    const child = spawn(
+      PIPER_BIN,
+      [
+        '--model',
+        path.join(PIPER_DIR, voice.file),
+        '--json-input',
+        '--length_scale',
+        String(voice.length || 1.04),
+        '--noise_scale',
+        String(voice.noise || 0.55),
+      ],
+      { cwd: PIPER_DIR, windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'] },
+    );
+    child.stdin.on('error', () => {});
+    child.on('error', () => {
+      if (piperProc === child) piperProc = null;
+    });
+    child.on('exit', () => {
+      if (piperProc === child) piperProc = null;
+    });
+    piperProc = child;
+    return child;
+  } catch {
+    return null;
+  }
+}
+
+// Warms the model in the background so the first spoken reply is not slow.
+function warmPiper() {
+  if (!neuralVoiceAvailable()) return;
+  const child = piperProcess();
+  if (!child) return;
+  clearTimeout(piperIdleTimer);
+  piperIdleTimer = setTimeout(stopPiper, 12 * 60 * 1000);
+}
+
+function speakNeural(text) {
+  const value = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 900);
+  if (!value) return Promise.resolve({ ok: false, reason: 'empty' });
+  const child = piperProcess();
+  if (!child) return Promise.resolve({ ok: false, reason: 'missing' });
+  clearTimeout(piperIdleTimer);
+  piperIdleTimer = setTimeout(stopPiper, 12 * 60 * 1000);
+  const file = path.join(os.tmpdir(), `notch-voice-${Date.now()}-${(piperSeq += 1)}.wav`);
+  // One line at a time: piper answers in order, and the queue keeps the
+  // filenames from colliding when two replies land together.
+  piperQueue = piperQueue.then(
+    () =>
+      new Promise((resolve) => {
+        const started = Date.now();
+        try {
+          child.stdin.write(`${JSON.stringify({ text: value, output_file: file })}\n`);
+        } catch {
+          resolve({ ok: false, reason: 'stdin' });
+          return;
+        }
+        const tick = setInterval(() => {
+          try {
+            if (fs.existsSync(file) && fs.statSync(file).size > 800) {
+              clearInterval(tick);
+              resolve({ ok: true, file, url: `file:///${file.replace(/\\/g, '/')}` });
+              return;
+            }
+          } catch {
+            /* file still being written */
+          }
+          if (Date.now() - started > 25000) {
+            clearInterval(tick);
+            resolve({ ok: false, reason: 'timeout' });
+          }
+        }, 40);
+      }),
+  );
+  return piperQueue;
+}
+
+ipcMain.handle('assistant:speak-neural', async (_event, text) => {
+  const result = await speakNeural(text);
+  if (!result.ok) return result;
+  return { ok: true, url: result.url };
+});
+
+ipcMain.handle('assistant:warm-voice', () => {
+  warmPiper();
+  return { ok: true };
+});
+
+// ------------------------------------------------------------------ voice HUD
+
+// A small presence at the bottom of the screen: it appears the moment Jarvis
+// hears its name, breathes with the microphone, and turns into a wave while it
+// talks. Click-through, no focus, gone again when the moment is over.
+const VOICE_HUD_W = 320;
+const VOICE_HUD_H = 132;
+
+let voiceHudWin = null;
+let voiceHudTimer = 0;
+let voiceHudState = { state: 'idle', level: 0 };
+
+function voiceHudBounds() {
+  const display = screen.getPrimaryDisplay();
+  const width = Math.min(VOICE_HUD_W, display.workAreaSize.width - 40);
+  const height = Math.min(VOICE_HUD_H, display.workAreaSize.height - 40);
+  return {
+    x: Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2),
+    y: Math.round(display.workArea.y + 12),
+    width,
+    height,
+  };
+}
+
+function createVoiceHud() {
+  if (voiceHudWin) return voiceHudWin;
+  voiceHudWin = new BrowserWindow({
+    ...voiceHudBounds(),
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    thickFrame: false,
+    roundedCorners: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    focusable: false,
+    show: false,
+    title: 'Jarvis voice',
+    webPreferences: {
+      preload: path.join(__dirname, 'voicehud-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  voiceHudWin.setMenu(null);
+  voiceHudWin.setAlwaysOnTop(true, 'screen-saver');
+  voiceHudWin.setSkipTaskbar(true);
+  voiceHudWin.setIgnoreMouseEvents(true, { forward: true });
+  voiceHudWin.loadFile(path.join(__dirname, 'src', 'voicehud.html'));
+  voiceHudWin.webContents.on('did-finish-load', () => {
+    if (voiceHudWin) voiceHudWin.webContents.send('voicehud:state', voiceHudState);
+  });
+  voiceHudWin.on('closed', () => {
+    voiceHudWin = null;
+  });
+  return voiceHudWin;
+}
+
+function hudWatchdog() {
+  clearTimeout(voiceHudTimer);
+  voiceHudTimer = setTimeout(() => {
+    if (!voiceHudWin || voiceHudWin.isDestroyed()) return;
+    voiceHudState = { state: 'idle', level: 0 };
+    voiceHudWin.hide();
+  }, 45000);
+}
+
+function showVoiceHud(state, level) {
+  voiceHudState = { state, level };
+  const hud = createVoiceHud();
+  if (!hud.isVisible()) {
+    hud.setBounds(voiceHudBounds());
+    hud.showInactive();
+  }
+  if (!hud.webContents.isLoading()) hud.webContents.send('voicehud:state', voiceHudState);
+  hudWatchdog();
+}
+
+function hideVoiceHud(delay = 0) {
+  clearTimeout(voiceHudTimer);
+  const shut = () => {
+    voiceHudState = { state: 'idle', level: 0 };
+    if (voiceHudWin && !voiceHudWin.isDestroyed()) {
+      if (!voiceHudWin.webContents.isLoading()) voiceHudWin.webContents.send('voicehud:state', voiceHudState);
+      setTimeout(() => {
+        if (voiceHudWin && !voiceHudWin.isDestroyed()) voiceHudWin.hide();
+      }, 260);
+    }
+  };
+  if (delay > 0) voiceHudTimer = setTimeout(shut, delay);
+  else shut();
+}
+
+ipcMain.on('voice:hud', (_event, payload) => {
+  const state = String((payload && payload.state) || 'idle');
+  if (state === 'idle') {
+    hideVoiceHud(600);
+    return;
+  }
+  showVoiceHud(state, 0);
+});
+
+ipcMain.on('voice:level', (_event, value) => {
+  if (!voiceHudWin || voiceHudWin.isDestroyed() || !voiceHudWin.isVisible()) return;
+  if (voiceHudState.state === 'idle') return;
+  voiceHudState.level = Math.max(0, Math.min(1, Number(value) || 0));
+  voiceHudWin.webContents.send('voicehud:level', voiceHudState.level);
+  hudWatchdog();
+});
+
 // Asking Windows for its voices takes a second the first time, so keep it off
 // the main thread's critical path and remember the answer.
 function listVoices() {
@@ -1113,11 +1748,20 @@ ipcMain.handle('assistant:boot', async () => {
   // Waking the engine here keeps the first open quiet: the poll picks it up
   // without making the window wait for the server to come up.
   if (!status.running) startOllama();
+  const hardware = detectHardware();
+  const recommended = recommendModel(hardware);
   return {
     settings: assistantSettings(),
     status,
     voices: await listVoices(),
-    presets: OLLAMA_PRESETS,
+    presets: OLLAMA_PRESETS.map((preset) => ({
+      ...preset,
+      recommended: preset.name === recommended.name,
+    })),
+    hardware,
+    recommended,
+    stt: recommendStt(hardware),
+    neural: { available: neuralVoiceAvailable(), voices: NEURAL_VOICES.map(({ id, label, note }) => ({ id, label, note })) },
     hotkey: 'Ctrl+Alt+J',
     platform: process.platform,
   };
@@ -1255,7 +1899,23 @@ ipcMain.handle('assistant:speak', (_event, text) => speak(text));
 
 ipcMain.on('assistant:hush', () => stopSpeaking());
 
-ipcMain.handle('assistant:settings', (_event, patch) => setAssistantSettings(patch));
+ipcMain.handle('assistant:settings', (_event, patch) => {
+  const before = assistantSettings();
+  const settings = setAssistantSettings(patch);
+  // A different voice model cannot be swapped inside a running piper process.
+  if (patch && patch.neuralVoice && patch.neuralVoice !== before.neuralVoice) stopPiper();
+  // The wake word lives in the window, so turning it on has to bring the
+  // window into existence (hidden) rather than wait for the hotkey.
+  if (settings.wake && !jarvisWin) createJarvis();
+  return settings;
+});
+
+ipcMain.handle('assistant:act', (_event, text) => performAssistantAction(text));
+
+ipcMain.handle('assistant:hardware', () => {
+  const hardware = detectHardware();
+  return { hardware, recommended: recommendModel(hardware) };
+});
 
 ipcMain.handle('assistant:open', (_event, url) => {
   const target = String(url || '');
@@ -1806,7 +2466,9 @@ function applyLogin() {
   try {
     app.setLoginItemSettings({
       openAtLogin: !!prefs.login,
-      path: process.execPath,
+      // A portable build unpacks itself to a temp folder, so the launcher exe is
+      // the stable path for a login shortcut.
+      path: process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,
       args: app.isPackaged ? [] : [path.join(__dirname)],
     });
   } catch {
@@ -1890,6 +2552,7 @@ ipcMain.handle('notch:set-settings', (_event, patch) => {
     startDesktopSampling();
   }
   refreshTaskbar();
+  sendWidgetSurface();
   syncWinHook();
   return prefs.settings;
 });
@@ -2000,18 +2663,55 @@ ipcMain.handle('notch:copy-clip', async (_event, id) => {
 // A tile dragged out of the panel becomes its own always-on-top window: small
 // meters that expand into a live "what is using it" breakdown.
 const WIDGET_W = 268;
-let widgetWin = null;
+// Every tile can be pulled out of the panel into its own card, so there is one
+// window per tile instead of a single System widget.
+const WIDGET_TILES = new Set(['system', 'focus', 'library', 'clip']);
+const widgetWins = new Map();
 let widgetExpanded = false;
 let widgetDragTimer = null;
 let widgetDragOrigin = null;
+let widgetDragWin = null;
 let widgetStatsTimer = null;
 let widgetProcTimer = null;
 let procBusy = false;
 let procPrev = new Map();
 let procPrevAt = 0;
+let panelSystemDetail = false;
+// The focus timer is owned by the panel; this mirrors its last state so a
+// detached Focus card shows the same clock and drives the same timer.
+let focusState = {
+  minutes: 25,
+  total: 25 * 60000,
+  remaining: 25 * 60000,
+  endsAt: 0,
+  running: false,
+};
 
-function widgetSize(expanded) {
+function widgetSize(tile, expanded) {
+  if (tile === 'focus') return { width: 176, height: 190 };
+  if (tile === 'library') return { width: 268, height: 300 };
+  if (tile === 'clip') return { width: 268, height: 220 };
   return { width: WIDGET_W, height: expanded ? 276 : 116 };
+}
+
+function widgetTitle(tile) {
+  return { system: 'System', focus: 'Focus', library: 'Library', clip: 'Clipboard' }[tile] || 'System';
+}
+
+function widgetsFor(tile) {
+  const card = widgetWins.get(tile);
+  return card && !card.isDestroyed() ? card : null;
+}
+
+function eachWidget(callback) {
+  for (const [tile, card] of widgetWins) {
+    if (card && !card.isDestroyed()) callback(card, tile);
+  }
+}
+
+function hasWidgets() {
+  for (const card of widgetWins.values()) if (card && !card.isDestroyed()) return true;
+  return false;
 }
 
 // Electron already reports the pointer in DIP; older notes here assumed physical
@@ -2046,19 +2746,22 @@ function clampWidget(x, y, width, height) {
 
 // The window follows the cursor while the button is down, so the widget can be
 // dragged out of the panel and moved again later with the same code path.
-function startWidgetDrag(grab) {
+function startWidgetDrag(target, grab) {
   stopWidgetDrag();
+  if (!target || target.isDestroyed()) return;
+  widgetDragWin = target;
   widgetDragOrigin = grab;
   widgetDragTimer = setInterval(() => {
-    if (!widgetWin || widgetWin.isDestroyed()) {
+    if (!widgetDragWin || widgetDragWin.isDestroyed()) {
       stopWidgetDrag();
       return;
     }
     const point = cursorDip();
+    const tile = widgetDragWin.__tile || 'system';
+    const size = widgetSize(tile, tile === 'system' && widgetExpanded);
     // setBounds, not setPosition: on scaled Windows displays a bare
     // setPosition can make the transparent window creep wider on every call.
-    const size = widgetSize(widgetExpanded);
-    widgetWin.setBounds({
+    widgetDragWin.setBounds({
       x: Math.round(point.x - widgetDragOrigin.dx),
       y: Math.round(point.y - widgetDragOrigin.dy),
       width: size.width,
@@ -2071,17 +2774,19 @@ function stopWidgetDrag() {
   clearInterval(widgetDragTimer);
   widgetDragTimer = null;
   widgetDragOrigin = null;
+  widgetDragWin = null;
 }
 
 function finishWidgetDrag() {
-  if (!widgetWin || widgetWin.isDestroyed()) {
+  const target = widgetDragWin;
+  if (!target || target.isDestroyed()) {
     stopWidgetDrag();
     return;
   }
-  const bounds = widgetWin.getBounds();
+  const bounds = target.getBounds();
   const pos = clampWidget(bounds.x, bounds.y, bounds.width, bounds.height);
   stopWidgetDrag();
-  widgetWin.setPosition(pos.x, pos.y);
+  target.setPosition(pos.x, pos.y);
 }
 
 // The widget is glass over whatever is behind it. The last desktop sample was
@@ -2119,10 +2824,20 @@ function widgetBackdrop() {
   };
 }
 
+// The surface alone, for when the material changes but the backdrop does not:
+// a dragged-out card has to follow the panel without re-sampling the desktop.
+function sendWidgetSurface() {
+  const surface = prefs.settings.material === 'black' ? 'black' : 'glass';
+  eachWidget((card) => card.webContents.send('widget:backdrop', { surface }));
+}
+
 function sendWidgetBackdrop() {
-  if (!widgetWin || widgetWin.isDestroyed()) return;
   const backdrop = widgetBackdrop();
-  if (backdrop) widgetWin.webContents.send('widget:backdrop', backdrop);
+  // A dragged-out card follows the panel's surface too, so the material still
+  // reaches it when there is no image to refract.
+  const surface = prefs.settings.material === 'black' ? 'black' : 'glass';
+  const payload = backdrop ? { ...backdrop, surface } : { surface };
+  eachWidget((card) => card.webContents.send('widget:backdrop', payload));
 }
 
 // ------------------------------------------------------------------ taskbar
@@ -2148,9 +2863,13 @@ function taskbarOn() {
   return !!prefs.settings.taskbar;
 }
 
+// The bar wears the same surface as the notch: black when the panel is black,
+// glass when it is glass, and nothing but icons when it is set to invisible.
 function taskbarMode() {
+  const hidden = prefs.settings.taskbarStyle === 'hidden';
+  const black = prefs.settings.material === 'black';
   return {
-    style: prefs.settings.taskbarStyle === 'hidden' ? 'hidden' : 'glass',
+    style: hidden ? 'hidden' : black ? 'black' : 'glass',
     shape: prefs.settings.taskbarShape === 'islands' ? 'islands' : 'attached',
   };
 }
@@ -2252,6 +2971,16 @@ function requestWindowList(timeout = 1800) {
   return request.promise;
 }
 
+// A window with no document title reports its own path (cmd.exe shows up as
+// C:\WINDOWS\system32\cmd.exe). The bar should say "cmd", not the path.
+function friendlyTitle(title, exe) {
+  const value = String(title || '').trim();
+  if (!/[\\/]/.test(value) || !/\.exe$/i.test(value)) return value;
+  const fromTitle = value.split(/[\\/]/).pop().replace(/\.exe$/i, '');
+  const fromExe = String(exe || '').split(/[\\/]/).pop().replace(/\.exe$/i, '');
+  return fromTitle || fromExe || value;
+}
+
 async function readTaskbarWindowsFromHelper() {
   const rows = await requestWindowList();
   if (!rows) return null;
@@ -2264,7 +2993,7 @@ async function readTaskbarWindowsFromHelper() {
     if (!title || title === 'Program Manager') continue;
     const base = String(exe || '').split(/[\\/]/).pop().toLowerCase();
     if (SHELL_PROCESSES.has(base)) continue;
-    items.push({ hwnd, title, icon: await iconForExe(exe) });
+    items.push({ hwnd, title: friendlyTitle(title, exe), icon: await iconForExe(exe) });
   }
   return items;
 }
@@ -2548,7 +3277,9 @@ function focusTaskbarWindow(hwnd) {
   if (!Number.isFinite(hwnd) || hwnd <= 0) return;
   if (hookProc && hookProc.stdin && !hookProc.stdin.destroyed) {
     try {
-      hookProc.stdin.write(`activate ${Math.trunc(hwnd)}\n`);
+      // The hook knows what is in front: the click that brings an app up also
+      // puts it away again, the way the Windows taskbar behaves.
+      hookProc.stdin.write(`toggle ${Math.trunc(hwnd)}\n`);
       return;
     } catch {
       /* fall through to the helper process */
@@ -2578,13 +3309,15 @@ function activateTaskbarSlot(slot) {
 }
 
 function sendWidgetStats() {
-  if (!widgetWin || widgetWin.isDestroyed()) return;
+  if (!hasWidgets()) return;
   const stats = currentStats();
-  widgetWin.webContents.send('widget:stats', {
+  const payload = {
     cpu: Math.round(stats.cpu),
     ram: stats.ram,
     disk: stats.disk,
-  });
+    focus: focusState,
+  };
+  eachWidget((card) => card.webContents.send('widget:stats', payload));
 }
 
 function startWidgetStats() {
@@ -2594,9 +3327,21 @@ function startWidgetStats() {
 }
 
 function stopWidgetStats() {
+  if (hasWidgets()) return;
   clearInterval(widgetStatsTimer);
   widgetStatsTimer = null;
   stopProcSampling();
+}
+
+// The process list only runs while something is showing it: an opened System
+// card, or the System view inside the panel.
+function wantsProcesses() {
+  return panelSystemDetail || (!!widgetsFor('system') && widgetExpanded);
+}
+
+function syncProcSampling() {
+  if (wantsProcesses()) startProcSampling();
+  else stopProcSampling();
 }
 
 function startProcSampling() {
@@ -2615,7 +3360,7 @@ function stopProcSampling() {
 // Task Manager–style breakdown: PowerShell lists the busiest processes, and the
 // CPU column is the delta of their accumulated CPU seconds between samples.
 function sampleProcesses() {
-  if (procBusy || !widgetExpanded || !widgetWin || widgetWin.isDestroyed()) return;
+  if (procBusy || !wantsProcesses()) return;
   procBusy = true;
   const script =
     'Get-Process | Where-Object { $_.WorkingSet64 -gt 20000000 } | Sort-Object CPU -Descending | Select-Object -First 12 Name,Id,CPU,WorkingSet64 | ConvertTo-Json -Compress';
@@ -2668,8 +3413,11 @@ function sampleProcesses() {
           share: totalRam ? item.mem / totalRam : 0,
           label: `${(item.mem / 1073741824).toFixed(1)} GB`,
         }));
-      if (widgetWin && !widgetWin.isDestroyed()) {
-        widgetWin.webContents.send('widget:processes', { cpu: topCpu, ram: topRam });
+      const payload = { cpu: topCpu, ram: topRam };
+      const systemCard = widgetsFor('system');
+      if (systemCard && widgetExpanded) systemCard.webContents.send('widget:processes', payload);
+      if (panelSystemDetail && win && !win.isDestroyed()) {
+        win.webContents.send('notch:processes', payload);
       }
     },
   );
@@ -2677,22 +3425,31 @@ function sampleProcesses() {
 
 function setWidgetExpanded(value) {
   widgetExpanded = !!value;
-  if (!widgetWin || widgetWin.isDestroyed()) return;
-  const bounds = widgetWin.getBounds();
-  const size = widgetSize(widgetExpanded);
+  const card = widgetsFor('system');
+  if (!card) return;
+  const bounds = card.getBounds();
+  const size = widgetSize('system', widgetExpanded);
   const pos = clampWidget(bounds.x, bounds.y, size.width, size.height);
   // setContentSize keeps the page exactly the size the layout expects; window
   // bounds on a transparent Windows window can carry invisible frame insets.
-  widgetWin.setContentSize(size.width, size.height);
-  widgetWin.setPosition(pos.x, pos.y);
-  widgetWin.webContents.send('widget:expanded-state', widgetExpanded);
-  if (widgetExpanded) startProcSampling();
-  else stopProcSampling();
+  card.setContentSize(size.width, size.height);
+  card.setPosition(pos.x, pos.y);
+  card.webContents.send('widget:expanded-state', widgetExpanded);
+  syncProcSampling();
 }
 
-function createWidget() {
-  widgetWin = new BrowserWindow({
-    ...widgetSize(widgetExpanded),
+function sendTileData(tile) {
+  const card = widgetsFor(tile);
+  if (!card) return;
+  if (tile === 'focus') card.webContents.send('widget:focus', focusState);
+  else if (tile === 'clip') card.webContents.send('widget:clips', clips);
+  else if (tile === 'library') card.webContents.send('widget:games', games);
+  else sendWidgetStats();
+}
+
+function createWidget(tile) {
+  const card = new BrowserWindow({
+    ...widgetSize(tile, tile === 'system' && widgetExpanded),
     x: 40,
     y: 80,
     frame: false,
@@ -2709,7 +3466,7 @@ function createWidget() {
     skipTaskbar: true,
     alwaysOnTop: true,
     show: false,
-    title: 'System',
+    title: widgetTitle(tile),
     webPreferences: {
       preload: path.join(__dirname, 'widget-preload.js'),
       contextIsolation: true,
@@ -2719,75 +3476,115 @@ function createWidget() {
       backgroundThrottling: false,
     },
   });
-  widgetWin.setMenu(null);
-  widgetWin.setAlwaysOnTop(true, 'screen-saver');
-  widgetWin.setSkipTaskbar(true);
-  widgetWin.loadFile(path.join(__dirname, 'src', 'widget.html'));
-  widgetWin.once('ready-to-show', () => {
-    if (!widgetWin || widgetWin.isDestroyed()) return;
-    const size = widgetSize(widgetExpanded);
-    widgetWin.setContentSize(size.width, size.height);
-    widgetWin.showInactive();
-    widgetWin.moveTop();
+  card.__tile = tile;
+  card.setMenu(null);
+  card.setAlwaysOnTop(true, 'screen-saver');
+  card.setSkipTaskbar(true);
+  card.loadFile(path.join(__dirname, 'src', 'widget.html'), { query: { tile } });
+  widgetWins.set(tile, card);
+  card.once('ready-to-show', () => {
+    if (card.isDestroyed()) return;
+    const size = widgetSize(tile, tile === 'system' && widgetExpanded);
+    card.setContentSize(size.width, size.height);
+    card.showInactive();
+    card.moveTop();
     startWidgetStats();
     sendWidgetBackdrop();
+    sendTileData(tile);
   });
-  widgetWin.on('closed', () => {
-    widgetWin = null;
-    widgetExpanded = false;
+  card.on('closed', () => {
+    if (widgetWins.get(tile) === card) widgetWins.delete(tile);
+    if (tile === 'system') widgetExpanded = false;
     stopWidgetDrag();
     stopWidgetStats();
+    syncProcSampling();
   });
+  return card;
 }
 
-function openWidget(at) {
-  const size = widgetSize(widgetExpanded);
+function openWidget(tile, at) {
+  const size = widgetSize(tile, tile === 'system' && widgetExpanded);
   const pos = clampWidget(
     Math.round(at.x - size.width / 2),
     Math.round(at.y - 26),
     size.width,
     size.height,
   );
-  if (!widgetWin || widgetWin.isDestroyed()) {
-    createWidget();
-    widgetWin.setContentSize(size.width, size.height);
-    widgetWin.setPosition(pos.x, pos.y);
+  const card = widgetsFor(tile) || createWidget(tile);
+  if (!card) return;
+  card.setContentSize(size.width, size.height);
+  card.setPosition(pos.x, pos.y);
+  if (card.isVisible()) {
+    card.showInactive();
+    card.moveTop();
   } else {
-    widgetWin.setContentSize(size.width, size.height);
-    widgetWin.setPosition(pos.x, pos.y);
-    widgetWin.showInactive();
-    widgetWin.moveTop();
-    startWidgetStats();
+    card.once('ready-to-show', () => card.moveTop());
   }
-  startWidgetDrag({ dx: size.width / 2, dy: 26 });
+  startWidgetStats();
+  sendWidgetBackdrop();
+  startWidgetDrag(card, { dx: size.width / 2, dy: 26 });
 }
 
-ipcMain.on('notch:detach', (_event, point) => {
-  const at = point && Number.isFinite(point.x) ? point : cursorDip();
-  openWidget(at);
+ipcMain.on('notch:detach', (_event, payload) => {
+  const at = payload && Number.isFinite(payload.x) ? { x: payload.x, y: payload.y } : cursorDip();
+  const tile = payload && WIDGET_TILES.has(payload.tile) ? payload.tile : 'system';
+  openWidget(tile, at);
 });
 
 ipcMain.on('notch:detach-end', () => finishWidgetDrag());
 
-ipcMain.on('widget:drag-start', () => {
-  if (!widgetWin || widgetWin.isDestroyed()) return;
+// The panel says when the System view is open, so the process list only runs
+// while somebody is actually looking at it.
+ipcMain.on('notch:detail', (_event, kind) => {
+  panelSystemDetail = kind === 'system';
+  syncProcSampling();
+});
+
+// The timer lives in the panel; it reports every tick, and a detached Focus
+// card sends its buttons back through the same hop.
+ipcMain.on('focus:state', (_event, next) => {
+  if (!next || !Number.isFinite(next.remaining)) return;
+  focusState = {
+    minutes: Number(next.minutes) || 25,
+    total: Number(next.total) || 0,
+    remaining: Number(next.remaining) || 0,
+    endsAt: Number(next.endsAt) || 0,
+    running: !!next.running,
+  };
+  const card = widgetsFor('focus');
+  if (card) card.webContents.send('widget:focus', focusState);
+});
+
+ipcMain.on('focus:action', (_event, action) => {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send('notch:focus-action', action);
+});
+
+ipcMain.on('widget:drag-start', (event) => {
+  const card = BrowserWindow.fromWebContents(event.sender);
+  if (!card || card.isDestroyed()) return;
   const point = cursorDip();
-  const bounds = widgetWin.getBounds();
-  startWidgetDrag({ dx: point.x - bounds.x, dy: point.y - bounds.y });
+  const bounds = card.getBounds();
+  startWidgetDrag(card, { dx: point.x - bounds.x, dy: point.y - bounds.y });
 });
 
 ipcMain.on('widget:drag-end', () => finishWidgetDrag());
 
-ipcMain.on('widget:close', () => {
-  if (widgetWin && !widgetWin.isDestroyed()) widgetWin.close();
+ipcMain.on('widget:close', (event) => {
+  const card = BrowserWindow.fromWebContents(event.sender);
+  if (card && !card.isDestroyed()) card.close();
 });
 
 ipcMain.on('widget:expanded', (_event, value) => setWidgetExpanded(value));
 
-ipcMain.on('widget:ready', () => {
+ipcMain.on('widget:ready', (event) => {
+  const card = BrowserWindow.fromWebContents(event.sender);
+  const tile = card && card.__tile ? card.__tile : 'system';
   startWidgetStats();
   sendWidgetBackdrop();
-  if (widgetExpanded) startProcSampling();
+  sendTileData(tile);
+  if (tile === 'system') card.webContents.send('widget:expanded-state', widgetExpanded);
+  syncProcSampling();
 });
 
 // --------------------------------------------------------------------- startup
@@ -2826,6 +3623,22 @@ if (!app.requestSingleInstanceLock()) {
     // Warm the launcher and its app index so the first Windows key is instant.
     createLauncher();
     buildAppIndex().catch(() => {});
+    // With the wake word on, Jarvis has to exist (hidden) to keep listening.
+    if (assistantSettings().wake) createJarvis();
+    // Load the voice model in the background so the first reply is not slow.
+    setTimeout(warmPiper, 4000);
+    // Spoken replies leave wav files behind; old ones are of no use to anyone.
+    try {
+      const temp = os.tmpdir();
+      const cutoff = Date.now() - 60 * 60 * 1000;
+      for (const name of fs.readdirSync(temp)) {
+        if (!name.startsWith('notch-voice-')) continue;
+        const file = path.join(temp, name);
+        if (fs.statSync(file).mtimeMs < cutoff) fs.unlinkSync(file);
+      }
+    } catch {
+      /* a locked file just waits for the next start */
+    }
 
     globalShortcut.register('Control+Alt+Space', () => toggleLauncher());
     globalShortcut.register('Control+Alt+N', () => {
@@ -2840,6 +3653,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     app.isQuitting = true;
     stopWinHook();
+    stopPiper();
   });
 
   app.on('window-all-closed', () => {

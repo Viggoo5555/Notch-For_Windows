@@ -33,7 +33,8 @@ installer, no browser, no web service.
 ## Requirements
 
 - Windows 10 or 11 (the window helper and the key hook are PowerShell + Win32 calls)
-- Node.js 18 or newer for development
+- Node.js 18 or newer, for development only — the packaged executable needs
+  nothing installed
 - PowerShell 5.1, which ships with Windows
 
 ## Run it
@@ -45,6 +46,19 @@ npm start
 
 The app starts with the pill on the top edge and sits in the tray. Nothing else is
 needed: no build step, no API keys.
+
+### A single executable
+
+```bash
+npm run dist
+```
+
+writes `dist/Notch-1.0.0.exe` — one portable file with no installer and no Node.js
+on the target machine. It carries Electron, the Whisper loader and the Piper
+voice, so speech works offline out of the box. Ollama and the speech model are
+downloaded on first use, and the Jarvis setup card offers to install Ollama for
+you. The voice files it bundles come from `tts/` (not in the repository; copy
+`piper/` and the `.onnx` voice there before building if you want it included).
 
 To check the interface without starting Electron — every window is a normal HTML
 page — run the small static server and open <http://localhost:4173>:

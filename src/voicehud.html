@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+    />
+    <title>Jarvis voice</title>
+    <link rel="stylesheet" href="voicehud.css" />
+  </head>
+  <body data-state="idle">
+    <div class="hud" id="hud">
+      <div class="pill">
+        <span class="orb" id="orb" aria-hidden="true"></span>
+        <span class="bars" id="bars" aria-hidden="true"></span>
+        <span class="label" id="label">Listening</span>
+      </div>
+    </div>
+    <script src="voicehud.js"></script>
+  </body>
+</html>
