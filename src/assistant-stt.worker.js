@@ -89,7 +89,28 @@ async function load(model, fallback, requested) {
     }
   };
 
+  // Threads help whisper and hurt a small model: whisper reads a thirty-second
+  // window through an encoder, where four threads are a large win, while Moonshine
+  // is small enough that the hand-off between threads costs more than it saves
+  // (measured: 0.37–0.59 s on four threads against 0.20–0.26 s on one). So the model
+  // decides.
+  try {
+    const cores = navigator.hardwareConcurrency || 1;
+    const whisper = /whisper/i.test(String(model));
+    env.backends.onnx.wasm.numThreads = whisper ? Math.max(1, Math.min(4, cores)) : 1;
+  } catch {
+    /* older builds decide for themselves */
+  }
+
   const device = await pickDevice(requested);
+  // How many threads the runtime actually got: shared memory needs a cross-origin
+  // isolated page, and without it a 30-second whisper window is a long wait.
+  let threads = 1;
+  try {
+    threads = env.backends.onnx.wasm.numThreads || 1;
+  } catch {
+    /* older builds do not expose it */
+  }
   // Quantised weights are a CPU optimisation; a GPU wants full precision.
   const options = {
     dtype:
@@ -106,7 +127,7 @@ async function load(model, fallback, requested) {
         45000,
         'gpu init timed out',
       );
-      post({ type: 'ready', device: 'webgpu' });
+      post({ type: 'ready', device: 'webgpu', threads });
       return;
     } catch {
       asr = null;
@@ -116,13 +137,13 @@ async function load(model, fallback, requested) {
 
   try {
     asr = await pipeline('automatic-speech-recognition', model, { ...options, device: 'wasm' });
-    post({ type: 'ready', device: 'wasm' });
+    post({ type: 'ready', device: 'wasm', threads });
     return;
   } catch (error) {
     if (!fallback) throw error;
     post({ type: 'progress', pct: 0, file: 'fallback model' });
     asr = await pipeline('automatic-speech-recognition', fallback, { ...options, device: 'wasm' });
-    post({ type: 'ready', device: 'wasm' });
+    post({ type: 'ready', device: 'wasm', threads });
   }
 }
 
@@ -153,8 +174,9 @@ self.onmessage = async (event) => {
         post({ type: 'result', text: '' });
         return;
       }
+      // No chunking: a command is a few seconds long, and chunked generation only
+      // adds bookkeeping to something that already fits in one window.
       const result = await asr(audio, {
-        chunk_length_s: 30,
         sampling_rate: 16000,
         ...(language ? { language, task: 'transcribe' } : {}),
       });

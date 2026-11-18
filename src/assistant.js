@@ -1196,6 +1196,8 @@ function ensureStt() {
     }
     if (data.type === 'ready') {
       worker.ready = true;
+      worker.threads = data.threads || 0;
+      worker.device = data.device || '';
       clearTimeout(worker.loadTimer);
       els.sttLine.textContent = 'Speech model ready.';
       return;
@@ -1969,10 +1971,36 @@ window.addEventListener('focus', () => {
   refreshStatus();
 });
 
+// A game owns the machine: the microphone is closed, the speech model is thrown
+// away, and the window stays parked until the game is over. Twice-called by
+// design (message and direct call), so it remembers what it has already done.
+let gameModeSeen = null;
+
+function applyGameMode(on) {
+  if (gameModeSeen === on) return;
+  gameModeSeen = on;
+  if (on) {
+    state.gamePaused = pauseWake();
+    releaseMicrophone();
+    setListening(false);
+    setVoiceState('idle');
+    stopAudio();
+  } else if (state.gamePaused) {
+    state.gamePaused = false;
+    startWakeLoop();
+    // Loading a model is a few seconds of disk and CPU, so it waits until the
+    // game is actually gone rather than racing its last frames.
+    setTimeout(() => {
+      if (!state.stt) ensureStt();
+    }, 2500);
+  }
+}
+
 // A hook for testing the wake word with recorded audio (no microphone needed).
 window.__jarvis = {
   transcribe,
   say,
+  gameMode: null,
   voice: () => ({
     busy: !!voiceChain,
     failed: voiceFailed,
@@ -1984,13 +2012,40 @@ window.__jarvis = {
     prompt: (state.history[0] && state.history[0].content) || '',
     hud: voiceState,
     wake: wakeListening,
+    stt: !!state.stt,
+    paused: !!state.gamePaused,
     sinceWake: lastWakeAt ? Date.now() - lastWakeAt : null,
     needsGreeting: wakeNeedsGreeting(),
   }),
   followUp: followUpIfAsked,
+  sttModel: (model, language) => {
+    if (state.stt) {
+      try {
+        state.stt.terminate();
+      } catch {
+        /* already gone */
+      }
+      state.stt = null;
+    }
+    state.sttAttempts = 0;
+    state.sttPlan = {
+      ...(state.sttPlan || {}),
+      model,
+      fallback: model,
+      device: 'auto',
+      language: language || (state.sttPlan && state.sttPlan.language) || null,
+    };
+    ensureStt();
+    return state.sttPlan;
+  },
   stt: () => ({
     pending: !!(state.stt && state.stt.pending),
     ready: !!(state.stt && state.stt.ready),
+    threads: (state.stt && state.stt.threads) || 0,
+    model: (state.sttPlan && state.sttPlan.model) || '',
+    device: (state.stt && state.stt.device) || '',
+    isolated: window.crossOriginIsolated === true,
+    cores: navigator.hardwareConcurrency || 0,
     attempts: state.sttAttempts,
     plan: state.sttPlan || null,
     line: (els.sttLine && els.sttLine.textContent) || '',
@@ -2006,6 +2061,15 @@ window.__jarvis = {
   spoke: [],
   setup: { run: runSetup, refresh: refreshSetupCard },
 };
+
+// Wired at load, not at the end of boot: boot gives up when main does not answer
+// its first question, and a game can start at any moment.
+api.onGameMode(applyGameMode);
+// Main also calls this straight into the page: a hidden, throttled renderer can
+// sit on a queued message, and letting go of the microphone cannot wait for that.
+window.__jarvis.gameMode = applyGameMode;
+
+
 
 // ----------------------------------------------------------------------- boot
 
@@ -2026,6 +2090,7 @@ window.__jarvis = {
 
   applySettingsToUi();
   fillVoices();
+
   // The studio voice takes a while to load, so start it before it is asked for.
   if (state.settings.engine === 'studio' && state.studio.available) ensureStudio();
   setConnected(state.status.running, state.status.version);
@@ -2051,20 +2116,7 @@ window.__jarvis = {
   if (state.settings.wake) {
     startWakeLoop();
   }
-  // A game owns the machine: the microphone is closed and the window stays
-  // parked until it is over. Nothing here should compete with a frame rate.
-  api.onGameMode((on) => {
-    if (on) {
-      state.gamePaused = pauseWake();
-      releaseMicrophone();
-      setListening(false);
-      setVoiceState('idle');
-      stopAudio();
-    } else if (state.gamePaused) {
-      state.gamePaused = false;
-      startWakeLoop();
-    }
-  });
+
   refreshSetupCard();
   els.input.focus();
 })();

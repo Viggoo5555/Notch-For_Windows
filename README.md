@@ -12,7 +12,7 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.1.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.1/Notch-Setup-1.2.1.exe)**
+**[Notch-Setup-1.2.2.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.2/Notch-Setup-1.2.2.exe)**
 — the installer, about 340 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -26,15 +26,15 @@ It installs for your user only, so it never asks for an administrator password.
 Remove it from *Settings → Apps → Notch*; your settings in
 `%APPDATA%\notch\notch.json` are left in place.
 
-No installer wanted? [Notch-1.2.1.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.1/Notch-1.2.1.exe)
+No installer wanted? [Notch-1.2.2.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.2/Notch-1.2.2.exe)
 is the same app as a single portable file (~300 MB) — double-click and it runs.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
-### Upgrading from 1.2.0
+### Upgrading from 1.2.1
 
-Run the new installer over the old one; settings, pinned apps and the game
-library are kept. Nothing else is needed — the first start asks nothing.
+Run the new installer over the old one; settings, pinned apps, the game library and
+the overlay's corner are kept. Nothing else is needed — the first start asks nothing.
 
 ## What you get
 
@@ -71,10 +71,32 @@ library are kept. Nothing else is needed — the first start asks nothing.
   vejret*, and it answers in Danish with a Danish voice.
 - **Game mode** — when a game takes the full screen, the whole shell stands down:
   windows hidden, captures and scans stopped, the microphone released, Chromium
-  windows parked. The cost falls from a third of a core to about a tenth of one, and
-  it comes back by itself when you leave the game.
+  windows parked, and every process of the app dropped to idle priority so the game
+  is never waiting behind it. Nothing is polled faster than three seconds, and the
+  performance overlay and an opened System card are the only things that keep
+  moving. Measured here: 150–180 % of one core while listening falls to 2–17 % of
+  one, and roughly 1.7 GB of memory to 1.1–1.4 GB. It comes back by itself when you
+  leave the game. What is left is the speech model itself: it is a few hundred
+  megabytes of weights in the listening window, and the only way to give those back
+  is to let go of the model entirely — which then has to be loaded again (about ten
+  seconds) before the wake word works.
 - **Widget** — drag the panel away from the notch and it becomes a floating card you
   can drop anywhere and keep open.
+- **Performance overlay** — *menu → Performance overlay* puts four numbers on the
+  screen with no card behind them: frames per second, CPU, GPU and RAM, the way a
+  driver overlay looks. A dragged-out System card has the same thing one click
+  away: its **–** button, next to the ✕, folds the whole card down into the
+  overlay where the card was standing — and the overlay's **↗** button, next to
+  its own ✕, opens the System card again in that same place. So the two are one
+  widget in two sizes, and the way between them is one click either way. GPU is the graphics card's 3D engine load summed across
+  everything drawing on it, which is what a game shows up as. It stays above
+  everything, including a running game, never takes the keyboard, and remembers
+  where you dragged it. The frame rate is the rate the
+  desktop compositor delivers frames to that little window — your monitor's refresh
+  when idle, and what a game is actually being shown at when it runs in a window or
+  borderless, capped by the monitor. A game in exclusive fullscreen has no such
+  hand-off, and its own internal frame counter is not something Windows gives a
+  normal app; that needs PresentMon, which asks for an administrator prompt.
 
 ## Requirements
 
@@ -148,7 +170,10 @@ The first is that Danish is *named* to the model instead of letting it guess the
 language from a one-second clip; the second is the model itself, sized to the
 machine — Whisper base on a processor, Whisper small on a 4 GB graphics card, where
 it is also fast enough to be worth it (small took 20–44 seconds per phrase on this
-processor, which is not a conversation; base takes about eight).
+processor, which is not a conversation; base takes six to eight). Four threads are
+given to Whisper and withheld from Moonshine: the tiny English model is small enough
+that threading costs more than it saves, so English stays where it was — about a
+quarter of a second.
 
 It is still the weakest link in Danish: a short command comes back close but not
 clean, and the name on its own survives while *"hej Jarvis"* spoken in Danish is
@@ -162,8 +187,8 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.1.exe`, the installer said above,
-and `Notch-1.2.1.exe`, the same app as one portable file. Neither needs Node.js on
+writes two files into `dist/`: `Notch-Setup-1.2.2.exe`, the installer said above,
+and `Notch-1.2.2.exe`, the same app as one portable file. Neither needs Node.js on
 the target machine. `npm run dist:installer` builds only the installer.
 
 The package carries Electron, the Whisper loader, `kokoro-js` and the Piper voice,
@@ -284,6 +309,20 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.2** — a performance overlay. *Menu → Performance overlay* puts four numbers on
+the screen with nothing behind them — frames per second, CPU, GPU and RAM — always
+above a running game and never taking the keyboard; the GPU figure is the card's 3D
+engine load summed across everything drawing on it. A dragged-out System card folds
+down to it with the **–** button beside its ✕, and the overlay's **↗** unfolds the
+card again in the same place, so the two are one widget in two sizes and the way
+between them is one click. Game mode became much cheaper: every process of the app
+is dropped to idle priority so a game never waits behind it, an open System card
+stays on screen on a three-second tick instead of a half-second one, and the
+listening window is no longer parked by it — 150–180 % of one core while listening
+falls to a single-digit share of one. Danish listening got faster as well: Whisper
+runs on four threads instead of one, which took a short Danish phrase from 8–9 s to
+6–8 s, with English untouched at a quarter of a second.
 
 **v1.2.1** — Danish. Jarvis answers in Danish, reads it aloud in a bundled Danish
 voice, runs the short commands in Danish and answers them in Danish, and listens

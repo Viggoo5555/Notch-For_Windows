@@ -496,3 +496,80 @@ body[data-surface="black"] .wg-glass {
   border-radius: 4px;
   object-fit: contain;
 }
+
+/* The performance overlay: three readings and no surface at all, so it can sit
+   over a running game the way a driver overlay does. */
+body.perf .card {
+  background: none;
+  box-shadow: none;
+  border: 0;
+  padding: 0 3px;
+  gap: 0;
+  border-radius: 0;
+}
+
+body.perf .wg-glass,
+body.perf .head,
+body.perf .hint {
+  display: none;
+}
+
+body.perf .body {
+  justify-content: center;
+}
+
+body.perf .x {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+}
+
+body.perf .card:hover .x {
+  opacity: 0.85;
+}
+
+/* The overlay's own way back out: sits beside the ✕, and only exists there. */
+body.perf .restore {
+  position: absolute;
+  top: -4px;
+  right: 12px;
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+}
+
+body.perf .card:hover .restore {
+  opacity: 0.85;
+}
+
+.perf {
+  display: flex;
+  align-items: flex-end;
+  gap: 13px;
+}
+
+.perf-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.85),
+    0 0 8px rgba(0, 0, 0, 0.6);
+}
+
+.perf-item b {
+  font: 600 15px/1 ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
+  letter-spacing: -0.02em;
+}
+
+.perf-item span {
+  font-size: 7.5px;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  opacity: 0.75;
+}

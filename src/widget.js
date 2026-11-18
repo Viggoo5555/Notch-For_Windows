@@ -113,6 +113,57 @@ function setMeters(data) {
   bar(system.bar_disk, diskPct);
 }
 
+// ----------------------------------------------------- performance overlay card
+
+// Three numbers and nothing else: no title, no glass, no background. The frame
+// rate is counted from this window's own animation callback, which is the rate the
+// desktop compositor is delivering frames at — for a game in a window or borderless
+// that is the rate the game is being shown at, capped by the monitor.
+const perf = {};
+let perfFrames = 0;
+let perfStamp = 0;
+
+function buildPerf() {
+  document.body.classList.add('perf');
+  const row = el('div', 'perf');
+  for (const [key, label] of [
+    ['fps', 'FPS'],
+    ['cpu', 'CPU'],
+    ['gpu', 'GPU'],
+    ['ram', 'RAM'],
+  ]) {
+    const item = el('div', 'perf-item');
+    const value = el('b', null, '—');
+    value.id = `perf-${key}`;
+    item.append(value, el('span', null, label));
+    row.appendChild(item);
+    perf[key] = value;
+  }
+  $('#wBody').appendChild(row);
+}
+
+function countFrames() {
+  perfFrames += 1;
+  const now = performance.now();
+  if (!perfStamp) perfStamp = now;
+  else if (now - perfStamp >= 500) {
+    if (perf.fps) perf.fps.textContent = String(Math.round((perfFrames * 1000) / (now - perfStamp)));
+    perfFrames = 0;
+    perfStamp = now;
+  }
+  requestAnimationFrame(countFrames);
+}
+
+function setPerfMeters(data) {
+  if (perf.cpu) perf.cpu.textContent = `${Math.round(data.cpu)}%`;
+  if (perf.gpu) {
+    perf.gpu.textContent =
+      typeof data.gpu === 'number' && data.gpu >= 0 ? `${Math.round(data.gpu)}%` : '—';
+  }
+  const ramPct = data.ram && data.ram.total ? (data.ram.used / data.ram.total) * 100 : 0;
+  if (perf.ram) perf.ram.textContent = `${Math.round(ramPct)}%`;
+}
+
 function renderList(element, rows) {
   element.replaceChildren();
   (rows || []).forEach((row, index) => {
@@ -298,17 +349,42 @@ $('#close').addEventListener('click', (event) => {
   api.close();
 });
 
+// The System card minimises into the performance overlay: the same readings in the
+// same place, with no card behind them. The overlay folds back out with its own
+// button. The other cards have nothing to fold down to.
+if (tile === 'system') {
+  $('#minimize').addEventListener('click', (event) => {
+    event.stopPropagation();
+    api.minimize();
+  });
+} else {
+  $('#minimize').remove();
+}
+
+if (tile === 'perf') {
+  $('#restore').addEventListener('click', (event) => {
+    event.stopPropagation();
+    api.restore();
+  });
+} else {
+  $('#restore').remove();
+}
+
 // ------------------------------------------------------------------ live data
 
 if (tile === 'focus') buildFocus();
 else if (tile === 'clip') renderClips([]);
 else if (tile === 'library') renderGames([]);
-else buildSystem();
+else if (tile === 'perf') {
+  buildPerf();
+  requestAnimationFrame(countFrames);
+} else buildSystem();
 
 if (tile === 'focus') setInterval(() => renderFocus(), 1000);
 
 api.onStats((data) => {
   if (tile === 'system') setMeters(data);
+  else if (tile === 'perf') setPerfMeters(data);
   else if (tile === 'focus' && data.focus) renderFocus(data.focus);
 });
 api.onBackdrop(applyBackdrop);

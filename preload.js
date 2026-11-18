@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('notchAPI', {
   copyClip: (id) => ipcRenderer.invoke('notch:copy-clip', id),
   ready: () => ipcRenderer.send('notch:ready'),
   detachTile: (payload) => ipcRenderer.send('notch:detach', payload),
+  overlay: () => ipcRenderer.invoke('notch:overlay'),
   detail: (kind) => ipcRenderer.send('notch:detail', kind),
   focusState: (state) => ipcRenderer.send('focus:state', state),
   detachEnd: () => ipcRenderer.send('notch:detach-end'),

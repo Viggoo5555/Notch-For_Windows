@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('widgetAPI', {
   dragStart: () => ipcRenderer.send('widget:drag-start'),
   dragEnd: () => ipcRenderer.send('widget:drag-end'),
   close: () => ipcRenderer.send('widget:close'),
+  minimize: () => ipcRenderer.send('widget:minimize'),
+  restore: () => ipcRenderer.send('widget:restore'),
   focus: (action) => ipcRenderer.send('focus:action', String(action || 'toggle')),
   copyClip: (id) => ipcRenderer.invoke('notch:copy-clip', id),
   launch: (id) => ipcRenderer.invoke('notch:launch', id),

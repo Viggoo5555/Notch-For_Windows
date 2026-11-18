@@ -1213,6 +1213,15 @@ function bindEvents() {
   });
   $('#settingsBack').addEventListener('click', () => closeSettings());
 
+  $('#overlayBtn').addEventListener('click', async () => {
+    hideMenu();
+    const result = await api.overlay();
+    toast(
+      result && result.open
+        ? 'Overlay on — drag it where you want it'
+        : 'Overlay off',
+    );
+  });
   $('#quitBtn').addEventListener('click', () => api.quit());
   $('#loginToggle').addEventListener('change', async (event) => {
     state.login = await api.setLogin(event.target.checked);

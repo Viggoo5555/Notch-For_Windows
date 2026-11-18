@@ -9,9 +9,11 @@ param([switch]$Test)
 # extra key suppresses Start, and the Win up clears the modifier so the keyboard
 # keeps working. Chords (Win+E, Win+D, Win+L) are untouched: their Win down was
 # never intercepted.
-Add-Type -ReferencedAssemblies @('UIAutomationClient', 'UIAutomationTypes', 'WindowsBase', 'System.Drawing', 'System.Management') -TypeDefinition @"
+Add-Type -ReferencedAssemblies @('UIAutomationClient', 'UIAutomationTypes', 'WindowsBase', 'System.Drawing', 'System.Management', 'System') -TypeDefinition @"
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -551,6 +553,55 @@ public class JarvisWinHook
         }
     }
 
+    // How hard the graphics card is working, as one number.
+    //
+    // Windows publishes GPU use per engine instance — process, adapter and engine
+    // type — so the 3D instances are added up and the rest (copy, video decode) is
+    // left out: a game drawing frames is 3D. The counters are kept between calls
+    // because a percentage is a delta over time and a fresh counter always reads
+    // zero first; they are rebuilt every so often, since a game that starts or
+    // stops renames the instances out from under them.
+    private static Dictionary<string, CounterSample> _gpuBefore = new Dictionary<string, CounterSample>();
+
+    private static string GpuLoad()
+    {
+        try
+        {
+            // One read of the whole category, not one call per instance: there are
+            // dozens of instances and every single-instance read walks the category
+            // again, which is the difference between a few milliseconds and a third
+            // of a second.
+            InstanceDataCollection samples = new PerformanceCounterCategory("GPU Engine").ReadCategory()["Utilization Percentage"];
+            if (samples == null) return "-1";
+
+            double total = 0;
+            Dictionary<string, CounterSample> now = new Dictionary<string, CounterSample>(samples.Count);
+            foreach (DictionaryEntry entry in samples)
+            {
+                string name = (string)entry.Key;
+                if (name.IndexOf("engtype_3D", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                CounterSample current = ((InstanceData)entry.Value).Sample;
+                now[name] = current;
+                CounterSample before;
+                if (!_gpuBefore.TryGetValue(name, out before)) continue;
+                // Busy time over wall time, both in 100 ns units: that is the
+                // percentage this engine reported for this sample window.
+                long span = current.TimeStamp - before.TimeStamp;
+                long busy = current.RawValue - before.RawValue;
+                if (span <= 0 || busy < 0) continue;
+                total += (busy * 100.0) / span;
+            }
+            _gpuBefore = now;
+            if (now.Count == 0) return "-1";
+            return ((int)Math.Round(Math.Min(100.0, total))).ToString();
+        }
+        catch
+        {
+            _gpuBefore.Clear();
+            return "-1";
+        }
+    }
+
     // A taskbar click: bring it up, or put it away when it is already in front.
     private static void ToggleWindow(IntPtr hWnd)
     {
@@ -634,6 +685,11 @@ public class JarvisWinHook
                 else if (text == "game")
                 {
                     Console.WriteLine("GAME\t" + GameState());
+                    Console.Out.Flush();
+                }
+                else if (text == "gpu")
+                {
+                    Console.WriteLine("GPU\t" + GpuLoad());
                     Console.Out.Flush();
                 }
                 else if (text.StartsWith("activate "))

@@ -36,6 +36,12 @@ app.setPath('userData', path.join(app.getPath('appData'), 'notch'));
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=192 --max-semi-space-size=2');
 // Let Chromium drop caches while nothing is happening.
 app.commandLine.appendSwitch('aggressive-cache-discard');
+// Speech recognition runs on onnxruntime, which only spreads a model over several
+// threads when shared memory is available. This window is loaded from a file, so
+// there are no headers to make it cross-origin isolated; the switch is what turns
+// SharedArrayBuffer on anyway, and four threads instead of one is the difference
+// between a Danish phrase taking eight seconds and two.
+app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
 
 // The notch hangs from the top edge: the window is only as wide as the thing
 // visible inside it, so it never blocks the desktop it isn't covering.
@@ -503,11 +509,21 @@ function shellSurfaces() {
 function setGameMode(on) {
   if (gameMode === on) return;
   gameMode = on;
+  // Told first, before its window is hidden and parked: a parked renderer is a
+  // poor listener, and this is what makes it let go of the microphone and the
+  // speech model.
+  tellJarvisGameMode(on);
   if (on) {
     stopDesktopSampling();
     stopJarvisBackdrop();
     setTaskbarRevealed(false);
-    gameHidden = shellSurfaces().filter((surface) => surface.isVisible());
+    // Watched surfaces a game keeps: the performance overlay, because watching the
+    // game is what it is for, and an opened System card, which then runs on the slow
+    // tick below. Everything else — panel, taskbar, Jarvis, launcher — is put away.
+    gameHidden = shellSurfaces().filter(
+      (surface) =>
+        surface.isVisible() && surface !== widgetsFor('perf') && surface !== widgetsFor('system'),
+    );
     for (const surface of gameHidden) {
       try {
         surface.hide();
@@ -521,30 +537,95 @@ function setGameMode(on) {
       clearInterval(pointerTimer);
       pointerTimer = null;
     }
-  } else if (!pointerTimer && win && !win.isDestroyed()) {
-    // Hover is what brings it back; the poll has to be running for that.
-    armPointerPoll();
+  } else {
+    // Whatever the game put away comes back where it was.
+    for (const surface of gameHidden) {
+      if (surface.isDestroyed()) continue;
+      try {
+        surface.showInactive();
+      } catch {
+        /* already gone */
+      }
+    }
+    gameHidden = [];
+    if (!pointerTimer && win && !win.isDestroyed()) {
+      // Hover is what brings it back; the poll has to be running for that.
+      armPointerPoll();
+    }
   }
 
   // Chromium parks a throttled window, which is most of the idle cost.
   for (const surface of shellSurfaces()) {
+    // The overlay counts frames, which means its animation frame callback has to
+    // keep running while the game does — that is the number it shows.
+    if (surface === widgetsFor('perf')) continue;
+    // The listening window is never throttled: a parked page reads its queue once
+    // a minute, which is how a game could start and the microphone stay open. It
+    // is what decides to stand down, so it has to keep thinking.
+    if (surface === jarvisWin) continue;
     try {
-      surface.webContents.setBackgroundThrottling(!(on === false && surface === jarvisWin));
+      surface.webContents.setBackgroundThrottling(true);
     } catch {
       /* older builds */
     }
+  }
+  // The game should never wait for this shell. Dropped to idle, Windows only
+  // schedules us when nothing else wants the core, which is what "0% CPU" means
+  // in practice — and the overlay keeps counting frames because it is never busy.
+  yieldCpuToGame(on);
+  // Polling gets slower, not faster: a card left on screen during a game still
+  // moves, at a third of the wake-ups.
+  if (widgetStatsTimer) {
+    clearInterval(widgetStatsTimer);
+    widgetStatsTimer = setInterval(sendWidgetStats, gameStatsInterval());
   }
   try {
     syncTaskbarPeek();
   } catch {
     /* the taskbar is not up yet */
   }
-  // The listening window owns the microphone; it gives it up during a game.
-  if (jarvisWin && !jarvisWin.isDestroyed()) {
+}
+
+// A hidden renderer parks its own event loop, so the notice would sit in a queue
+// behind the thing it is meant to stop. The throttle is lifted for a moment, the
+// page is told twice (message and a direct call, one of which always lands), and
+// then the window is parked again a beat later.
+// Loaded again rather than told: a hidden renderer defers messages and timers
+// until something wakes it, and during a game nothing does. Reloading is what
+// actually closes the microphone and lets go of the speech model, and the page
+// comes back in its normal state when the game is over.
+function tellJarvisGameMode(on) {
+  if (!jarvisWin || jarvisWin.isDestroyed()) return;
+  const contents = jarvisWin.webContents;
+  // A page that has been out of sight for a while reads its queue once a minute.
+  // The throttle is lifted for this, and the call is repeated: the microphone has
+  // to close when the game starts, not a minute later.
+  try {
+    contents.send('jarvis:game-mode', on);
+  } catch {
+    /* window is not ready */
+  }
+}
+
+// Every process this app owns, including the renderers, dropped to idle while a
+// game runs and put back afterwards. Windows keeps a lower class from taking a
+// core away from anything that wants it, so the shell costs the game nothing even
+// when a timer fires.
+function yieldCpuToGame(on) {
+  let pids = [];
+  try {
+    pids = app.getAppMetrics().map((metric) => metric.pid);
+  } catch {
+    /* metrics are best effort */
+  }
+  const priority = on
+    ? os.constants.priority.PRIORITY_LOW
+    : os.constants.priority.PRIORITY_NORMAL;
+  for (const pid of [...new Set([process.pid, ...pids])]) {
     try {
-      jarvisWin.webContents.send('jarvis:game-mode', on);
+      os.setPriority(pid, priority);
     } catch {
-      /* window is not ready */
+      /* a renderer that already exited */
     }
   }
 }
@@ -2788,7 +2869,12 @@ function startWinHook() {
     while (line >= 0) {
       const text = buffer.slice(0, line).trim();
       buffer = buffer.slice(line + 1);
-      if (iconRequest && text.startsWith(iconRequest.prefix)) {
+      if (gpuRequest && text.startsWith('GPU\t')) {
+        const pending = gpuRequest;
+        gpuRequest = null;
+        gpuBusy = false;
+        pending(Number(text.slice(4)));
+      } else if (iconRequest && text.startsWith(iconRequest.prefix)) {
         const pending = iconRequest;
         iconRequest = null;
         pending.resolve(text.slice(pending.prefix.length).trim());
@@ -3156,7 +3242,7 @@ ipcMain.handle('notch:copy-clip', async (_event, id) => {
 const WIDGET_W = 268;
 // Every tile can be pulled out of the panel into its own card, so there is one
 // window per tile instead of a single System widget.
-const WIDGET_TILES = new Set(['system', 'focus', 'library', 'clip']);
+const WIDGET_TILES = new Set(['system', 'focus', 'library', 'clip', 'perf']);
 const widgetWins = new Map();
 let widgetExpanded = false;
 let widgetDragTimer = null;
@@ -3179,6 +3265,9 @@ let focusState = {
 };
 
 function widgetSize(tile, expanded) {
+  // The performance overlay is the one card with no surface at all: three numbers
+  // floating over the game, the way a driver overlay looks.
+  if (tile === 'perf') return { width: 212, height: 44 };
   if (tile === 'focus') return { width: 176, height: 190 };
   if (tile === 'library') return { width: 268, height: 300 };
   if (tile === 'clip') return { width: 268, height: 220 };
@@ -3186,7 +3275,10 @@ function widgetSize(tile, expanded) {
 }
 
 function widgetTitle(tile) {
-  return { system: 'System', focus: 'Focus', library: 'Library', clip: 'Clipboard' }[tile] || 'System';
+  return (
+    { system: 'System', focus: 'Focus', library: 'Library', clip: 'Clipboard', perf: 'Performance' }[tile] ||
+    'System'
+  );
 }
 
 function widgetsFor(tile) {
@@ -4564,14 +4656,48 @@ function activateTaskbarSlot(slot) {
   else if (app.pin) launchTarget(app.pin.target);
 }
 
+// The GPU reading is asked of the helper only while the overlay is on screen: it
+// is a performance counter, and there is no reason to pay for it otherwise.
+let gpuPercent = null;
+let gpuBusy = false;
+let gpuRequest = null;
+let gpuAskedAt = 0;
+
+function sampleGpu() {
+  // The counter read is a few milliseconds in the helper: asked for at the same
+  // pace as the card, and a third as often while a game is running.
+  if (!hookProc || gpuBusy || Date.now() - gpuAskedAt < (gameMode ? 4000 : 1200)) return;
+  gpuAskedAt = Date.now();
+  gpuBusy = true;
+  gpuRequest = (value) => {
+    gpuPercent = Number.isFinite(value) && value >= 0 ? value : null;
+  };
+  try {
+    hookProc.stdin.write('gpu\n');
+  } catch {
+    gpuBusy = false;
+    gpuRequest = null;
+  }
+}
+
+// 1.5 s normally; during a game the overlay and an open System card share a
+// 3 s tick, which is still live on screen and half the wake-ups.
+function gameStatsInterval() {
+  return gameMode ? 3000 : 1500;
+}
+
 function sendWidgetStats() {
-  if (gameMode || !hasWidgets()) return;
+  // During a game everything else stands still, but the overlay is still being
+  // watched: three readings from memory every 3 seconds cost nothing measurable.
+  if (!hasWidgets() || (gameMode && !widgetsFor('perf') && !widgetsFor('system'))) return;
   const stats = currentStats();
+  if (widgetsFor('perf')) sampleGpu();
   const payload = {
     cpu: Math.round(stats.cpu),
     ram: stats.ram,
     disk: stats.disk,
     focus: focusState,
+    gpu: gpuPercent,
   };
   eachWidget((card) => card.webContents.send('widget:stats', payload));
 }
@@ -4579,7 +4705,7 @@ function sendWidgetStats() {
 function startWidgetStats() {
   sendWidgetStats();
   if (widgetStatsTimer) return;
-  widgetStatsTimer = setInterval(sendWidgetStats, 1500);
+  widgetStatsTimer = setInterval(sendWidgetStats, gameStatsInterval());
 }
 
 function stopWidgetStats() {
@@ -4780,6 +4906,107 @@ function openWidget(tile, at) {
   sendWidgetBackdrop();
   startWidgetDrag(card, { dx: size.width / 2, dy: 26 });
 }
+
+// Dropped exactly where it is asked for, without a drag of its own: this is how the
+// overlay hands the screen back to the System card it came from.
+function showWidgetAt(tile, at) {
+  const size = widgetSize(tile, tile === 'system' && widgetExpanded);
+  const card = widgetsFor(tile) || createWidget(tile);
+  if (!card) return null;
+  const place = () => {
+    if (card.isDestroyed()) return;
+    card.setContentSize(size.width, size.height);
+    card.setPosition(at.x, at.y);
+    card.showInactive();
+    card.moveTop();
+  };
+  if (card.isVisible()) place();
+  else card.once('ready-to-show', place);
+  startWidgetStats();
+  sendWidgetBackdrop();
+  sendTileData(tile);
+  return card;
+}
+
+// The performance overlay is not dragged out of the panel like the other cards: it
+// appears in the corner and stays there until it is switched off, remembering where
+// it was put.
+let overlayPos = null;
+
+function showOverlayAt(at) {
+  const size = widgetSize('perf', false);
+  const existing = widgetsFor('perf');
+  if (existing) {
+    existing.setContentSize(size.width, size.height);
+    existing.setPosition(at.x, at.y);
+    existing.moveTop();
+    return existing;
+  }
+  const card = createWidget('perf');
+  if (!card) return null;
+  const place = () => {
+    if (card.isDestroyed()) return;
+    card.setContentSize(size.width, size.height);
+    card.setPosition(at.x, at.y);
+    // Shown without taking the keyboard: an overlay that steals focus from a game
+    // is worse than no overlay.
+    card.showInactive();
+    card.moveTop();
+  };
+  card.once('ready-to-show', place);
+  card.on('move', () => {
+    if (card.isDestroyed()) return;
+    const bounds = card.getBounds();
+    overlayPos = { x: bounds.x, y: bounds.y };
+  });
+  return card;
+}
+
+function togglePerformanceOverlay() {
+  const existing = widgetsFor('perf');
+  if (existing) {
+    existing.close();
+    return { open: false };
+  }
+  const size = widgetSize('perf', false);
+  const display = screen.getDisplayNearestPoint(cursorDip());
+  const at = overlayPos
+    ? clampWidget(overlayPos.x, overlayPos.y, size.width, size.height)
+    : {
+        x: display.workArea.x + display.workAreaSize.width - size.width - 24,
+        y: display.workArea.y + 24,
+      };
+  showOverlayAt(at);
+  return { open: true };
+}
+
+// The System card's minimise button hands its place over to the overlay: the same
+// four readings, with no card behind them, where the card was standing.
+ipcMain.on('widget:minimize', (event) => {
+  const card = BrowserWindow.fromWebContents(event.sender);
+  if (!card || card.isDestroyed()) return;
+  const bounds = card.getBounds();
+  const size = widgetSize('perf', false);
+  const at = clampWidget(bounds.x, bounds.y, size.width, size.height);
+  if (card.__tile === 'system') {
+    setWidgetExpanded(false);
+    card.close();
+  }
+  showOverlayAt(at);
+});
+
+// ... and its own button folds it back out into the System card, in the same place.
+ipcMain.on('widget:restore', (event) => {
+  const card = BrowserWindow.fromWebContents(event.sender);
+  if (!card || card.isDestroyed() || card.__tile !== 'perf') return;
+  const bounds = card.getBounds();
+  const size = widgetSize('system', false);
+  const at = clampWidget(bounds.x, bounds.y, size.width, size.height);
+  card.close();
+  showWidgetAt('system', at);
+});
+
+ipcMain.handle('notch:overlay', () => togglePerformanceOverlay());
 
 ipcMain.on('notch:detach', (_event, payload) => {
   const at = payload && Number.isFinite(payload.x) ? { x: payload.x, y: payload.y } : cursorDip();
