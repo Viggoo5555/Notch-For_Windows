@@ -948,6 +948,8 @@ const ASSISTANT_DEFAULTS = {
   engine: 'neural',
   neuralVoice: 'en_GB-alan-medium',
   studioVoice: 'bm_george',
+  // auto: answer in whatever the user wrote or spoke. da/en force one language.
+  language: 'auto',
   rate: 0,
   speak: true,
   wake: false,
@@ -1084,6 +1086,25 @@ function detectHardware() {
 // whisper on WebGPU; everything else gets moonshine, the only thing fast enough
 // on a CPU without WASM threads.
 function recommendStt(hardware = detectHardware()) {
+  // Danish is only understood by the multilingual whisper; the small English
+  // models would answer a Danish phrase with English-sounding nonsense.
+  if (assistantSettings().language === 'da') {
+    // Whisper small was measured at 20–44 s for a one-second Danish phrase on this
+    // processor, which is not a conversation; base with Danish named to it is the
+    // one that fits. Naming the language is most of the difference between "Åbn
+    // lommeregner" and "Open the door", because whisper otherwise guesses English
+    // on a short clip. A graphics card has the room for the larger model.
+    const gpu = hardware.tier === 'studio' || (!hardware.integrated && hardware.gpuMemoryGb >= 4);
+    return {
+      model: gpu ? 'onnx-community/whisper-small' : 'onnx-community/whisper-base',
+      fallback: 'onnx-community/whisper-base',
+      device: 'auto',
+      language: 'da',
+      note: gpu
+        ? `Dansk: whisper-small på ${hardware.gpu} med dansk angivet — den hører dansk bedst, og kortet gør den hurtig nok.`
+        : 'Dansk: whisper-base med dansk angivet, så den ikke gætter på engelsk; regn med et par sekunder pr. sætning på en processor.',
+    };
+  }
   if (hardware.tier === 'studio') {
     return {
       model: 'onnx-community/whisper-small',
@@ -1303,6 +1324,12 @@ function cleanOrder(rawText) {
     .trim();
 }
 
+// A Danish order deserves a Danish answer: the replies below follow the language
+// the order was given in (or the chosen language, when one is forced).
+let answerDanish = false;
+const sayBoth = (english, danish) => (answerDanish ? danish : english);
+const settingsInDanish = () => assistantSettings().language === 'da';
+
 // Launching something is shared between "open brave" and "open google": both
 // may be an app, a browser, a site or a bare domain, in that order of certainty.
 async function openSomething(rawAsked) {
@@ -1315,13 +1342,13 @@ async function openSomething(rawAsked) {
   if (/\b(?:and|then|og)\s+(?:open|launch|start|run|play|search|google|look)\b/i.test(asked)) return '';
   if (/^(settings|indstillinger)$/i.test(asked)) {
     shell.openExternal('ms-settings:');
-    return 'Opening Settings.';
+    return sayBoth('Opening Settings.', 'Åbner Indstillinger.');
   }
   const browser = findBrowser(asked);
   if (browser) {
     try {
       execFile(browser.exe, [], { windowsHide: true }, () => {});
-      return `Opening ${browser.name}.`;
+      return sayBoth(`Opening ${browser.name}.`, `Åbner ${browser.name}.`);
     } catch {
       /* fall through to the index */
     }
@@ -1330,37 +1357,41 @@ async function openSomething(rawAsked) {
   if (system) {
     try {
       execFile(system[1], [], { windowsHide: true }, () => {});
-      return `Opening ${system[2]}.`;
+      return sayBoth(`Opening ${system[2]}.`, `Åbner ${system[2]}.`);
     } catch {
       /* fall through to the index */
     }
   }
   const found = await findAppByName(asked);
   if (found && launchTarget(found.target).ok) {
-    return `Opening ${String(found.name).replace(/\.lnk$/i, '')}.`;
+    const name = String(found.name).replace(/\.lnk$/i, '');
+    return sayBoth(`Opening ${name}.`, `Åbner ${name}.`);
   }
   const site = ASSISTANT_SITES.find(([pattern]) => pattern.test(asked));
   if (site) {
     shell.openExternal(site[1]);
-    return `Opening ${site[2]}.`;
+    return sayBoth(`Opening ${site[2]}.`, `Åbner ${site[2]}.`);
   }
   if (/^https?:\/\/\S+$/i.test(asked)) {
     shell.openExternal(asked);
-    return `Opening ${asked}.`;
+    return sayBoth(`Opening ${asked}.`, `Åbner ${asked}.`);
   }
   if (/^[\w-]+(\.[\w-]+)+$/.test(asked)) {
     shell.openExternal(`https://${asked}`);
-    return `Opening ${asked}.`;
+    return sayBoth(`Opening ${asked}.`, `Åbner ${asked}.`);
   }
   return '';
 }
 
 async function runAction(text) {
 
-  if (/^(?:what(?:'s| is) the time|what time is it|hvad er klokken)[?.!]*$/i.test(text)) {
+  if (/^(?:what(?:'s| is) the time|what time is it|hvad er klokken|hvad er tiden)[?.!]*$/i.test(text)) {
     const now = new Date();
-    const time = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    return { handled: true, say: `It is ${time}.` };
+    const time = now.toLocaleTimeString(answerDanish ? 'da-DK' : 'en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    return { handled: true, say: sayBoth(`It is ${time}.`, `Klokken er ${time}.`) };
   }
 
   const openMatch = text.match(
@@ -1388,7 +1419,10 @@ async function runAction(text) {
     };
     shell.openExternal(urls[where] || urls.google);
     const label = where.charAt(0).toUpperCase() + where.slice(1);
-    return { handled: true, say: `Searching ${label} for ${query}.` };
+    return {
+      handled: true,
+      say: sayBoth(`Searching ${label} for ${query}.`, `Søger på ${label} efter ${query}.`),
+    };
   }
 
   const playMatch = text.match(/^(?:play|afspil|spil)\s+(.+?)[.!?]*$/i);
@@ -1396,10 +1430,10 @@ async function runAction(text) {
     const query = playMatch[1].trim();
     if (/^(music|musik|something|noget)$/i.test(query)) {
       shell.openExternal('https://open.spotify.com');
-      return { handled: true, say: 'Opening Spotify.' };
+      return { handled: true, say: sayBoth('Opening Spotify.', 'Åbner Spotify.') };
     }
     shell.openExternal(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`);
-    return { handled: true, say: `Playing ${query} on YouTube.` };
+    return { handled: true, say: sayBoth(`Playing ${query} on YouTube.`, `Spiller ${query} på YouTube.`) };
   }
 
   return { handled: false };
@@ -1408,6 +1442,7 @@ async function runAction(text) {
 async function performAssistantAction(rawText) {
   const text = cleanOrder(rawText);
   if (!text) return { handled: false };
+  answerDanish = settingsInDanish() || looksDanish(text);
   let missed = '';
 
   // "open brave and google the weather" is two orders in one breath, and a
@@ -1427,7 +1462,15 @@ async function performAssistantAction(rawText) {
   if (first.handled) return first;
   if (first.missed) missed = first.missed;
 
-  if (missed) return { handled: true, say: `I could not find “${missed}” on this machine.` };
+  if (missed) {
+    return {
+      handled: true,
+      say: sayBoth(
+        `I could not find “${missed}” on this machine.`,
+        `Jeg kunne ikke finde “${missed}” på denne computer.`,
+      ),
+    };
+  }
   return { handled: false };
 }
 
@@ -1738,7 +1781,35 @@ const NEURAL_VOICES = [
     // A breathing space between sentences, so a reply is not one run-on line.
     silence: 0.22,
   },
+  {
+    id: 'da_DK-talesyntese-medium',
+    label: 'Jarvis · dansk',
+    note: 'Dansk · rolig',
+    file: 'da_DK-talesyntese-medium.onnx',
+    lang: 'da',
+    // Danish is spoken with rounder vowels and longer syllables than the model's
+    // default gives it, so it is left slightly slower than the British voice.
+    length: 0.94,
+    noise: 0.5,
+    noiseW: 0.7,
+    silence: 0.24,
+  },
 ];
+
+// Danish can be recognised from its letters alone most of the time, and from its
+// small words when a sentence happens to use none of them.
+const DANISH_LETTERS = /[æøåÆØÅ]/;
+const DANISH_WORDS =
+  /\b(og|ikke|jeg|det|der|er|til|med|på|for|af|du|vi|kan|hvad|hvor|hvordan|hvorfor|gerne|tak|hej|nu|så|også|men|har|skal|vil|mig|dig|den|dette|klokken|vejret|åbn|åbne|spil|søg|dansk|godaften|godmorgen|godnat|hr)\b/gi;
+
+function looksDanish(text) {
+  const value = String(text || '');
+  if (DANISH_LETTERS.test(value)) return true;
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 4) return false;
+  const hits = (value.match(DANISH_WORDS) || []).length;
+  return hits >= 2;
+}
 
 // The studio voice: a bigger neural reader that only makes sense with a real
 // graphics card behind it. It is not used unless it is chosen, and the machine
@@ -1760,44 +1831,75 @@ function studioAvailable() {
   }
 }
 
-let piperProc = null;
+// One process per language: the model is fixed when piper starts, and a reply in
+// Danish cannot be read by the English voice.
+const piperProcs = new Map();
 let piperQueue = Promise.resolve();
 let piperIdleTimer = 0;
 let piperSeq = 0;
 // The model itself only loads when the first line arrives, which costs a second
 // or more; a throwaway line at startup pays that once, out of sight.
-let piperWarmed = false;
+const piperWarmed = new Set();
+
+function voiceById(id) {
+  return NEURAL_VOICES.find((voice) => voice.id === id) || null;
+}
+
+function danishVoice() {
+  return NEURAL_VOICES.find((voice) => voice.lang === 'da') || null;
+}
 
 function neuralVoice() {
   const wanted = assistantSettings().neuralVoice;
-  return NEURAL_VOICES.find((voice) => voice.id === wanted) || NEURAL_VOICES[0];
+  return voiceById(wanted) || NEURAL_VOICES[0];
 }
 
-function neuralVoiceAvailable() {
+function voiceAvailable(voice) {
   try {
-    return fs.existsSync(PIPER_BIN) && fs.existsSync(path.join(PIPER_DIR, neuralVoice().file));
+    return !!voice && fs.existsSync(PIPER_BIN) && fs.existsSync(path.join(PIPER_DIR, voice.file));
   } catch {
     return false;
   }
 }
 
-function stopPiper() {
-  clearTimeout(piperIdleTimer);
-  piperWarmed = false;
-  if (!piperProc) return;
-  try {
-    piperProc.stdin.end();
-    piperProc.kill();
-  } catch {
-    /* already gone */
-  }
-  piperProc = null;
+function neuralVoiceAvailable() {
+  return voiceAvailable(neuralVoice());
 }
 
-function piperProcess() {
-  if (piperProc && !piperProc.killed) return piperProc;
-  if (!neuralVoiceAvailable()) return null;
-  const voice = neuralVoice();
+// Danish text goes to the Danish voice even when the chosen voice is the British
+// one: reading Danish with an English model is not an accent, it is nonsense.
+function voiceForText(text, wantedId) {
+  const wanted = wantedId ? voiceById(wantedId) : null;
+  if (wanted && voiceAvailable(wanted)) return wanted;
+  const chosen = neuralVoice();
+  if (chosen && voiceAvailable(chosen) && (chosen.lang === 'da' || !looksDanish(text))) return chosen;
+  const danish = danishVoice();
+  if (looksDanish(text) && voiceAvailable(danish)) return danish;
+  return chosen;
+}
+
+function stopPiper(id) {
+  clearTimeout(piperIdleTimer);
+  const keys = id ? [id] : [...piperProcs.keys()];
+  for (const key of keys) {
+    piperWarmed.delete(key);
+    const child = piperProcs.get(key);
+    piperProcs.delete(key);
+    if (!child) continue;
+    try {
+      child.stdin.end();
+      child.kill();
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+function piperProcess(voice) {
+  if (!voice) return null;
+  const running = piperProcs.get(voice.id);
+  if (running && !running.killed) return running;
+  if (!voiceAvailable(voice)) return null;
   try {
     const child = spawn(
       PIPER_BIN,
@@ -1818,40 +1920,53 @@ function piperProcess() {
     );
     child.stdin.on('error', () => {});
     child.on('error', () => {
-      if (piperProc === child) piperProc = null;
+      if (piperProcs.get(voice.id) === child) piperProcs.delete(voice.id);
     });
     child.on('exit', () => {
-      if (piperProc === child) piperProc = null;
+      if (piperProcs.get(voice.id) === child) piperProcs.delete(voice.id);
     });
-    piperProc = child;
+    piperProcs.set(voice.id, child);
     return child;
   } catch {
     return null;
   }
 }
 
-// Warms the model in the background so the first spoken reply is not slow.
-function warmPiper() {
-  if (!neuralVoiceAvailable()) return;
-  const child = piperProcess();
-  if (!child) return;
-  clearTimeout(piperIdleTimer);
-  piperIdleTimer = setTimeout(stopPiper, 12 * 60 * 1000);
-  if (piperWarmed) return;
-  piperWarmed = true;
-  speakNeural('Ready.').catch(() => {});
+function warmVoiceLine(voice, text) {
+  if (!voice || piperWarmed.has(voice.id)) return;
+  piperWarmed.add(voice.id);
+  speakNeural(text, voice.id).catch(() => {});
 }
 
-function speakNeural(text) {
+// Warms the model in the background so the first spoken reply is not slow.
+function warmPiper() {
+  const voice = neuralVoice();
+  if (!voiceAvailable(voice)) return;
+  const child = piperProcess(voice);
+  if (!child) return;
+  clearTimeout(piperIdleTimer);
+  piperIdleTimer = setTimeout(() => stopPiper(), 12 * 60 * 1000);
+  warmVoiceLine(voice, 'Ready.');
+
+  // The Danish model is loaded quietly a little later: the first Danish reply
+  // should not be the slow one either, and nothing waits on it.
+  const danish = danishVoice();
+  if (danish && danish.id !== voice.id && voiceAvailable(danish)) {
+    setTimeout(() => warmVoiceLine(danish, 'Klar.'), 8000);
+  }
+}
+
+function speakNeural(text, voiceId) {
   const value = String(text || '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 900);
   if (!value) return Promise.resolve({ ok: false, reason: 'empty' });
-  const child = piperProcess();
+  const voice = voiceForText(value, voiceId);
+  const child = piperProcess(voice);
   if (!child) return Promise.resolve({ ok: false, reason: 'missing' });
   clearTimeout(piperIdleTimer);
-  piperIdleTimer = setTimeout(stopPiper, 12 * 60 * 1000);
+  piperIdleTimer = setTimeout(() => stopPiper(), 12 * 60 * 1000);
   const file = path.join(os.tmpdir(), `notch-voice-${Date.now()}-${(piperSeq += 1)}.wav`);
   // One line at a time: piper answers in order, and the queue keeps the
   // filenames from colliding when two replies land together.
@@ -1869,7 +1984,7 @@ function speakNeural(text) {
           try {
             if (fs.existsSync(file) && fs.statSync(file).size > 800) {
               clearInterval(tick);
-              resolve({ ok: true, file, url: `file:///${file.replace(/\\/g, '/')}` });
+              resolve({ ok: true, file, url: `file:///${file.replace(/\\/g, '/')}`, voice: voice ? voice.id : '' });
               return;
             }
           } catch {
@@ -1885,10 +2000,10 @@ function speakNeural(text) {
   return piperQueue;
 }
 
-ipcMain.handle('assistant:speak-neural', async (_event, text) => {
-  const result = await speakNeural(text);
+ipcMain.handle('assistant:speak-neural', async (_event, text, voiceId) => {
+  const result = await speakNeural(text, voiceId);
   if (!result.ok) return result;
-  return { ok: true, url: result.url };
+  return { ok: true, url: result.url, voice: result.voice };
 });
 
 ipcMain.handle('assistant:warm-voice', () => {
@@ -2254,6 +2369,7 @@ ipcMain.handle('assistant:settings', (_event, patch) => {
   const settings = setAssistantSettings(patch);
   // A different voice model cannot be swapped inside a running piper process.
   if (patch && patch.neuralVoice && patch.neuralVoice !== before.neuralVoice) stopPiper();
+  if (patch && patch.language && patch.language !== before.language) warmPiper();
   // The wake word lives in the window, so turning it on has to bring the
   // window into existence (hidden) rather than wait for the hotkey.
   if (settings.wake && !jarvisWin) createJarvis();

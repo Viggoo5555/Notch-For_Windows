@@ -4,6 +4,10 @@
 let asr = null;
 let loading = null;
 let webgpuBroken = false;
+// Whisper guesses the language from the first seconds of audio, and on a short
+// Danish phrase that guess is usually English — which is where "Åbn lommeregner"
+// came back as "Open the door". Naming the language skips the guess entirely.
+let language = null;
 
 function post(message) {
   self.postMessage(message);
@@ -125,6 +129,7 @@ async function load(model, fallback, requested) {
 self.onmessage = async (event) => {
   const data = event.data || {};
   if (data.type === 'init') {
+    language = data.language || null;
     if (loading) return;
     loading = load(data.model, data.fallback, data.device).catch((error) => {
       asr = null;
@@ -148,7 +153,11 @@ self.onmessage = async (event) => {
         post({ type: 'result', text: '' });
         return;
       }
-      const result = await asr(audio, { chunk_length_s: 30, sampling_rate: 16000 });
+      const result = await asr(audio, {
+        chunk_length_s: 30,
+        sampling_rate: 16000,
+        ...(language ? { language, task: 'transcribe' } : {}),
+      });
       const text = Array.isArray(result) ? result.map((r) => r.text).join(' ') : result.text;
       post({ type: 'result', text: String(text || '').trim() });
     } catch (error) {

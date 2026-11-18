@@ -44,6 +44,7 @@ const els = {
   pullText: $('pullText'),
   speakToggle: $('speakToggle'),
   voiceSelect: $('voiceSelect'),
+  languageSelect: $('languageSelect'),
   rateRange: $('rateRange'),
   testVoice: $('testVoice'),
   wakeToggle: $('wakeToggle'),
@@ -78,18 +79,59 @@ const state = {
   stt: null,
   studioAnnounced: false,
   gamePaused: false,
+  lastVoice: '',
 };
 
-const SYSTEM_PROMPT = [
-  'You are Jarvis, a calm British assistant living in a small window on a Windows desktop.',
-  'Speak the way a good butler would: short, dry, precise, never flustered. Use "sir" now and then, not in every sentence.',
-  'Keep answers to two or three sentences unless asked for depth. Plain language; fenced code blocks only when code is wanted.',
-  'Never invent facts; say plainly when you are unsure.',
-  'You can work this computer. When the user asks you to do a thing rather than explain it, do it and add one command in double square brackets at the very end:',
-  '[[open: Brave]], [[search: google for weather in Aarhus]], [[play: Norah Jones]].',
-  'The window carries the command out and removes the brackets from the reply, so say what you are doing in one short line and put the command after it.',
-  'Use those three forms only, one per reply, and never when the user merely asked a question.',
-].join(' ');
+// Danish is recognisable by its letters, which the small models respect better
+// than any instruction about language.
+const DANISH_LETTERS = /[æøåÆØÅ]/;
+const DANISH_WORDS =
+  /\b(og|ikke|jeg|det|der|er|til|med|på|for|af|du|vi|kan|hvad|hvor|hvordan|hvorfor|gerne|tak|hej|nu|så|også|men|har|skal|vil|mig|dig|den|dette|klokken|vejret|dansk|godaften|godmorgen|godnat|hr)\b/gi;
+
+function looksDanish(text) {
+  const value = String(text || '');
+  if (DANISH_LETTERS.test(value)) return true;
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 4) return false;
+  return (value.match(DANISH_WORDS) || []).length >= 2;
+}
+
+function systemPrompt() {
+  const lines = [
+    'You are Jarvis, a calm British assistant living in a small window on a Windows desktop.',
+    'Speak the way a good butler would: short, dry, precise, never flustered. Use "sir" now and then, not in every sentence.',
+    'Keep answers to two or three sentences unless asked for depth. Plain language; fenced code blocks only when code is wanted.',
+    'Never invent facts; say plainly when you are unsure.',
+  ];
+  const language = state.settings.language || 'auto';
+  if (language === 'da') {
+    lines.push(
+      'Svar altid på dansk, også når spørgsmålet er på engelsk. Du er stadig Jarvis: rolig, kort og præcis, og du siger "hr." nu og da i stedet for "sir".',
+    );
+  } else if (language === 'en') {
+    lines.push('Answer in English, even if the question is in Danish.');
+  } else {
+    lines.push(
+      'Answer in the language the user wrote or spoke in — Danish when they used Danish, English otherwise. Never mix the two in one reply, and keep the same voice in both.',
+    );
+  }
+  lines.push(
+    'You can work this computer. When the user asks you to do a thing rather than explain it, do it and add one command in double square brackets at the very end:',
+    '[[open: Brave]], [[search: google for weather in Aarhus]], [[play: Norah Jones]].',
+    'The window carries the command out and removes the brackets from the reply, so say what you are doing in one short line and put the command after it.',
+    'Use those three forms only, one per reply, and never when the user merely asked a question.',
+  );
+  return lines.join(' ');
+}
+
+// The system message is rebuilt when the language changes, so a switch takes
+// effect on the very next reply rather than at the next restart.
+function refreshSystemPrompt() {
+  const content = systemPrompt();
+  const existing = state.history.find((message) => message.role === 'system');
+  if (existing) existing.content = content;
+  else state.history.unshift({ role: 'system', content });
+}
 
 // The model writes its orders as [[open: X]] so that any local model can drive
 // the machine without tool-calling support. They are taken out before the reply
@@ -376,11 +418,18 @@ function voiceBus() {
 // pay for it, so the pace is unchanged.
 const VOICE_PITCH = 0.95;
 
-function wireVoice(audio) {
+// The Danish voice is a different model with its own pitch and its own pacing:
+// dropped a semitone it drags, and the model already speaks at a natural speed,
+// so it plays as rendered and only the warmth chain is added.
+function pitchFor(voiceId) {
+  return String(voiceId || '').startsWith('da') ? 1 : VOICE_PITCH;
+}
+
+function wireVoice(audio, pitch = VOICE_PITCH) {
   try {
     audio.preservesPitch = false;
     audio.webkitPreservesPitch = false;
-    audio.playbackRate = VOICE_PITCH;
+    audio.playbackRate = pitch;
   } catch {
     /* older engines keep their own pitch */
   }
@@ -542,12 +591,12 @@ function stopAudio() {
 
 // Resolves when the clip is done, so a long reply can be spoken sentence by
 // sentence without the next one cutting off the one before it.
-function playFileWhenDone(url) {
+function playFileWhenDone(url, voiceId) {
   return new Promise((resolve) => {
     stopAudio();
     const audio = new Audio(url);
     player = audio;
-    wireVoice(audio);
+    wireVoice(audio, pitchFor(voiceId));
     const finish = () => {
       if (player === audio) player = null;
       resolve();
@@ -641,7 +690,10 @@ function say(text) {
       .catch(() => {});
     return speechChain;
   }
-  const useStudio = state.settings.engine === 'studio' && state.studio.available && !studioBroken;
+  // The studio voice has no Danish, so a Danish reply goes to the Danish voice
+  // instead of being read with an English accent.
+  const useStudio =
+    state.settings.engine === 'studio' && state.studio.available && !studioBroken && !looksDanish(value);
   if (useStudio) ensureStudio();
   // Start rendering now, rather than once the sentence before has been spoken.
   let render = useStudio ? studioRenderChain : speechRender;
@@ -674,14 +726,15 @@ function say(text) {
           // voice is always there, so the reply is still spoken.
           const spare = await api.speakNeural(clips[index].chunk).catch(() => null);
           if (spare && spare.ok && spare.url) {
-            await playFileWhenDone(spare.url);
+            await playFileWhenDone(spare.url, spare.voice);
             continue;
           }
           await speakSystem(clips.slice(index).map((item) => item.chunk).join(' '));
           break;
         }
         if (clip && clip.ok && clip.url) {
-          await playFileWhenDone(clip.url);
+          if (clip.voice) state.lastVoice = clip.voice;
+          await playFileWhenDone(clip.url, clip.voice);
           continue;
         }
         // That line could not be synthesised: finish the rest of the reply with
@@ -733,6 +786,7 @@ async function send(text) {
     trimHistory();
     if (state.settings.speak) say(reply);
     else setVoiceState('idle');
+    followUpIfAsked(reply);
     return;
   }
 
@@ -768,6 +822,42 @@ async function send(text) {
   }
 }
 
+// Jarvis asked something, so the answer is the next thing said: the microphone
+// opens again by itself instead of waiting for the wake word. It only happens
+// hands-free (wake word on) and only when the question is actually spoken, and
+// it needs a real question — a reply that ends in a full stop does not trigger it.
+function followUpIfAsked(reply) {
+  if (!state.settings.wake || !state.settings.speak) return;
+  const value = String(reply || '').trim();
+  if (!value) return;
+  const lastSentence = value.split(/(?<=[.!?])\s+/).pop() || value;
+  if (!lastSentence.includes('?')) return;
+  speechChain
+    .then(() => {
+      if (state.busy || !state.settings.wake) return null;
+      // The reply is still in the room after the last word — the speakers ring
+      // for a moment and the room echoes — and a microphone opened into that
+      // records Jarvis answering itself. So the room is given until it is quiet
+      // again before listening starts.
+      return new Promise((resolve) => {
+        const started = Date.now();
+        const tick = setInterval(() => {
+          const quiet = !audio || audio.silence >= 3 || Date.now() - started > 3000;
+          if (!quiet) return;
+          clearInterval(tick);
+          resolve();
+        }, 90);
+      });
+    })
+    .then(() => new Promise((resolve) => setTimeout(resolve, 360)))
+    .then(() => {
+      if (state.busy || !state.settings.wake) return null;
+      toast('Listening…', 1600);
+      return listenOnce({ followUp: true });
+    })
+    .catch(() => {});
+}
+
 function finishStream(text, aborted) {
   if (!state.stream) return;
   const { body } = state.stream;
@@ -792,6 +882,7 @@ function finishStream(text, aborted) {
       if (rest) say(rest);
       else if (!spokenAt) say(clean);
     } else setVoiceState('idle');
+    if (!aborted) followUpIfAsked(clean);
   } else {
     setVoiceState('idle');
   }
@@ -1126,6 +1217,7 @@ function ensureStt() {
     model: plan.model || STT_MODELLING,
     fallback: plan.fallback ?? STT_FALLBACK,
     device: plan.device || 'auto',
+    language: plan.language || null,
   });
   return state.stt;
 }
@@ -1375,22 +1467,22 @@ function setVoiceState(next) {
   }
 }
 
-async function listenOnce() {
+async function listenOnce(options = {}) {
   if (state.busy) {
-    toast('One thing at a time.');
+    if (!options.followUp) toast('One thing at a time.');
     return;
   }
   // The wake listener owns the microphone; hand it over for this recording and
   // pick listening back up afterwards.
   const wasWaking = pauseWake();
   try {
-    await recordAndSend();
+    await recordAndSend(options);
   } finally {
     if (wasWaking) startWakeLoop();
   }
 }
 
-async function recordAndSend() {
+async function recordAndSend(options = {}) {
   try {
     await ensureAudio();
   } catch {
@@ -1418,20 +1510,24 @@ async function recordAndSend() {
   });
   setListening(false);
 
+  // After a question of its own, nothing said is a normal end to the conversation
+  // rather than a failed recording, so it is left without a complaint.
   if (!samples.length || samples.length < 1600) {
     setVoiceState('idle');
-    toast('I did not catch that.');
+    if (!options.followUp) toast('I did not catch that.');
     return;
   }
-  toast('Transcribing…', 1400);
+  if (!options.followUp) toast('Transcribing…', 1400);
   const text = await transcribe(samples);
   const clean = String(text || '').trim();
   if (!clean) {
     setVoiceState('idle');
-    toast('I did not catch that.');
+    if (!options.followUp) toast('I did not catch that.');
     return;
   }
-  const stripped = clean.replace(/^(hey|hi|okay|ok)[,\s]*jarvis[,\s.!:-]*/i, '').trim();
+  const stripped = clean
+    .replace(/^(hey|hi|hej|hejsa|okay|ok|halløj)[,\s]*jarvis[,\s.!:-]*/i, '')
+    .trim();
   const command = stripped || clean;
   els.input.value = command;
   autosize();
@@ -1468,14 +1564,35 @@ function closeEnough(word) {
   return false;
 }
 
-function wakeCommand(text) {
+// Within a conversation the name on its own is enough. After a while away it
+// takes a greeting in front of it — "hey Jarvis", "hej Jarvis", "okay Jarvis" — so
+// that the television saying a name at an empty desk does not start one.
+const WAKE_GREETING = /^(hey|hej|hejsa|hejhej|hi|ok|okay|okey|hallo|halløj|goddag|yo)$/i;
+const WAKE_FRESH_MS = 5 * 60 * 1000;
+let lastWakeAt = 0;
+
+function wakeNeedsGreeting() {
+  return Date.now() - lastWakeAt > WAKE_FRESH_MS;
+}
+
+function wakeCommand(text, requireGreeting = false) {
   const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ');
   if (!words.length || !words[0]) return null;
   const head = Math.min(words.length, 4);
   for (let i = 0; i < head; i += 1) {
-    const bare = words[i].replace(/[^a-zA-Z]/g, '');
+    const bare = words[i].replace(/[^a-zA-ZæøåÆØÅ]/g, '');
     if (!bare) continue;
     if (!WAKE_NAME.test(bare) && !closeEnough(bare)) continue;
+    if (requireGreeting) {
+      const before = words
+        .slice(0, i)
+        .map((word) => word.replace(/[^a-zA-ZæøåÆØÅ]/g, ''))
+        .filter(Boolean);
+      const greeting = before.length > 0 && WAKE_GREETING.test(before[before.length - 1]);
+      // A cold wake needs the greeting: the name by itself is passed over here,
+      // and the phrase keeps listening for a better one.
+      if (!greeting) return null;
+    }
     return words
       .slice(i + 1)
       .join(' ')
@@ -1547,13 +1664,17 @@ function wakeTick() {
   if (!done && !long) return;
   const loud = a.loud;
   const samples = recorderTake();
-  // Two loud blocks is about half a second of real sound: enough for a name.
-  if (loud < 2 || samples.length < 9000) return;
+  // One loud block is a quarter of a second, which is all a quick "Jarvis" takes.
+  // Asking for two made the shortest, most natural way of waking it the one that
+  // never arrived; a stray noise costs a short transcription and nothing else,
+  // because a phrase without the name is dropped on the next line.
+  if (loud < 1 || samples.length < 5000) return;
   wakeBusy = true;
   transcribe(samples)
     .then((text) => {
-      const command = wakeCommand(text);
+      const command = wakeCommand(text, wakeNeedsGreeting());
       if (command === null) return null;
+      lastWakeAt = Date.now();
       wakeChime();
       setVoiceState('listening');
       if (command.length > 1) {
@@ -1563,7 +1684,9 @@ function wakeTick() {
         return null;
       }
       toast('Listening…', 1500);
-      return listenOnce();
+      // The name on its own is a wake-up call, not a command: listen for the
+      // order, and if none comes, go quietly back to waiting.
+      return listenOnce({ followUp: true });
     })
     .catch(() => {})
     .finally(() => {
@@ -1630,6 +1753,7 @@ function fillVoices() {
 function applySettingsToUi() {
   els.speakToggle.checked = !!state.settings.speak;
   els.wakeToggle.checked = !!state.settings.wake;
+  if (els.languageSelect) els.languageSelect.value = state.settings.language || 'auto';
   els.rateRange.value = String(state.settings.rate || 0);
 }
 
@@ -1755,6 +1879,41 @@ els.voiceSelect.addEventListener('change', () => {
   say('At your service, sir.');
 });
 
+if (els.languageSelect) {
+  els.languageSelect.addEventListener('change', () => {
+    state.settings.language = els.languageSelect.value;
+    api.save({ language: state.settings.language });
+    refreshSystemPrompt();
+    // The listening model depends on the language, so the next recording rebuilds
+    // it, and the voice for it is warmed now rather than mid-sentence.
+    if (state.stt) {
+      const worker = state.stt;
+      state.stt = null;
+      try {
+        worker.terminate();
+      } catch {
+        /* already gone */
+      }
+    }
+    state.sttAttempts = 0;
+    state.sttAnnounced = false;
+    api.warmVoice();
+    api.boot().then((data) => {
+      if (data && data.stt) {
+        state.sttPlan = data.stt;
+        if (els.sttLine && data.stt.note) els.sttLine.textContent = data.stt.note;
+      }
+    });
+    say(
+      state.settings.language === 'da'
+        ? 'Godaften. Klar til tjeneste, hr.'
+        : state.settings.language === 'en'
+          ? 'At your service, sir.'
+          : 'At your service, sir. Godaften.',
+    );
+  });
+}
+
 els.rateRange.addEventListener('input', () => {
   state.settings.rate = Number(els.rateRange.value) || 0;
   api.save({ rate: state.settings.rate });
@@ -1821,6 +1980,20 @@ window.__jarvis = {
     rate: player ? player.playbackRate : null,
     studio: !!studioSource,
     studioReady,
+    last: state.lastVoice || '',
+    prompt: (state.history[0] && state.history[0].content) || '',
+    hud: voiceState,
+    wake: wakeListening,
+    sinceWake: lastWakeAt ? Date.now() - lastWakeAt : null,
+    needsGreeting: wakeNeedsGreeting(),
+  }),
+  followUp: followUpIfAsked,
+  stt: () => ({
+    pending: !!(state.stt && state.stt.pending),
+    ready: !!(state.stt && state.stt.ready),
+    attempts: state.sttAttempts,
+    plan: state.sttPlan || null,
+    line: (els.sttLine && els.sttLine.textContent) || '',
   }),
   wakeCommand,
   wake: () => ({
@@ -1849,7 +2022,7 @@ window.__jarvis = {
   state.sttPlan = data.stt || null;
   if (els.sttLine && state.sttPlan && state.sttPlan.note) els.sttLine.textContent = state.sttPlan.note;
   state.voices = data.voices || [];
-  state.history = [{ role: 'system', content: SYSTEM_PROMPT }];
+  state.history = [{ role: 'system', content: systemPrompt() }];
 
   applySettingsToUi();
   fillVoices();

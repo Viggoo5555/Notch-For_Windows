@@ -12,8 +12,8 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.0.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.0/Notch-Setup-1.2.0.exe)**
-— the installer, about 300 MB.
+**[Notch-Setup-1.2.1.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.1/Notch-Setup-1.2.1.exe)**
+— the installer, about 340 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
    code-signed): **More info → Run anyway**.
@@ -26,12 +26,12 @@ It installs for your user only, so it never asks for an administrator password.
 Remove it from *Settings → Apps → Notch*; your settings in
 `%APPDATA%\notch\notch.json` are left in place.
 
-No installer wanted? [Notch-1.2.0.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.0/Notch-1.2.0.exe)
-is the same app as a single portable file (~260 MB) — double-click and it runs.
+No installer wanted? [Notch-1.2.1.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.1/Notch-1.2.1.exe)
+is the same app as a single portable file (~300 MB) — double-click and it runs.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
-### Upgrading from 1.1.0
+### Upgrading from 1.2.0
 
 Run the new installer over the old one; settings, pinned apps and the game
 library are kept. Nothing else is needed — the first start asks nothing.
@@ -57,11 +57,18 @@ library are kept. Nothing else is needed — the first start asks nothing.
 - **Library** — scans Steam, Epic and your own shortcuts, shows the cover art, and
   launches a game with a click. Add a shortcut by hand if a launcher keeps it hidden.
 - **Jarvis** — an assistant panel with a chat model picker, push-to-talk, and a
-  "Hey Jarvis" wake word that keeps listening while the window is hidden. It can
+  "Hey Jarvis" wake word that keeps listening while the window is hidden — and the
+  name on its own is enough once you have spoken to it in the last five minutes —
+  *Jarvis*, *Jarvis, open Brave*. After a longer pause it wants a greeting in
+  front: *Hey Jarvis*, *Okay Jarvis*, *Hej Jarvis*. Either way the chime plays and
+  it listens for the order that follows. It can
   work the machine: *open Brave*, *open calculator and notepad*, *search Google for
   the weather*, *play Norah Jones*, or a whole sentence asking for one of those. It
   also answers with two voices — a light one that starts in under a second, and a
-  studio voice that sounds like a recording on machines with a graphics card.
+  studio voice that sounds like a recording on machines with a graphics card. When
+  it answers with a question of its own it keeps listening, so the reply can be
+  spoken straight back without saying the wake word again. It understands Danish: write or say *åbn lommeregner*, *hvad er klokken*, *søg efter
+  vejret*, and it answers in Danish with a Danish voice.
 - **Game mode** — when a game takes the full screen, the whole shell stands down:
   windows hidden, captures and scans stopped, the microphone released, Chromium
   windows parked. The cost falls from a third of a core to about a tenth of one, and
@@ -109,14 +116,54 @@ Everything is a choice in Settings → Voice and Settings → models; the
 recommendation is only a default. Model files for the other tiers download on first
 use.
 
+### Danish
+
+Jarvis follows the language it is spoken to in. Set **Settings → Voice → Language**
+to *Match what I write* (the default) and it answers in Danish when you use Danish,
+in English otherwise; force *Dansk* to have it answer in Danish whatever you type.
+The short commands work in both languages, and their answers come back in the
+language you asked in — *åbn lommeregner* → "Åbner Lommeregner.", *hvad er klokken*
+→ "Klokken er 19.14.".
+
+The two voices follow the text: a Danish reply is read by the bundled Danish Piper
+voice (`da_DK-talesyntese-medium`, ships in the package), an English one by the
+British voice. The studio voice is English only, so Danish lines fall back to Piper
+automatically, and a Danish line plays at its own pace instead of being slowed down
+the way the British voice deliberately is. Nothing is sent anywhere.
+
+Listening is the hard part, and it is worth being plain about it. Choosing *Dansk*
+switches to a multilingual Whisper, because the small English model turns Danish
+into English-sounding nonsense: without it *"Åbn lommeregner"* came back as *"Open
+the door"*, and *"Hvad er klokken?"* as *"We're clopping."*. Two changes were made
+and measured on the same four recorded phrases:
+
+| | before | after |
+| --- | --- | --- |
+| Åbn lommeregner. | Open the door. | Open DOM 1 |
+| Hvad er klokken? | We're clopping. | Hver kloppen? |
+| Hvad er vejret i dag i Aarhus? | What is your day at home? | Hvad værdede de i jer huset? |
+| Hej Jarvis. | Hi guys | Hej Guys! |
+
+The first is that Danish is *named* to the model instead of letting it guess the
+language from a one-second clip; the second is the model itself, sized to the
+machine — Whisper base on a processor, Whisper small on a 4 GB graphics card, where
+it is also fast enough to be worth it (small took 20–44 seconds per phrase on this
+processor, which is not a conversation; base takes about eight).
+
+It is still the weakest link in Danish: a short command comes back close but not
+clean, and the name on its own survives while *"hej Jarvis"* spoken in Danish is
+sometimes heard as *"Hej Guys!"*. Saying *"hey Jarvis"* the English way is
+recognised reliably. Beyond that, the accuracy questions is answered by hardware:
+on a graphics card Whisper small hears Danish properly.
+
 ### Build the download
 
 ```bash
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.0.exe`, the installer said above,
-and `Notch-1.2.0.exe`, the same app as one portable file. Neither needs Node.js on
+writes two files into `dist/`: `Notch-Setup-1.2.1.exe`, the installer said above,
+and `Notch-1.2.1.exe`, the same app as one portable file. Neither needs Node.js on
 the target machine. `npm run dist:installer` builds only the installer.
 
 The package carries Electron, the Whisper loader, `kokoro-js` and the Piper voice,
@@ -158,8 +205,9 @@ Panel → menu (the sliders icon) → Settings. Everything is stored in
 - **Backdrop** — sample the live desktop or a fixed wallpaper image
 - **Taskbar** — show it, glass or invisible surface, attached or island layout,
   items (both, open windows only, pins only), auto-hide
-- **Voice** — speak replies, the voice itself (studio, fast, or a Windows voice),
-  speed, test button, and the "Hey Jarvis" wake word
+- **Voice** — speak replies, language (match what I write, Danish, English), the
+  voice itself (studio, fast, or a Windows voice), speed, test button, and the
+  "Hey Jarvis" wake word
 - **Start menu** — whether the Windows key opens this launcher
 - **Start with Windows** — run at login (from the panel menu)
 
@@ -236,6 +284,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.1** — Danish. Jarvis answers in Danish, reads it aloud in a bundled Danish
+voice, runs the short commands in Danish and answers them in Danish, and listens
+with a model that is told the language instead of guessing it. Language is a setting
+of its own (match what I write, Dansk, English) and the listening model follows it,
+sized to the machine. The wake word lost its training wheels: after five minutes
+away it wants a greeting in front of the name — *hey Jarvis*, *okay Jarvis*, *hej
+Jarvis* — and within a conversation the name alone will do, at a gate low enough
+that a quick *"Jarvis"* is not swallowed. When its own answer ends in a question it
+keeps listening for the reply, and returns quietly to waiting if none comes.
 
 **v1.2.0** — Jarvis can work the computer: open apps and browsers, search, play, or
 do several of those from one sentence, with the model itself able to ask for an
