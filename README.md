@@ -255,7 +255,7 @@ src/assistant-stt.worker.js  Whisper in a worker, on WebGPU or WASM
 src/assistant-tts.worker.js  the studio voice in a worker, on WebGPU or WASM
 src/voicehud.html          the ring visualiser drawn while Jarvis listens
 src/glass.js               liquid-glass presets for every surface
-src/vendor/                liquid-glass shader helper
+src/vendor/                ybouane/liquidglass build, used as-is
 ```
 
 Four details are worth knowing because they explain the odd bits:
@@ -301,9 +301,14 @@ option is on.
 
 ## Credits
 
-The liquid-glass technique follows [shuding/liquid-glass](https://github.com/shuding/liquid-glass)
-and [ccl125/liquid-glass](https://github.com/ccl125/liquid-glass) — an SVG
-displacement rim with a specular edge and chromatic dispersion. The voices are
+The liquid glass on every surface — panel, taskbar, Start sheet, widgets and the
+assistant lens — is [ybouane/liquidglass](https://github.com/ybouane/liquidglass)
+(MIT): a copy of it sits in `src/vendor/liquidglass.js` and `src/glass.js` drives it,
+so the glass is one library everywhere and never a hand-rolled shader. The technique
+under it — an SVG displacement rim with a specular edge and chromatic dispersion —
+was explored by [shuding/liquid-glass](https://github.com/shuding/liquid-glass) and
+[ccl125/liquid-glass](https://github.com/ccl125/liquid-glass), whose pens informed
+the look. The voices are
 [Piper](https://github.com/rhasspy/piper) and [Kokoro](https://github.com/hexgrad/kokoro);
 listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).

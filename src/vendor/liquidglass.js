@@ -1,4 +1,6 @@
-// src/defaults.ts
+// Liquid glass — ybouane/liquidglass (MIT), https://github.com/ybouane/liquidglass
+// A copy of that library's build, unchanged but for this header, kept here so the
+// glass on every surface is one renderer. Drive it from src/glass.js; do not edit.
 var DEFAULTS = {
   blurAmount: 0,
   refraction: 0.69,
