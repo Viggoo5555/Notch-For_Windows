@@ -27,7 +27,7 @@ Remove it from *Settings → Apps → Notch*; your settings in
 `%APPDATA%\notch\notch.json` are left in place.
 
 No installer wanted? [Notch-1.2.0.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.0/Notch-1.2.0.exe)
-is the same app as a single portable file (~270 MB) — double-click and it runs.
+is the same app as a single portable file (~260 MB) — double-click and it runs.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
