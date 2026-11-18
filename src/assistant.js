@@ -48,14 +48,25 @@ const els = {
   testVoice: $('testVoice'),
   wakeToggle: $('wakeToggle'),
   sttLine: $('sttLine'),
+  voiceLine: $('voiceLine'),
   hwLine: $('hwLine'),
   toast: $('toast'),
   suggestions: $('suggestions'),
 };
 
 const state = {
-  settings: { model: '', voice: '', engine: 'neural', neuralVoice: '', rate: 0, speak: true, wake: false },
+  settings: {
+    model: '',
+    voice: '',
+    engine: 'neural',
+    neuralVoice: '',
+    studioVoice: 'bm_george',
+    rate: 0,
+    speak: true,
+    wake: false,
+  },
   neural: { available: false, voices: [] },
+  studio: { available: false, recommended: false, voices: [], note: '' },
   sttPlan: null,
   status: { running: false, version: '', models: [] },
   presets: [],
@@ -65,6 +76,8 @@ const state = {
   stream: null,
   pulling: null,
   stt: null,
+  studioAnnounced: false,
+  gamePaused: false,
 };
 
 const SYSTEM_PROMPT = [
@@ -72,7 +85,26 @@ const SYSTEM_PROMPT = [
   'Speak the way a good butler would: short, dry, precise, never flustered. Use "sir" now and then, not in every sentence.',
   'Keep answers to two or three sentences unless asked for depth. Plain language; fenced code blocks only when code is wanted.',
   'Never invent facts; say plainly when you are unsure.',
+  'You can work this computer. When the user asks you to do a thing rather than explain it, do it and add one command in double square brackets at the very end:',
+  '[[open: Brave]], [[search: google for weather in Aarhus]], [[play: Norah Jones]].',
+  'The window carries the command out and removes the brackets from the reply, so say what you are doing in one short line and put the command after it.',
+  'Use those three forms only, one per reply, and never when the user merely asked a question.',
 ].join(' ');
+
+// The model writes its orders as [[open: X]] so that any local model can drive
+// the machine without tool-calling support. They are taken out before the reply
+// is shown or spoken.
+const ACTION_TAG = /\[\[\s*(open|search|play|launch|start)\s*:\s*([^\]]+?)\s*\]\]/gi;
+
+function extractActions(text) {
+  const actions = [];
+  const clean = String(text || '').replace(ACTION_TAG, (_match, verb, target) => {
+    const order = verb.toLowerCase() === 'launch' || verb.toLowerCase() === 'start' ? 'open' : verb.toLowerCase();
+    actions.push(`${order} ${target.trim()}`);
+    return '';
+  });
+  return { clean: clean.replace(/[ \t]+$/gm, '').trim(), actions };
+}
 
 // Moonshine is built for short clips on a CPU: the same sentence takes ~2 s here,
 // where whisper-tiny needed 25 s without WASM threads. Main sends a better plan
@@ -109,6 +141,7 @@ function stripForSpeech(text) {
     .replace(/```[\s\S]*?```/g, ' code block ')
     .replace(/[\u0060*_#>]/g, '')
     .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+    .replace(/\[\[[^\]]*\]\]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 700);
@@ -265,7 +298,237 @@ if (api.onInstall) {
 // would not talk over themselves.
 let player = null;
 
+// The voice leaves the synthesiser dry and a little thin. This is the small
+// studio under it: a rumble cut, a lift in the chest, the harsh band around
+// 3 kHz tamed, gentle compression so quiet words still carry, and a very short
+// room. None of it costs render time, it just makes the clip sound recorded.
+let voiceCtx = null;
+let voiceChain = null;
+let voiceFailed = false;
+
+function roomImpulse(ctx, seconds) {
+  const frames = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+  const buffer = ctx.createBuffer(2, frames, ctx.sampleRate);
+  for (let channel = 0; channel < 2; channel += 1) {
+    const data = buffer.getChannelData(channel);
+    for (let i = 0; i < frames; i += 1) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, 3.4);
+    }
+  }
+  return buffer;
+}
+
+function voiceBus() {
+  if (voiceChain) return voiceChain;
+  if (voiceFailed) return null;
+  try {
+    const ctx = new AudioContext();
+    const rumble = ctx.createBiquadFilter();
+    rumble.type = 'highpass';
+    rumble.frequency.value = 88;
+    const chest = ctx.createBiquadFilter();
+    chest.type = 'lowshelf';
+    chest.frequency.value = 210;
+    chest.gain.value = 2.6;
+    const harsh = ctx.createBiquadFilter();
+    harsh.type = 'peaking';
+    harsh.frequency.value = 3300;
+    harsh.Q.value = 1.1;
+    harsh.gain.value = -2.2;
+    const air = ctx.createBiquadFilter();
+    air.type = 'highshelf';
+    air.frequency.value = 7600;
+    air.gain.value = 1.2;
+    const level = ctx.createDynamicsCompressor();
+    level.threshold.value = -21;
+    level.knee.value = 18;
+    level.ratio.value = 2.4;
+    level.attack.value = 0.006;
+    level.release.value = 0.22;
+    const out = ctx.createGain();
+    out.gain.value = 0.95;
+    const room = ctx.createConvolver();
+    room.buffer = roomImpulse(ctx, 0.26);
+    const wet = ctx.createGain();
+    wet.gain.value = 0.08;
+
+    rumble.connect(chest);
+    chest.connect(harsh);
+    harsh.connect(air);
+    air.connect(level);
+    level.connect(out);
+    out.connect(ctx.destination);
+    out.connect(room);
+    room.connect(wet);
+    wet.connect(ctx.destination);
+
+    voiceCtx = ctx;
+    voiceChain = rumble;
+    return voiceChain;
+  } catch {
+    voiceFailed = true;
+    return null;
+  }
+}
+
+// A semitone down, which is most of what makes the voice sound like a person
+// with a chest rather than a reader. Piper rendered the clip slightly quick to
+// pay for it, so the pace is unchanged.
+const VOICE_PITCH = 0.95;
+
+function wireVoice(audio) {
+  try {
+    audio.preservesPitch = false;
+    audio.webkitPreservesPitch = false;
+    audio.playbackRate = VOICE_PITCH;
+  } catch {
+    /* older engines keep their own pitch */
+  }
+  const chain = voiceBus();
+  if (!chain) return;
+  try {
+    if (voiceCtx.state === 'suspended') voiceCtx.resume().catch(() => {});
+    voiceCtx.createMediaElementSource(audio).connect(chain);
+  } catch {
+    /* the element plays straight to the speakers instead */
+  }
+}
+
+// ------------------------------------------------------------- the studio voice
+
+// Kokoro lives in a worker of its own: it is far heavier than Piper, and a
+// frame drop in the window would be visible while it reads.
+let studioWorker = null;
+let studioReady = false;
+let studioBroken = false;
+let studioSeq = 0;
+let studioWaiters = [];
+const studioPending = new Map();
+
+function studioSettleReady(ok) {
+  studioReady = ok;
+  const waiters = studioWaiters;
+  studioWaiters = [];
+  for (const done of waiters) done(ok);
+}
+
+function ensureStudio() {
+  if (studioWorker) return studioWorker;
+  if (studioBroken) return null;
+  try {
+    const worker = new Worker(new URL('./assistant-tts.worker.js', import.meta.url), { type: 'module' });
+    studioWorker = worker;
+    worker.onmessage = (event) => {
+      const data = event.data || {};
+      if (data.type === 'progress') {
+        // The first use downloads the model; say so once rather than leaving the
+        // reply silently waiting.
+        if (!state.studioAnnounced && typeof data.pct === 'number') {
+          state.studioAnnounced = true;
+          toast('Preparing the studio voice — this happens once.', 4200);
+        }
+        return;
+      }
+      if (data.type === 'ready') {
+        studioSettleReady(true);
+        return;
+      }
+      if (data.type === 'error') {
+        studioSettleReady(false);
+        return;
+      }
+      if (data.type === 'result') {
+        const done = studioPending.get(data.id);
+        if (!done) return;
+        studioPending.delete(data.id);
+        done(data.samples && data.samples.length ? { samples: data.samples, rate: data.rate || 24000 } : null);
+      }
+    };
+    worker.onerror = () => {
+      studioBroken = true;
+      studioSettleReady(false);
+      studioWorker = null;
+      for (const done of studioPending.values()) done(null);
+      studioPending.clear();
+    };
+    worker.postMessage({ type: 'init', device: 'auto', voice: state.settings.studioVoice || 'bm_george' });
+    return worker;
+  } catch {
+    studioBroken = true;
+    return null;
+  }
+}
+
+// Waits for the model the first time rather than answering with a fallback: the
+// download only happens once, and after it the wait is nothing.
+async function studioAwake(timeout) {
+  if (studioReady) return true;
+  const worker = ensureStudio();
+  if (!worker) return false;
+  if (studioBroken) return false;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeout);
+    studioWaiters.push((ok) => {
+      clearTimeout(timer);
+      resolve(!!ok);
+    });
+  });
+}
+
+async function studioRender(text) {
+  const worker = ensureStudio();
+  if (!worker) return null;
+  if (!(await studioAwake(180000))) return null;
+  return new Promise((resolve) => {
+    const id = (studioSeq += 1);
+    studioPending.set(id, resolve);
+    worker.postMessage({ type: 'speak', id, text, voice: state.settings.studioVoice || 'bm_george' });
+  });
+}
+
+// The studio voice already sounds recorded, so it goes through the same chain
+// only for level and room, and is not pitched down.
+function playSamples(samples, rate) {
+  return new Promise((resolve) => {
+    const chain = voiceBus();
+    if (!chain) {
+      resolve();
+      return;
+    }
+    stopAudio();
+    try {
+      if (voiceCtx.state === 'suspended') voiceCtx.resume().catch(() => {});
+      const buffer = voiceCtx.createBuffer(1, samples.length, rate);
+      buffer.copyToChannel(samples, 0);
+      const source = voiceCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(chain);
+      source.onended = () => {
+        if (studioSource === source) studioSource = null;
+        resolve();
+      };
+      studioSource = source;
+      source.start();
+    } catch {
+      studioSource = null;
+      resolve();
+    }
+  });
+}
+
+// A clip from the studio voice plays from memory rather than from a file, so it
+// needs stopping separately.
+let studioSource = null;
+
 function stopAudio() {
+  if (studioSource) {
+    try {
+      studioSource.stop();
+    } catch {
+      /* already over */
+    }
+    studioSource = null;
+  }
   if (!player) return;
   try {
     player.pause();
@@ -284,6 +547,7 @@ function playFileWhenDone(url) {
     stopAudio();
     const audio = new Audio(url);
     player = audio;
+    wireVoice(audio);
     const finish = () => {
       if (player === audio) player = null;
       resolve();
@@ -298,6 +562,7 @@ function playFile(url) {
   stopAudio();
   const audio = new Audio(url);
   player = audio;
+  wireVoice(audio);
   audio.addEventListener('ended', () => {
     if (player === audio) player = null;
     setVoiceState('idle');
@@ -313,6 +578,54 @@ let speakTimer = 0;
 // One utterance at a time, in order. The first sentence of a reply goes out
 // while the rest of it is still being written.
 let speechChain = Promise.resolve();
+// Rendering a sentence costs about a second, so the next one is made while the
+// one before it is being spoken. This chain runs ahead of the player, which is
+// what keeps the voice from stopping between sentences.
+let speechRender = Promise.resolve();
+// The studio voice renders into the same kind of queue, separately, because the
+// two are different workers.
+let studioRenderChain = Promise.resolve();
+
+// Piper reads a whole request before it writes a single note, so handing it a
+// paragraph means silence while it works. Sentences are the natural unit
+// anyway: the pauses between them are what make speech sound considered. The
+// first piece is kept short so the reply is heard sooner rather than later.
+function speechChunks(value, limit = 120, firstLimit = 60) {
+  const sentences = value.match(/[^.!?;]+[.!?;]*\s*/g) || [value];
+  const parts = [];
+  for (const sentence of sentences) {
+    if (sentence.trim().length <= limit) {
+      parts.push(sentence);
+      continue;
+    }
+    // A long sentence is broken at its commas: a breath in the middle of it is
+    // what a person would do anyway.
+    for (const piece of sentence.split(/(?<=,)\s+/)) parts.push(`${piece} `);
+  }
+  const chunks = [];
+  let current = '';
+  for (const part of parts) {
+    const cap = chunks.length ? limit : firstLimit;
+    if (current && current.length + part.length > cap) {
+      chunks.push(current.trim());
+      current = part;
+    } else {
+      current += part;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks.length ? chunks : [value];
+}
+
+async function speakSystem(value) {
+  api.speak(value);
+  // The system voice gives no end signal, so guess from the length of the text.
+  const words = value.split(/\s+/).filter(Boolean).length;
+  clearTimeout(speakTimer);
+  await new Promise((resolve) => {
+    speakTimer = setTimeout(resolve, Math.max(1400, (words / 2.6) * 1000));
+  });
+}
 
 function say(text) {
   const value = stripForSpeech(text);
@@ -321,30 +634,65 @@ function say(text) {
     window.__jarvis.spoke.push({ t: Date.now(), text: value.slice(0, 48) });
     if (window.__jarvis.spoke.length > 20) window.__jarvis.spoke.shift();
   }
-  speechChain = speechChain.then(() => speakOne(value)).catch(() => {});
-  return speechChain;
-}
-
-async function speakOne(value) {
-  setVoiceState('speaking');
-  if (state.settings.engine !== 'system' && state.neural.available) {
-    const result = await api.speakNeural(value).catch(() => null);
-    if (result && result.ok && result.url) {
-      await playFileWhenDone(result.url);
-      setVoiceState('idle');
-      return;
-    }
+  if (state.settings.engine === 'system' || !state.neural.available) {
+    speechChain = speechChain
+      .then(() => speakSystem(value))
+      .then(() => setVoiceState('idle'))
+      .catch(() => {});
+    return speechChain;
   }
-  api.speak(value);
-  // The system voice gives no end signal, so guess from the length of the text.
-  const words = value.split(/\s+/).filter(Boolean).length;
-  clearTimeout(speakTimer);
-  await new Promise((resolve) => {
-    speakTimer = setTimeout(() => {
-      setVoiceState('idle');
-      resolve();
-    }, Math.max(1400, (words / 2.6) * 1000));
+  const useStudio = state.settings.engine === 'studio' && state.studio.available && !studioBroken;
+  if (useStudio) ensureStudio();
+  // Start rendering now, rather than once the sentence before has been spoken.
+  let render = useStudio ? studioRenderChain : speechRender;
+  const clips = speechChunks(value).map((chunk) => {
+    render = render.then(() =>
+      useStudio ? studioRender(chunk) : api.speakNeural(chunk).catch(() => null),
+    );
+    return { chunk, clip: render };
   });
+  if (useStudio) studioRenderChain = render.then(
+    () => null,
+    () => null,
+  );
+  else speechRender = render.then(
+    () => null,
+    () => null,
+  );
+
+  speechChain = speechChain
+    .then(async () => {
+      setVoiceState('speaking');
+      for (let index = 0; index < clips.length; index += 1) {
+        const clip = await clips[index].clip;
+        if (useStudio) {
+          if (clip && clip.samples) {
+            await playSamples(clip.samples, clip.rate);
+            continue;
+          }
+          // The studio voice was not ready or could not read that line: the fast
+          // voice is always there, so the reply is still spoken.
+          const spare = await api.speakNeural(clips[index].chunk).catch(() => null);
+          if (spare && spare.ok && spare.url) {
+            await playFileWhenDone(spare.url);
+            continue;
+          }
+          await speakSystem(clips.slice(index).map((item) => item.chunk).join(' '));
+          break;
+        }
+        if (clip && clip.ok && clip.url) {
+          await playFileWhenDone(clip.url);
+          continue;
+        }
+        // That line could not be synthesised: finish the rest of the reply with
+        // the system voice rather than leaving a hole in it.
+        await speakSystem(clips.slice(index).map((item) => item.chunk).join(' '));
+        break;
+      }
+      setVoiceState('idle');
+    })
+    .catch(() => setVoiceState('idle'));
+  return speechChain;
 }
 
 function modelLabel(name) {
@@ -427,18 +775,22 @@ function finishStream(text, aborted) {
   state.stream = null;
   setBusy(false);
 
+  const { clean, actions } = extractActions(text);
   const card = body.closest('.msg');
-  if (!text.trim() && card) card.remove();
-  else body.textContent = text;
+  if (!clean.trim() && card) card.remove();
+  else body.textContent = clean;
 
-  if (text.trim()) {
-    state.history.push({ role: 'assistant', content: text });
+  // Anything the model asked for happens now, after it has answered.
+  for (const action of actions) api.act(action).catch(() => {});
+
+  if (clean.trim()) {
+    state.history.push({ role: 'assistant', content: clean });
     trimHistory();
     trimHistory();
     if (state.settings.speak && !aborted) {
-      const rest = text.slice(spokenAt).trim();
+      const rest = clean.slice(Math.min(spokenAt, clean.length)).trim();
       if (rest) say(rest);
-      else if (!spokenAt) say(text);
+      else if (!spokenAt) say(clean);
     } else setVoiceState('idle');
   } else {
     setVoiceState('idle');
@@ -461,7 +813,8 @@ api.onDelta((chunk) => {
   state.stream.text += chunk;
   speakFirstSentence(state.stream);
   const body = state.stream.body;
-  body.textContent = state.stream.text;
+  // Commands are for the machine, not for the eye: hide them as they arrive.
+  body.textContent = extractActions(state.stream.text).clean;
   const caret = document.createElement('span');
   caret.className = 'caret';
   body.appendChild(caret);
@@ -593,6 +946,12 @@ function showHardware() {
   els.hwLine.textContent = rec
     ? `${bits.join(' · ')}. ${rec.reason} Suggested: ${recName}.`
     : `${bits.join(' · ')}.`;
+  if (els.voiceLine) {
+    const studio = state.studio;
+    els.voiceLine.textContent = studio.recommended
+      ? `${studio.note} Choose a studio voice below for the best this machine can do.`
+      : `${studio.note} “Jarvis” is the voice that suits this machine.`;
+  }
 }
 
 // Nothing installed yet? Fetch the model this machine was made for.
@@ -834,6 +1193,35 @@ async function ensureAudio() {
   return audio;
 }
 
+// Let the microphone go entirely. Stopping the loop alone leaves the capture
+// stream open, and an open stream keeps the machine's audio service awake for as
+// long as anything is running — which is exactly what a game should not pay for.
+function releaseMicrophone() {
+  const a = audio;
+  audio = null;
+  if (!a) return;
+  try {
+    if (a.processor) a.processor.disconnect();
+  } catch {
+    /* already detached */
+  }
+  try {
+    a.source.disconnect();
+  } catch {
+    /* already detached */
+  }
+  try {
+    for (const track of a.stream.getTracks()) track.stop();
+  } catch {
+    /* stream already gone */
+  }
+  try {
+    a.context.close();
+  } catch {
+    /* already closed */
+  }
+}
+
 function recorderStart(threshold = 0.012) {
   const a = audio;
   if (!a) return;
@@ -844,6 +1232,7 @@ function recorderStart(threshold = 0.012) {
   a.silence = 0;
   a.blocks = 0;
   a.loud = 0;
+  a.floorLevel = null;
   a.processor = a.context.createScriptProcessor(4096, 1, 1);
   a.processor.onaudioprocess = (event) => {
     const data = event.inputBuffer.getChannelData(0);
@@ -853,7 +1242,13 @@ function recorderStart(threshold = 0.012) {
     const rms = Math.sqrt(sum / data.length);
     a.levels.push(rms);
     a.level = rms;
-    if (rms > threshold) {
+    // Learn the room, not a fixed number: microphones differ by a factor of
+    // twenty, and a gate set for a loud one made a quiet one deaf. Only quiet
+    // blocks teach the floor, so speech never drags it up.
+    if (a.floorLevel === null) a.floorLevel = Math.max(0.0004, rms);
+    else if (rms < a.floorLevel * 1.8) a.floorLevel = a.floorLevel * 0.92 + rms * 0.08;
+    a.gate = Math.max(0.004, a.floorLevel * 2.4, threshold * 0.6);
+    if (rms > a.gate) {
       a.voice = true;
       a.silence = 0;
       a.loud += 1;
@@ -866,16 +1261,10 @@ function recorderStart(threshold = 0.012) {
   a.processor.connect(a.context.destination);
 }
 
-function recorderStop() {
-  const a = audio;
-  if (!a || !a.processor) return new Float32Array(0);
-  try {
-    a.source.disconnect(a.processor);
-    a.processor.disconnect();
-  } catch {
-    /* already detached */
-  }
-  a.processor = null;
+// What the take contains, without the silence in front of and behind it: the
+// model's cost is linear in audio length, and a short blip inside a long take
+// should not pay for the quiet parts.
+function trimTake(a) {
   const total = a.buffers.reduce((sum, chunk) => sum + chunk.length, 0);
   let out = new Float32Array(total);
   let offset = 0;
@@ -883,10 +1272,8 @@ function recorderStop() {
     out.set(chunk, offset);
     offset += chunk.length;
   }
-  // Cut the silent head and tail: whisper's cost is linear in audio length, and
-  // a short blip inside a long recording should not pay for the quiet parts.
   const levels = a.levels || [];
-  const floor = a.threshold || 0.012;
+  const floor = a.gate || a.threshold || 0.012;
   let first = -1;
   let last = -1;
   for (let i = 0; i < levels.length; i += 1) {
@@ -900,9 +1287,35 @@ function recorderStop() {
     const end = Math.min(out.length, (last + 2) * 4096);
     if (end > start) out = out.slice(start, end);
   }
+  return out;
+}
+
+// Take what the microphone has heard and start a fresh take. The stream itself
+// keeps running, so a phrase can never fall into the gap between recordings.
+function recorderTake() {
+  const a = audio;
+  if (!a) return new Float32Array(0);
+  const out = trimTake(a);
   a.buffers = [];
   a.levels = [];
+  a.voice = false;
+  a.silence = 0;
+  a.blocks = 0;
+  a.loud = 0;
   return out;
+}
+
+function recorderStop() {
+  const a = audio;
+  if (!a || !a.processor) return new Float32Array(0);
+  try {
+    a.source.disconnect(a.processor);
+    a.processor.disconnect();
+  } catch {
+    /* already detached */
+  }
+  a.processor = null;
+  return recorderTake();
 }
 
 function setListening(value) {
@@ -967,6 +1380,17 @@ async function listenOnce() {
     toast('One thing at a time.');
     return;
   }
+  // The wake listener owns the microphone; hand it over for this recording and
+  // pick listening back up afterwards.
+  const wasWaking = pauseWake();
+  try {
+    await recordAndSend();
+  } finally {
+    if (wasWaking) startWakeLoop();
+  }
+}
+
+async function recordAndSend() {
   try {
     await ensureAudio();
   } catch {
@@ -1014,77 +1438,137 @@ async function listenOnce() {
   send(command);
 }
 
-// Whisper does not spell "Jarvis" the same way twice, so accept the near misses
-// and the greeting in front of the name.
-const WAKE_LEAD = /\b(?:hey|hej|hi|hello|ok(?:ay)?|yo)\b[\s,.:;-]*/i;
-const WAKE_WORD = /^(?:jarvis|jarv[ie]s|javis|jarwis|charvis)\b[\s,.:;!?-]*/i;
+// The speech model never spells "Jarvis" the same way twice, and there may or
+// may not be a greeting in front of it, so the name is matched by shape: any of
+// the usual spellings, or a word one letter away from it, in the first few words
+// of the phrase.
+const WAKE_NAME = /^(?:jarvis|jarv[ie]s|jarwis|jarvus|javis|charvis|harvis|garvis|jarves)\b/i;
 
-function wakeCommand(text) {
-  const value = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!value) return null;
-  const lead = value.match(WAKE_LEAD);
-  const rest = lead ? value.slice(lead.index + lead[0].length) : value;
-  const hit = rest.match(WAKE_WORD);
-  if (!hit) return null;
-  return rest.slice(hit[0].length).trim();
+function closeEnough(word) {
+  const value = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (value.length < 5) return false;
+  if (value.startsWith('jarvis')) return true;
+  const target = 'jarvis';
+  if (Math.abs(value.length - target.length) > 1) return false;
+  // One letter swapped: jorvis, jervis, jarwis.
+  if (value.length === target.length) {
+    let misses = 0;
+    for (let i = 0; i < value.length; i += 1) {
+      if (value[i] !== target[i]) misses += 1;
+      if (misses > 1) return false;
+    }
+    return true;
+  }
+  // One letter dropped or added: jarvi, jarvisss, jarviss.
+  const longer = value.length > target.length ? value : target;
+  const shorter = value.length > target.length ? target : value;
+  for (let skip = 0; skip < longer.length; skip += 1) {
+    if (longer.slice(0, skip) + longer.slice(skip + 1) === shorter) return true;
+  }
+  return false;
 }
 
-let wakeTimer = 0;
-
-async function wakeLoop() {
-  if (!state.settings.wake) return;
-  if (state.busy || document.body.dataset.listening === 'true') {
-    wakeTimer = setTimeout(wakeLoop, 1200);
-    return;
+function wakeCommand(text) {
+  const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ');
+  if (!words.length || !words[0]) return null;
+  const head = Math.min(words.length, 4);
+  for (let i = 0; i < head; i += 1) {
+    const bare = words[i].replace(/[^a-zA-Z]/g, '');
+    if (!bare) continue;
+    if (!WAKE_NAME.test(bare) && !closeEnough(bare)) continue;
+    return words
+      .slice(i + 1)
+      .join(' ')
+      .replace(/^[,.:;!?\-\s]+/, '')
+      .trim();
   }
+  return null;
+}
+
+// The listener records all the time and transcribes each finished phrase. The
+// old version recorded a fixed window, transcribed it, waited, then recorded
+// again — and anything said in the gaps or straddling a window was simply lost.
+let wakeTimer = 0;
+let wakeListening = false;
+let wakeBusy = false;
+
+function stopWakeLoop() {
+  clearInterval(wakeTimer);
+  wakeTimer = 0;
+  if (!wakeListening) return;
+  wakeListening = false;
+  recorderStop();
+  setListening(false);
+}
+
+function pauseWake() {
+  if (!wakeListening) return false;
+  stopWakeLoop();
+  return true;
+}
+
+async function startWakeLoop() {
+  if (!state.settings.wake || wakeListening) return;
   try {
     await ensureAudio();
   } catch {
     toast('Microphone blocked — wake word off.');
     els.wakeToggle.checked = false;
+    state.settings.wake = false;
     api.save({ wake: false });
     return;
   }
+  if (!state.settings.wake || wakeListening) return;
   if (audio.context.state === 'suspended') await audio.context.resume();
+  if (audio.processor) recorderStop();
+  // A gentler gate than the mic button needs: the room only has to sound like
+  // speech, not like shouting, before the phrase is worth transcribing.
+  recorderStart(0.008);
+  wakeListening = true;
+  clearInterval(wakeTimer);
+  wakeTimer = setInterval(wakeTick, 110);
+}
 
-  setListening(true);
-  // A much higher gate than the mic button: the room has to actually be loud
-  // enough to be a voice before whisper is asked to look at it.
-  recorderStart(0.05);
-  const samples = await new Promise((resolve) => {
-    const started = Date.now();
-    const tick = setInterval(() => {
-      const elapsed = Date.now() - started;
-      // Silence is cheap: stop after ~2.5 s and skip the transcription entirely.
-      // Speech gets four seconds — enough for "hey jarvis, open spotify".
-      if ((audio.voice && audio.silence >= 3) || elapsed > (audio.voice ? 4200 : 2600)) {
-        clearInterval(tick);
-        resolve(recorderStop());
-      }
-    }, 90);
-  });
-  setListening(false);
-
-  // Only loud speech is worth the CPU: whisper on an empty room pegs the fans.
-  // Three loud blocks is about a fifth of a second of real sound.
-  if (audio.voice && audio.loud >= 4 && samples.length > 4000) {
-    const text = String(await transcribe(samples)).trim();
-    const command = wakeCommand(text);
-    if (command !== null) {
-      // The name was spoken: a chime answers, and the orb appears while it listens.
+function wakeTick() {
+  const a = audio;
+  if (!a || !a.processor) return;
+  if (wakeBusy) {
+    // The model is still reading the last phrase; do not let this pile up
+    // forever if it wedges.
+    if (a.buffers.length > 48) recorderTake();
+    return;
+  }
+  if (state.busy) {
+    if (a.buffers.length > 48) recorderTake();
+    return;
+  }
+  const long = a.blocks * 4096 >= 16000 * 9;
+  const done = a.voice && a.silence >= 4;
+  if (!done && !long) return;
+  const loud = a.loud;
+  const samples = recorderTake();
+  // Two loud blocks is about half a second of real sound: enough for a name.
+  if (loud < 2 || samples.length < 9000) return;
+  wakeBusy = true;
+  transcribe(samples)
+    .then((text) => {
+      const command = wakeCommand(text);
+      if (command === null) return null;
       wakeChime();
       setVoiceState('listening');
       if (command.length > 1) {
         els.input.value = command;
         autosize();
         send(command);
-      } else {
-        toast('Listening…', 1500);
-        await listenOnce();
+        return null;
       }
-    }
-  }
-  if (state.settings.wake) wakeTimer = setTimeout(wakeLoop, 1200);
+      toast('Listening…', 1500);
+      return listenOnce();
+    })
+    .catch(() => {})
+    .finally(() => {
+      wakeBusy = false;
+    });
 }
 
 // ------------------------------------------------------------------- settings
@@ -1106,6 +1590,13 @@ function closeSheet() {
 
 function fillVoices() {
   els.voiceSelect.replaceChildren();
+  const studio = state.studio.available ? state.studio.voices : [];
+  for (const voice of studio) {
+    const option = document.createElement('option');
+    option.value = `studio:${voice.id}`;
+    option.textContent = `${voice.label} · ${voice.note}`;
+    els.voiceSelect.appendChild(option);
+  }
   const neural = state.neural.available ? state.neural.voices : [];
   for (const voice of neural) {
     const option = document.createElement('option');
@@ -1119,16 +1610,21 @@ function fillVoices() {
     option.textContent = `${voice.name.replace('Microsoft ', '').replace(' Desktop', '')} · ${voice.culture}`;
     els.voiceSelect.appendChild(option);
   }
-  const useNeural = state.settings.engine !== 'system' && neural.length > 0;
-  if (useNeural) {
-    const wanted = `neural:${state.settings.neuralVoice || neural[0].id}`;
-    els.voiceSelect.value = wanted;
-    if (!els.voiceSelect.value) els.voiceSelect.value = `neural:${neural[0].id}`;
+  // A select picks its first option on its own, so the choice is made here and
+  // only applied if that option really exists.
+  const has = (value) => [...els.voiceSelect.options].some((option) => option.value === value);
+  let chosen = '';
+  if (state.settings.engine === 'studio' && studio.length) {
+    chosen = `studio:${state.settings.studioVoice || studio[0].id}`;
+    if (!has(chosen)) chosen = `studio:${studio[0].id}`;
+  } else if (state.settings.engine !== 'system' && neural.length) {
+    chosen = `neural:${state.settings.neuralVoice || neural[0].id}`;
+    if (!has(chosen)) chosen = `neural:${neural[0].id}`;
   } else if (state.voices.length) {
-    const wanted = `system:${state.settings.voice || state.voices[0].name}`;
-    els.voiceSelect.value = wanted;
-    if (!els.voiceSelect.value) els.voiceSelect.value = `system:${state.voices[0].name}`;
+    chosen = `system:${state.settings.voice || state.voices[0].name}`;
+    if (!has(chosen)) chosen = `system:${state.voices[0].name}`;
   }
+  if (chosen && has(chosen)) els.voiceSelect.value = chosen;
 }
 
 function applySettingsToUi() {
@@ -1242,7 +1738,12 @@ els.speakToggle.addEventListener('change', () => {
 
 els.voiceSelect.addEventListener('change', () => {
   const value = els.voiceSelect.value || '';
-  if (value.startsWith('neural:')) {
+  if (value.startsWith('studio:')) {
+    state.settings.engine = 'studio';
+    state.settings.studioVoice = value.slice('studio:'.length);
+    api.save({ engine: 'studio', studioVoice: state.settings.studioVoice });
+    ensureStudio();
+  } else if (value.startsWith('neural:')) {
     state.settings.engine = 'neural';
     state.settings.neuralVoice = value.slice('neural:'.length);
     api.save({ engine: 'neural', neuralVoice: state.settings.neuralVoice });
@@ -1266,11 +1767,11 @@ els.testVoice.addEventListener('click', () => {
 els.wakeToggle.addEventListener('change', () => {
   state.settings.wake = els.wakeToggle.checked;
   api.save({ wake: state.settings.wake });
-  clearTimeout(wakeTimer);
   if (state.settings.wake) {
     toast('Say “Hey Jarvis”.', 2200);
-    wakeLoop();
+    startWakeLoop();
   } else {
+    stopWakeLoop();
     setListening(false);
   }
 });
@@ -1312,7 +1813,22 @@ window.addEventListener('focus', () => {
 // A hook for testing the wake word with recorded audio (no microphone needed).
 window.__jarvis = {
   transcribe,
+  say,
+  voice: () => ({
+    busy: !!voiceChain,
+    failed: voiceFailed,
+    state: voiceCtx ? voiceCtx.state : null,
+    rate: player ? player.playbackRate : null,
+    studio: !!studioSource,
+    studioReady,
+  }),
   wakeCommand,
+  wake: () => ({
+    listening: wakeListening,
+    busy: wakeBusy,
+    level: audio ? Number((audio.level || 0).toFixed(3)) : null,
+    loud: audio ? audio.loud : 0,
+  }),
   chime: wakeChime,
   spoke: [],
   setup: { run: runSetup, refresh: refreshSetupCard },
@@ -1329,12 +1845,16 @@ window.__jarvis = {
   state.hardware = data.hardware || null;
   state.recommended = data.recommended || null;
   state.neural = data.neural || { available: false, voices: [] };
+  state.studio = data.studio || state.studio;
   state.sttPlan = data.stt || null;
+  if (els.sttLine && state.sttPlan && state.sttPlan.note) els.sttLine.textContent = state.sttPlan.note;
   state.voices = data.voices || [];
   state.history = [{ role: 'system', content: SYSTEM_PROMPT }];
 
   applySettingsToUi();
   fillVoices();
+  // The studio voice takes a while to load, so start it before it is asked for.
+  if (state.settings.engine === 'studio' && state.studio.available) ensureStudio();
   setConnected(state.status.running, state.status.version);
   refreshModelChip();
   renderModels();
@@ -1356,8 +1876,22 @@ window.__jarvis = {
   }, 2500);
   // The wake word survives restarts: pick listening back up where it left off.
   if (state.settings.wake) {
-    wakeLoop();
+    startWakeLoop();
   }
+  // A game owns the machine: the microphone is closed and the window stays
+  // parked until it is over. Nothing here should compete with a frame rate.
+  api.onGameMode((on) => {
+    if (on) {
+      state.gamePaused = pauseWake();
+      releaseMicrophone();
+      setListening(false);
+      setVoiceState('idle');
+      stopAudio();
+    } else if (state.gamePaused) {
+      state.gamePaused = false;
+      startWakeLoop();
+    }
+  });
   refreshSetupCard();
   els.input.focus();
 })();

@@ -319,15 +319,9 @@ html:not(.island) .glass-pill-pane {
   border-radius: var(--pill-radius);
 }
 
-/* The shader's body does not hold up at pill size — inside a 96x26 pane the
-   lens renders as a black capsule with the highlight pushed into one corner,
-   and it sits under the CSS layers anyway. The folded island pill therefore
-   wears the CSS glass (blurred desktop, tint, bevel, rim, specular), which
-   follows the pill's own box exactly; the open panel keeps the shader lens. */
-html.island .glass-pill-pane > canvas {
-  display: none;
-}
-
+/* The folded pill is the same lens as the panel, at pill size. The CSS layers
+   that used to stand in for it would only cover the shader up, so with the lens
+   running they step aside — the tint stays, for the clock to read against. */
 html.island .notch.gl:not(.frost):not(.open) .glass-backdrop,
 html.island .notch.gl:not(.frost):not(.open) .glass-ambient,
 html.island .notch.gl:not(.frost):not(.open) .glass-bevel,
@@ -336,7 +330,7 @@ html.island .notch.gl:not(.frost):not(.open) .glass-rim,
 html.island .notch.gl:not(.frost):not(.open) .glass-thickness,
 html.island .notch.gl:not(.frost):not(.open) .glass-glow,
 html.island .notch.gl:not(.frost):not(.open) .glass-chroma {
-  display: block;
+  display: none;
 }
 
 /* The pill is a slice of the sheet: give the cut edge the pill's radius. */

@@ -29,4 +29,8 @@ contextBridge.exposeInMainWorld('jarvis', {
   onError: (callback) => ipcRenderer.on('assistant:error', (_event, payload) => callback(payload)),
   onPull: (callback) => ipcRenderer.on('assistant:pull', (_event, payload) => callback(payload)),
   onStatus: (callback) => ipcRenderer.on('assistant:status-push', (_event, payload) => callback(payload)),
+  // The strip of desktop behind the window, for its liquid-glass lens.
+  onBackdrop: (callback) => ipcRenderer.on('jarvis:backdrop', (_event, data) => callback(data)),
+  // A game has the screen: stop listening until it is over.
+  onGameMode: (callback) => ipcRenderer.on('jarvis:game-mode', (_event, on) => callback(!!on)),
 });

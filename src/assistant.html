@@ -12,6 +12,12 @@
     <link rel="stylesheet" href="assistant.css" />
   </head>
   <body>
+    <div class="jglass" id="jGlass" aria-hidden="true">
+      <img class="jg-source" id="jSource" alt="" decoding="async" />
+      <span class="jg-pane" id="jPane"></span>
+      <span class="jg-tint"></span>
+    </div>
+
     <div class="shell" id="shell">
       <div class="aurora" aria-hidden="true"></div>
 
@@ -135,7 +141,7 @@
               <span>Voice</span>
               <select id="voiceSelect"></select>
             </label>
-            <p class="muted">Jarvis is a small neural voice that runs on this machine — calm, British, and nothing sent to a server. The Windows voices are the plain fallback.</p>
+            <p class="muted" id="voiceLine">Jarvis is a small neural voice that runs on this machine — calm, British, and nothing sent to a server. The Windows voices are the plain fallback.</p>
             <label class="field-row">
               <span>Speed</span>
               <input type="range" id="rateRange" min="-6" max="6" step="1" />
@@ -161,5 +167,6 @@
       <div class="toast" id="toast" hidden></div>
     </div>
     <script type="module" src="assistant.js"></script>
+    <script type="module" src="assistant-glass.js"></script>
   </body>
 </html>

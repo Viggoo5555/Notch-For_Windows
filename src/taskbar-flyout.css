@@ -14,18 +14,70 @@ body {
 }
 
 .fx {
+  position: relative;
+  height: 100%;
+  padding: 5px;
+  border-radius: 12px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* The desktop behind the list, captured as a strip by the main process. */
+.fx-source {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* The lens itself: the library draws this pane. */
+.fx-pane {
+  position: absolute;
+  inset: 0;
+  display: block;
+  border-radius: 12px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Just enough shade over the glass for the labels to read. */
+.fx-tint {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(12, 14, 20, 0.5), rgba(6, 7, 11, 0.62));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  opacity: 0;
+  z-index: 2;
+}
+
+.fx.gl .fx-tint {
+  opacity: 1;
+}
+
+/* No lens yet (no sample, or WebGL refused): a solid surface, not a hole. */
+.fx:not(.gl) {
+  background: rgba(20, 22, 28, 0.94);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 18px 34px -18px rgba(0, 0, 0, 0.8);
+}
+
+.fx-list {
+  position: relative;
+  z-index: 3;
   display: flex;
   flex-direction: column;
   gap: 2px;
   height: 100%;
-  padding: 5px;
-  border-radius: 11px;
-  background: rgba(22, 24, 30, 0.92);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
-    0 18px 34px -18px rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(18px) saturate(1.1);
-  overflow: hidden;
 }
 
 .fx-row {

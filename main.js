@@ -383,25 +383,46 @@ function backdropDataUrl() {
   return cropPanelFrom(desktopFrame.image, desktopFrame.display);
 }
 
+// Every window of ours is kept out of screen captures for good. Windows honours
+// content protection as capture exclusion, so the samples are the bare desktop —
+// no ghost of the pill, the islands or a widget baked into the glass. Setting it
+// once at creation also matters for the log: flipping the flag around each grab
+// re-routed the display and made Chromium's capturer miss a frame every time.
+const protectedSurfaces = new WeakSet();
+
+function protectSurface(surface) {
+  if (!surface || surface.isDestroyed() || protectedSurfaces.has(surface)) return false;
+  try {
+    surface.setContentProtection(true);
+    protectedSurfaces.add(surface);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function protectSurfaces() {
+  let fresh = 0;
+  for (const surface of [
+    win,
+    ...widgetWins.values(),
+    ...taskbarZones().map((zone) => zone.win),
+    launcherWin,
+    jarvisWin,
+    voiceHudWin,
+    flyoutWin,
+  ]) {
+    if (protectSurface(surface)) fresh += 1;
+  }
+  return fresh;
+}
+
 async function captureDesktop() {
   if (!win || win.isDestroyed() || desktopBusy || !usesLiveBackdrop()) return;
   desktopBusy = true;
-  const shielded = [];
   try {
     const display = screen.getDisplayMatching(win.getBounds());
-    // Hide our own surfaces from the grab. Windows honours content protection
-    // as capture exclusion, so the sample is the bare desktop — the pill and
-    // the panel then refract the same pixels the open panel sees, with no
-    // ghost of the pill baked into the source.
-    // The islands sit over the desktop too, so they are shielded the same way:
-    // without that the bottom of every sample would be the bar's own glass.
-    for (const surface of [win, ...widgetWins.values(), ...taskbarZones().map((zone) => zone.win)]) {
-      if (surface && !surface.isDestroyed() && surface.isVisible()) {
-        surface.setContentProtection(true);
-        shielded.push(surface);
-      }
-    }
-    if (shielded.length) await new Promise((resolve) => setTimeout(resolve, 90));
+    if (protectSurfaces()) await new Promise((resolve) => setTimeout(resolve, 80));
     const thumbWidth = Math.max(320, Math.round(display.size.width / 2));
     const grab = () =>
       desktopCapturer.getSources({
@@ -424,15 +445,10 @@ async function captureDesktop() {
     desktopFrame = { image: source.thumbnail, display };
     const url = backdropDataUrl();
     if (url && win && !win.isDestroyed()) win.webContents.send('notch:backdrop', url);
-    // The islands refract the same sample, so they follow the desktop too when
-    // the backdrop is set to live.
-    sendTaskbarBackdrop();
+
   } catch {
     /* capture unavailable: the wallpaper sample stays as the fallback */
   } finally {
-    for (const surface of shielded) {
-      if (!surface.isDestroyed()) surface.setContentProtection(false);
-    }
     desktopBusy = false;
   }
 }
@@ -455,8 +471,98 @@ function stopDesktopSampling() {
 // Live glass needs frames while anything wearing it is on screen: the pill when
 // the pointer is near, and the taskbar islands whenever they are up.
 function samplingWanted() {
-  if (!usesLiveBackdrop() || isExpanded) return false;
-  return taskbarOn() || pointerNear;
+  // The islands take their own small strips; this full-screen sample is only
+  // for the panel, so it runs while the pointer is near it and no longer.
+  return usesLiveBackdrop() && !isExpanded && pointerNear && !gameMode;
+}
+
+// ---------------------------------------------------------------- game mode
+
+// A game with the screen in front of it should get the whole machine. Windows
+// knows when one owns the display; while that holds every scan, capture, timer
+// and microphone in this shell stands down and the windows are put away, so the
+// cost of running Notch behind a game is one politer-than-a-second question and
+// nothing else.
+let gameMode = false;
+let gameBusy = false;
+let gamePollTimer = null;
+let gameHidden = [];
+
+function shellSurfaces() {
+  return [
+    win,
+    ...widgetWins.values(),
+    ...taskbarZones().map((zone) => zone.win),
+    launcherWin,
+    jarvisWin,
+    voiceHudWin,
+    flyoutWin,
+  ].filter((surface) => surface && !surface.isDestroyed());
+}
+
+function setGameMode(on) {
+  if (gameMode === on) return;
+  gameMode = on;
+  if (on) {
+    stopDesktopSampling();
+    stopJarvisBackdrop();
+    setTaskbarRevealed(false);
+    gameHidden = shellSurfaces().filter((surface) => surface.isVisible());
+    for (const surface of gameHidden) {
+      try {
+        surface.hide();
+      } catch {
+        /* already gone */
+      }
+    }
+    revealed = false;
+    pointerNear = false;
+    if (pointerTimer) {
+      clearInterval(pointerTimer);
+      pointerTimer = null;
+    }
+  } else if (!pointerTimer && win && !win.isDestroyed()) {
+    // Hover is what brings it back; the poll has to be running for that.
+    armPointerPoll();
+  }
+
+  // Chromium parks a throttled window, which is most of the idle cost.
+  for (const surface of shellSurfaces()) {
+    try {
+      surface.webContents.setBackgroundThrottling(!(on === false && surface === jarvisWin));
+    } catch {
+      /* older builds */
+    }
+  }
+  try {
+    syncTaskbarPeek();
+  } catch {
+    /* the taskbar is not up yet */
+  }
+  // The listening window owns the microphone; it gives it up during a game.
+  if (jarvisWin && !jarvisWin.isDestroyed()) {
+    try {
+      jarvisWin.webContents.send('jarvis:game-mode', on);
+    } catch {
+      /* window is not ready */
+    }
+  }
+}
+
+function watchForGames() {
+  clearInterval(gamePollTimer);
+  gamePollTimer = setInterval(async () => {
+    if (gameBusy) return;
+    gameBusy = true;
+    try {
+      const answer = await askHook('game', 'GAME\t', 4000);
+      setGameMode(/^1\b/.test(String(answer || '').trim()));
+    } catch {
+      /* no helper: assume nothing is fullscreen */
+    } finally {
+      gameBusy = false;
+    }
+  }, 6000);
 }
 
 function syncDesktopSampling() {
@@ -537,14 +643,14 @@ function currentStats() {
 }
 
 function pushStats() {
-  if (!win || win.isDestroyed()) return;
+  if (gameMode || !win || win.isDestroyed()) return;
   win.webContents.send('notch:stats', currentStats());
 }
 
 let clipBusy = false;
 
 async function pollClipboard() {
-  if (clipBusy) return;
+  if (gameMode || clipBusy) return;
   clipBusy = true;
   try {
     let raw;
@@ -680,7 +786,7 @@ function nearRect(point, rect) {
 // The window is created at panel size, hidden, so the renderer can rasterise
 // the whole glass stack before it is ever visible. It then shrinks to the pill.
 function revealWindow() {
-  if (revealed || !win || win.isDestroyed()) return;
+  if (gameMode || revealed || !win || win.isDestroyed()) return;
   revealed = true;
   win.showInactive();
   win.moveTop();
@@ -841,6 +947,7 @@ const ASSISTANT_DEFAULTS = {
   voice: '',
   engine: 'neural',
   neuralVoice: 'en_GB-alan-medium',
+  studioVoice: 'bm_george',
   rate: 0,
   speak: true,
   wake: false,
@@ -949,6 +1056,11 @@ function detectHardware() {
   }
   // Integrated graphics borrow system RAM, so they count as no model space.
   const integrated = !gpu || /intel|uhd|iris|radeon\(tm\) graphics|radeon graphics|vega \d+ graphics/i.test(gpu);
+  const gpuMemoryGb = integrated ? 0 : vramGb;
+  // Three honest bands instead of a single guess: what the machine can carry
+  // for the brain, for listening and for the voice all differ, and a desk with
+  // a real card should get the good stuff rather than the safe stuff.
+  const tier = gpuMemoryGb >= 6 && cores >= 6 ? 'studio' : gpuMemoryGb >= 3 ? 'gpu' : 'cpu';
   hardwareCache = {
     cpu: cpu || 'Unknown CPU',
     cores,
@@ -956,7 +1068,14 @@ function detectHardware() {
     gpu: gpu || 'unknown graphics',
     vramGb,
     integrated,
-    gpuMemoryGb: integrated ? 0 : vramGb,
+    gpuMemoryGb,
+    tier,
+    tierNote:
+      tier === 'studio'
+        ? `${gpu} with ${gpuMemoryGb} GB of video memory: the studio voice, the larger listening model and a 7B brain all fit at once.`
+        : tier === 'gpu'
+          ? `${gpu} with ${gpuMemoryGb} GB of video memory: a GPU-accelerated brain and listening, with the light voice.`
+          : `${cores} CPU threads and no dedicated graphics: the light voice and small models, which stay instant here.`,
   };
   return hardwareCache;
 }
@@ -965,6 +1084,14 @@ function detectHardware() {
 // whisper on WebGPU; everything else gets moonshine, the only thing fast enough
 // on a CPU without WASM threads.
 function recommendStt(hardware = detectHardware()) {
+  if (hardware.tier === 'studio') {
+    return {
+      model: 'onnx-community/whisper-small',
+      fallback: 'onnx-community/whisper-base',
+      device: 'auto',
+      note: `${hardware.gpu} has the room for whisper-small on the GPU: it mishears far less than the small CPU models, and still answers in well under a second.`,
+    };
+  }
   if (!hardware.integrated && hardware.gpuMemoryGb >= 4) {
     return {
       model: 'onnx-community/whisper-base',
@@ -984,6 +1111,12 @@ function recommendStt(hardware = detectHardware()) {
 function recommendModel(hardware = detectHardware()) {
   const vram = hardware.gpuMemoryGb;
   const { cores, ramGb } = hardware;
+  if (vram >= 12) {
+    return {
+      name: 'qwen2.5:14b',
+      reason: `${hardware.gpu} has ${vram} GB of video memory, so a 14B model fits on the GPU and still answers quickly.`,
+    };
+  }
   if (vram >= 8) {
     return {
       name: 'qwen2.5:7b',
@@ -1049,8 +1182,74 @@ const ASSISTANT_SITES = [
   [/^(reddit)$/i, 'https://www.reddit.com', 'Reddit'],
   [/^(twitch)$/i, 'https://www.twitch.tv', 'Twitch'],
   [/^(chatgpt)$/i, 'https://chat.openai.com', 'ChatGPT'],
-  [/^(maps)$/i, 'https://maps.google.com', 'Google Maps'],
+  [/^(maps|google maps)$/i, 'https://maps.google.com', 'Google Maps'],
+  [/^(spotify)$/i, 'https://open.spotify.com', 'Spotify'],
+  [/^(netflix)$/i, 'https://www.netflix.com', 'Netflix'],
+  [/^(wikipedia)$/i, 'https://en.wikipedia.org', 'Wikipedia'],
+  [/^(stack overflow|stackoverflow)$/i, 'https://stackoverflow.com', 'Stack Overflow'],
+  [/^(amazon)$/i, 'https://www.amazon.com', 'Amazon'],
+  [/^(discord)$/i, 'https://discord.com/app', 'Discord'],
 ];
+
+// Browsers are often missing from the Start menu — Brave ships as a portable
+// install and Edge hides in a folder Windows does not index — so they are
+// looked for where they actually live.
+const BROWSER_APPS = [
+  [
+    /^(brave|brave browser|rave|bravebrowser)$/i,
+    'Brave',
+    [
+      '%ProgramFiles%\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+      '%ProgramFiles(x86)%\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+      '%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+    ],
+  ],
+  [
+    /^(chrome|google chrome|krom)$/i,
+    'Chrome',
+    [
+      '%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe',
+      '%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe',
+      '%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe',
+    ],
+  ],
+  [
+    /^(edge|microsoft edge)$/i,
+    'Edge',
+    [
+      '%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe',
+      '%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe',
+    ],
+  ],
+  [
+    /^(firefox|mozilla firefox)$/i,
+    'Firefox',
+    [
+      '%ProgramFiles%\\Mozilla Firefox\\firefox.exe',
+      '%ProgramFiles(x86)%\\Mozilla Firefox\\firefox.exe',
+      '%LOCALAPPDATA%\\Mozilla Firefox\\firefox.exe',
+    ],
+  ],
+];
+
+function expandEnv(value) {
+  return String(value || '').replace(/%([^%]+)%/g, (_match, name) => process.env[name] || '');
+}
+
+function findBrowser(asked) {
+  const wanted = normaliseName(asked);
+  const entry = BROWSER_APPS.find(([pattern]) => pattern.test(wanted));
+  if (!entry) return null;
+  for (const candidate of entry[2]) {
+    const resolved = expandEnv(candidate);
+    try {
+      if (resolved && fs.existsSync(resolved)) return { exe: resolved, name: entry[1] };
+    } catch {
+      /* try the next place */
+    }
+  }
+  return null;
+}
 
 const normaliseName = (value) =>
   String(value || '')
@@ -1092,11 +1291,71 @@ async function findAppByName(rawName) {
 }
 
 // "hey jarvis, open spotify" -> actually does it, and hands back what to say.
-async function performAssistantAction(rawText) {
-  const text = String(rawText || '')
+// An order sounds the same with or without the manners, so they come off before
+// it is matched: "could you open brave for me" is "open brave".
+function cleanOrder(rawText) {
+  return String(rawText || '')
     .replace(/^\s*(?:hey|hi|ok|okay|hej|hallo)?[\s,]*jarvis[\s,.:!-]*/i, '')
+    .replace(/^\s*(?:can|could|would|will)\s+you\s+(?:please\s+|kindly\s+)?/i, '')
+    .replace(/^\s*(?:i\s+(?:want|need)\s+you\s+to\s+)/i, '')
+    .replace(/^\s*(?:please|kindly|venligst)\s+/i, '')
+    .replace(/\s+(?:for\s+me|please|now|tak)\s*[.!?]*$/i, '')
     .trim();
-  if (!text) return { handled: false };
+}
+
+// Launching something is shared between "open brave" and "open google": both
+// may be an app, a browser, a site or a bare domain, in that order of certainty.
+async function openSomething(rawAsked) {
+  const asked = String(rawAsked || '')
+    .replace(/\s+(?:app|program|programmet)$/i, '')
+    .trim();
+  if (!asked) return '';
+  // "calculator and open notepad" is two orders; matching it against the app
+  // index would only produce a confident answer to the wrong question.
+  if (/\b(?:and|then|og)\s+(?:open|launch|start|run|play|search|google|look)\b/i.test(asked)) return '';
+  if (/^(settings|indstillinger)$/i.test(asked)) {
+    shell.openExternal('ms-settings:');
+    return 'Opening Settings.';
+  }
+  const browser = findBrowser(asked);
+  if (browser) {
+    try {
+      execFile(browser.exe, [], { windowsHide: true }, () => {});
+      return `Opening ${browser.name}.`;
+    } catch {
+      /* fall through to the index */
+    }
+  }
+  const system = SYSTEM_APPS.find(([pattern]) => pattern.test(asked));
+  if (system) {
+    try {
+      execFile(system[1], [], { windowsHide: true }, () => {});
+      return `Opening ${system[2]}.`;
+    } catch {
+      /* fall through to the index */
+    }
+  }
+  const found = await findAppByName(asked);
+  if (found && launchTarget(found.target).ok) {
+    return `Opening ${String(found.name).replace(/\.lnk$/i, '')}.`;
+  }
+  const site = ASSISTANT_SITES.find(([pattern]) => pattern.test(asked));
+  if (site) {
+    shell.openExternal(site[1]);
+    return `Opening ${site[2]}.`;
+  }
+  if (/^https?:\/\/\S+$/i.test(asked)) {
+    shell.openExternal(asked);
+    return `Opening ${asked}.`;
+  }
+  if (/^[\w-]+(\.[\w-]+)+$/.test(asked)) {
+    shell.openExternal(`https://${asked}`);
+    return `Opening ${asked}.`;
+  }
+  return '';
+}
+
+async function runAction(text) {
 
   if (/^(?:what(?:'s| is) the time|what time is it|hvad er klokken)[?.!]*$/i.test(text)) {
     const now = new Date();
@@ -1108,37 +1367,11 @@ async function performAssistantAction(rawText) {
     /^(?:please\s+)?(?:open|launch|start|run|åbn|vis)\s+(?:op\s+)?(?:the\s+|my\s+|min\s+|mit\s+|en\s+)?(.+?)[.!?]*$/i,
   );
   if (openMatch) {
-    const asked = openMatch[1].replace(/\s+(?:app|program|programmet)$/i, '').trim();
-    if (/^(settings|indstillinger)$/i.test(asked)) {
-      shell.openExternal('ms-settings:');
-      return { handled: true, say: 'Opening Settings.' };
-    }
-    const system = SYSTEM_APPS.find(([pattern]) => pattern.test(asked));
-    if (system) {
-      try {
-        execFile(system[1], [], { windowsHide: true }, () => {});
-        return { handled: true, say: `Opening ${system[2]}.` };
-      } catch {
-        /* fall through to the index */
-      }
-    }
-    const found = await findAppByName(asked);
-    if (found) {
-      const launched = launchTarget(found.target);
-      if (launched.ok) {
-        return { handled: true, say: `Opening ${String(found.name).replace(/\.lnk$/i, '')}.` };
-      }
-    }
-    const site = ASSISTANT_SITES.find(([pattern]) => pattern.test(asked));
-    if (site) {
-      shell.openExternal(site[1]);
-      return { handled: true, say: `Opening ${site[2]}.` };
-    }
-    if (/^[\w-]+(\.[\w-]+)+$/.test(asked)) {
-      shell.openExternal(`https://${asked}`);
-      return { handled: true, say: `Opening ${asked}.` };
-    }
-    return { handled: true, say: `I could not find “${asked}” on this machine.` };
+    const said = await openSomething(openMatch[1]);
+    // Nothing by that name: leave it unhandled so "open brave and google the
+    // weather" can be split into the two orders it really is.
+    if (said) return { handled: true, say: said };
+    return { handled: false, missed: openMatch[1].trim() };
   }
 
   const searchMatch = text.match(
@@ -1169,6 +1402,32 @@ async function performAssistantAction(rawText) {
     return { handled: true, say: `Playing ${query} on YouTube.` };
   }
 
+  return { handled: false };
+}
+
+async function performAssistantAction(rawText) {
+  const text = cleanOrder(rawText);
+  if (!text) return { handled: false };
+  let missed = '';
+
+  // "open brave and google the weather" is two orders in one breath, and a
+  // person speaks them that way, so they are taken one at a time.
+  const joined = /\b(?:and|then|og)\s+(?:open|launch|start|run|play|search|google|look)\b/i.test(text);
+  if (joined) {
+    const said = [];
+    for (const part of text.split(/\s*(?:,|;|\band\b|\bthen\b|\bog\b)\s+/i).filter(Boolean)) {
+      const result = await runAction(cleanOrder(part));
+      if (result.handled) said.push(result.say || 'Done.');
+      else if (result.missed) missed = result.missed;
+    }
+    if (said.length) return { handled: true, say: said.join(' ') };
+  }
+
+  const first = await runAction(text);
+  if (first.handled) return first;
+  if (first.missed) missed = first.missed;
+
+  if (missed) return { handled: true, say: `I could not find “${missed}” on this machine.` };
   return { handled: false };
 }
 
@@ -1335,17 +1594,22 @@ function createJarvis() {
       // The wake chime and spoken replies play while the window is hidden, so
       // audio must not wait for a click the user never made.
       autoplayPolicy: 'no-user-gesture-required',
-      // Hidden means hidden: no painting while it sits in the background. The
-      // wake word runs on the audio thread, which throttling does not touch.
-      backgroundThrottling: true,
+      // The wake word is a timer that samples the microphone every tenth of a
+      // second. Chromium throttles timers in a hidden window, and after a few
+      // minutes on this PC it slowed them to once a minute — which is exactly
+      // why "hey jarvis" almost never worked. This window must not be throttled.
+      backgroundThrottling: false,
     },
   });
   jarvisWin.setMenu(null);
+  protectSurface(jarvisWin);
   jarvisWin.loadFile(path.join(__dirname, 'src', 'assistant.html'));
+  jarvisWin.on('hide', stopJarvisBackdrop);
   jarvisWin.on('close', (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
       jarvisWin.hide();
+      stopJarvisBackdrop();
     }
   });
   jarvisWin.on('closed', () => {
@@ -1354,12 +1618,35 @@ function createJarvis() {
   return jarvisWin;
 }
 
+// Jarvis wears the same lens as the notch, so it samples the desktop behind
+// itself while it is on screen and stops the moment it hides.
+let jarvisBackdropTimer = 0;
+
+function stopJarvisBackdrop() {
+  clearInterval(jarvisBackdropTimer);
+  jarvisBackdropTimer = 0;
+}
+
+function startJarvisBackdrop(window) {
+  stopJarvisBackdrop();
+  if (!window || window.isDestroyed()) return;
+  sendRegionShot(window, 'jarvis:backdrop');
+  jarvisBackdropTimer = setInterval(() => {
+    if (gameMode || !jarvisWin || jarvisWin.isDestroyed() || !jarvisWin.isVisible()) {
+      stopJarvisBackdrop();
+      return;
+    }
+    sendRegionShot(jarvisWin, 'jarvis:backdrop');
+  }, 2600);
+}
+
 function showJarvis() {
   const window = createJarvis();
   if (!window) return;
   if (!window.isVisible()) window.setBounds(jarvisBounds());
   window.show();
   window.focus();
+  startJarvisBackdrop(window);
 }
 
 function toggleJarvis() {
@@ -1440,17 +1727,46 @@ const NEURAL_VOICES = [
     label: 'Jarvis',
     note: 'British male · calm',
     file: 'en_GB-alan-medium.onnx',
-    // Under 1 speaks faster than the model's default pace; 0.82 is brisk but
-    // still calm enough for a butler.
-    length: 0.82,
-    noise: 0.55,
+    // Rendered a touch quicker than it is played back: the window drops the
+    // pitch about a semitone on playback (see assistant.js), which is what gives
+    // the voice its chest, and rendering 5% fast keeps the pace where it was.
+    length: 0.78,
+    // Less generator noise than the model's default: the shimmer on long vowels
+    // is the main thing that makes a neural voice sound synthetic.
+    noise: 0.45,
+    noiseW: 0.65,
+    // A breathing space between sentences, so a reply is not one run-on line.
+    silence: 0.22,
   },
 ];
+
+// The studio voice: a bigger neural reader that only makes sense with a real
+// graphics card behind it. It is not used unless it is chosen, and the machine
+// that suits it is offered it first.
+const STUDIO_VOICES = [
+  { id: 'bm_george', label: 'Jarvis · studio', note: 'British male · warm and unhurried' },
+  { id: 'bm_lewis', label: 'Jarvis · studio deep', note: 'British male · low and deliberate' },
+  { id: 'bm_fable', label: 'Jarvis · studio bright', note: 'British male · lighter, quicker' },
+  { id: 'bf_emma', label: 'Jarvis · studio alto', note: 'British female · clear' },
+];
+
+const STUDIO_BUNDLE = () => path.join(__dirname, 'node_modules', 'kokoro-js', 'dist', 'kokoro.web.js');
+
+function studioAvailable() {
+  try {
+    return fs.existsSync(STUDIO_BUNDLE());
+  } catch {
+    return false;
+  }
+}
 
 let piperProc = null;
 let piperQueue = Promise.resolve();
 let piperIdleTimer = 0;
 let piperSeq = 0;
+// The model itself only loads when the first line arrives, which costs a second
+// or more; a throwaway line at startup pays that once, out of sight.
+let piperWarmed = false;
 
 function neuralVoice() {
   const wanted = assistantSettings().neuralVoice;
@@ -1467,6 +1783,7 @@ function neuralVoiceAvailable() {
 
 function stopPiper() {
   clearTimeout(piperIdleTimer);
+  piperWarmed = false;
   if (!piperProc) return;
   try {
     piperProc.stdin.end();
@@ -1492,6 +1809,10 @@ function piperProcess() {
         String(voice.length || 1.04),
         '--noise_scale',
         String(voice.noise || 0.55),
+        '--noise_w',
+        String(voice.noiseW || 0.8),
+        '--sentence_silence',
+        String(voice.silence == null ? 0.2 : voice.silence),
       ],
       { cwd: PIPER_DIR, windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'] },
     );
@@ -1516,6 +1837,9 @@ function warmPiper() {
   if (!child) return;
   clearTimeout(piperIdleTimer);
   piperIdleTimer = setTimeout(stopPiper, 12 * 60 * 1000);
+  if (piperWarmed) return;
+  piperWarmed = true;
+  speakNeural('Ready.').catch(() => {});
 }
 
 function speakNeural(text) {
@@ -1577,8 +1901,9 @@ ipcMain.handle('assistant:warm-voice', () => {
 // A small presence at the bottom of the screen: it appears the moment Jarvis
 // hears its name, breathes with the microphone, and turns into a wave while it
 // talks. Click-through, no focus, gone again when the moment is over.
-const VOICE_HUD_W = 320;
-const VOICE_HUD_H = 132;
+// Square: the presence is a ring of light, not a strip of text.
+const VOICE_HUD_W = 360;
+const VOICE_HUD_H = 360;
 
 let voiceHudWin = null;
 let voiceHudTimer = 0;
@@ -1590,7 +1915,7 @@ function voiceHudBounds() {
   const height = Math.min(VOICE_HUD_H, display.workAreaSize.height - 40);
   return {
     x: Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2),
-    y: Math.round(display.workArea.y + 12),
+    y: Math.round(display.workArea.y + 24),
     width,
     height,
   };
@@ -1778,6 +2103,15 @@ ipcMain.handle('assistant:boot', async () => {
     recommended,
     stt: recommendStt(hardware),
     neural: { available: neuralVoiceAvailable(), voices: NEURAL_VOICES.map(({ id, label, note }) => ({ id, label, note })) },
+    studio: {
+      available: studioAvailable(),
+      recommended: hardware.tier === 'studio',
+      voices: STUDIO_VOICES,
+      note:
+        hardware.tier === 'studio'
+          ? `${hardware.gpu} is enough for the studio voice: it reads like a recording rather than a synthesiser.`
+          : 'The studio voice needs a dedicated graphics card — on this machine it would take several seconds per sentence.',
+    },
     hotkey: 'Ctrl+Alt+J',
     platform: process.platform,
   };
@@ -1942,6 +2276,7 @@ ipcMain.handle('assistant:open', (_event, url) => {
 
 ipcMain.on('assistant:hide', () => {
   if (jarvisWin && !jarvisWin.isDestroyed()) jarvisWin.hide();
+  stopJarvisBackdrop();
 });
 
 ipcMain.on('assistant:quit', () => app.quit());
@@ -2337,7 +2672,11 @@ function startWinHook() {
     while (line >= 0) {
       const text = buffer.slice(0, line).trim();
       buffer = buffer.slice(line + 1);
-      if (trayShotRequest && text.startsWith('IMG\t')) {
+      if (iconRequest && text.startsWith(iconRequest.prefix)) {
+        const pending = iconRequest;
+        iconRequest = null;
+        pending.resolve(text.slice(pending.prefix.length).trim());
+      } else if (trayShotRequest && text.startsWith('IMG\t')) {
         const [, shotW, shotH, shotData] = text.split('\t');
         const pending = trayShotRequest;
         trayShotRequest = null;
@@ -2896,6 +3235,10 @@ let taskbarBusy = false;
 let taskbarPeekTimer = null;
 let taskbarRevealed = false;
 let taskbarLeaveTimer = null;
+// Mid-slide height of the bar, null when it is parked; the islands share it so
+// they always move as one.
+let taskbarY = null;
+let taskbarSlideTimer = null;
 // Each window measures itself: the apps island in the middle, the tray island on
 // the right, and one bar when the shape is attached.
 let taskbarWidths = { apps: 300, tray: 250, both: 620 };
@@ -2910,6 +3253,8 @@ let trayRequest = null;
 let traySignature = '';
 let trayBattery = null;
 let trayShotRequest = null;
+let iconRequest = null;
+const hwndIconCache = new Map();
 
 // Hover list for an app with several windows, the way the Windows taskbar
 // stacks its thumbnails under one button.
@@ -2986,6 +3331,49 @@ function taskbarZones() {
   ];
 }
 
+// One place for every window move, so a slide in progress is not undone by the
+// next content update.
+function applyTaskbarBounds(zone, win) {
+  if (!win || win.isDestroyed()) return;
+  const box = taskbarBounds(zone);
+  if (taskbarY !== null) box.y = taskbarY;
+  win.setBounds(box, false);
+}
+
+// Auto-hide slides the islands out of the bottom edge: ease out on the way up,
+// ease in on the way down, and both islands on the same clock.
+function slideTaskbar(revealed) {
+  const zones = taskbarZones().filter(({ win }) => win && !win.isDestroyed());
+  if (!zones.length) return;
+  if (taskbarSlideTimer) clearInterval(taskbarSlideTimer);
+  taskbarSlideTimer = null;
+  const shownY = taskbarGeometry(false, 'both').y;
+  const offY = taskbarGeometry(true, 'both').y;
+  const from = taskbarY === null ? (revealed ? offY : shownY) : taskbarY;
+  const to = revealed ? shownY : offY;
+  const duration = revealed ? 200 : 150;
+  if (from === to) {
+    taskbarY = null;
+    for (const { zone, win } of zones) applyTaskbarBounds(zone, win);
+    return;
+  }
+  const started = Date.now();
+  const step = () => {
+    const t = Math.min(1, (Date.now() - started) / duration);
+    const eased = revealed ? 1 - Math.pow(1 - t, 3) : t * t * t;
+    taskbarY = Math.round(from + (to - from) * eased);
+    for (const { zone, win } of zones) applyTaskbarBounds(zone, win);
+    if (t >= 1) {
+      clearInterval(taskbarSlideTimer);
+      taskbarSlideTimer = null;
+      taskbarY = null;
+      for (const { zone, win } of zones) applyTaskbarBounds(zone, win);
+    }
+  };
+  taskbarSlideTimer = setInterval(step, 16);
+  step();
+}
+
 let windowListBuffer = null;
 let windowRequest = null;
 const exeIconCache = new Map();
@@ -2999,6 +3387,94 @@ const SHELL_PROCESSES = new Set([
   'lockapp.exe',
   'winstore.app.exe',
 ]);
+
+// The icon a window draws for itself. Reading one out of the executable needs a
+// path, and packaged apps (the Store Notepad, Settings, anything UWP) refuse to
+// hand one out, which left those buttons showing initials.
+// One question at a time on the helper's stdin: its answers are a single line
+// each, and two requests in flight used to answer the wrong question.
+let hookAskChain = Promise.resolve();
+
+function askHook(command, prefix, timeout = 1500) {
+  const run = () =>
+    new Promise((resolve) => {
+      const proc = hookProc;
+      if (!proc || proc.killed || !proc.stdin || proc.stdin.destroyed) {
+        resolve('');
+        return;
+      }
+      let done = false;
+      const finish = (value) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (iconRequest === request) iconRequest = null;
+        resolve(value);
+      };
+      const timer = setTimeout(() => finish(''), timeout);
+      const request = { resolve: finish, prefix };
+      iconRequest = request;
+      try {
+        proc.stdin.write(`${command}\n`);
+      } catch {
+        finish('');
+      }
+    });
+  const next = hookAskChain.then(run, run);
+  hookAskChain = next.catch(() => '');
+  return next;
+}
+
+function requestWindowIcon(hwnd, timeout = 1500) {
+  return askHook(`icons ${Math.trunc(Number(hwnd) || 0)}`, 'ICO\t', timeout);
+}
+
+function requestHostExe(hwnd) {
+  return askHook(`hostexe ${Math.trunc(Number(hwnd) || 0)}`, 'EXE\t');
+}
+
+function requestExeIcon(path) {
+  return askHook(`exeicon ${path}`, 'ICO\t');
+}
+
+// The icon inside an executable's resource. Electron's own file-icon call hands
+// back the generic application bitmap for some apps that do ship an icon, so the
+// resource is read directly and only then falls back.
+const resourceIconCache = new Map();
+
+async function exeResourceIcon(path) {
+  const key = String(path || '').toLowerCase();
+  if (!key || !/[\\/]/.test(key)) return null;
+  if (resourceIconCache.has(key)) return resourceIconCache.get(key);
+  const data = await requestExeIcon(path);
+  const icon = data && data !== '-' ? `data:image/png;base64,${data}` : null;
+  if (resourceIconCache.size > 160) resourceIconCache.clear();
+  resourceIconCache.set(key, icon);
+  return icon;
+}
+
+async function windowIcon(hwnd) {
+  if (!Number.isFinite(hwnd) || hwnd <= 0) return null;
+  if (hwndIconCache.has(hwnd)) return hwndIconCache.get(hwnd);
+  const found = await requestWindowIcon(hwnd);
+  const icon = found && found !== '-' ? `data:image/png;base64,${found}` : null;
+  if (hwndIconCache.size > 240) hwndIconCache.clear();
+  hwndIconCache.set(hwnd, icon);
+  return icon;
+}
+
+// The executable of the app inside a packaged window, which is the one that has
+// the app's icon rather than the shared host's blank window.
+const hostExeCache = new Map();
+
+async function hostExe(hwnd) {
+  if (!Number.isFinite(hwnd) || hwnd <= 0) return '';
+  if (hostExeCache.has(hwnd)) return hostExeCache.get(hwnd);
+  const path = (await requestHostExe(hwnd)) || '';
+  if (hostExeCache.size > 120) hostExeCache.clear();
+  hostExeCache.set(hwnd, path);
+  return path;
+}
 
 async function iconForExe(exe) {
   const key = String(exe || '').toLowerCase();
@@ -3066,11 +3542,27 @@ async function readTaskbarWindowsFromHelper() {
     if (!title || title === 'Program Manager') continue;
     const base = String(exe || '').split(/[\\/]/).pop().toLowerCase();
     if (SHELL_PROCESSES.has(base)) continue;
+    // A bare process name (no directory) means the path could not be read, so
+    // the file icon is out of reach: ask the window for the icon it paints.
+    // Store apps run inside a shared host, whose path and icon belong to the
+    // host rather than the app, so they take the same route.
+    const hosted = base === 'applicationframehost.exe';
+    const hasPath = /[\\/]/.test(String(exe || '')) && !hosted;
+    const appExe = hasPath ? '' : hosted ? await hostExe(hwnd) : '';
+    // The executable's own resource first: it is the icon the app was built
+    // with, where Chromium's file icon can be the generic blank window.
+    const icon =
+      (hasPath ? (await exeResourceIcon(exe)) || (await iconForExe(exe)) : null) ||
+      (appExe ? (await exeResourceIcon(appExe)) || (await iconForExe(appExe)) : null) ||
+      (await windowIcon(hwnd)) ||
+      // A packaged window whose app process cannot be found still gets a
+      // picture rather than initials.
+      (String(exe || '').includes('\\') ? await iconForExe(exe) : null);
     items.push({
       hwnd,
       title: friendlyTitle(title, exe),
-      icon: await iconForExe(exe),
-      exe: String(exe || ''),
+      icon,
+      exe: hosted ? '' : String(exe || ''),
     });
   }
   return items;
@@ -3155,12 +3647,73 @@ function taskbarBackdrop() {
   };
 }
 
-function sendTaskbarBackdrop() {
+// The islands refract the desktop right behind them. A strip per window costs a
+// few kilobytes and no compositor frame, so it can be taken often enough to be
+// live: the windows are excluded from captures, so the strip is the bare desktop.
+let taskbarBackdropTimer = null;
+
+async function sendTaskbarBackdrop() {
+  const zones = taskbarZones().filter(({ win }) => win && !win.isDestroyed() && win.isVisible());
+  if (!zones.length) return;
+  if (usesLiveBackdrop()) {
+    if (protectSurfaces()) await new Promise((resolve) => setTimeout(resolve, 80));
+    for (const { win } of zones) {
+      if (win.isDestroyed() || !win.isVisible()) continue;
+      const box = win.getBounds();
+      const strip = await requestScreenShot({
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+      });
+      if (!strip || !strip.data || win.isDestroyed()) continue;
+      win.webContents.send('taskbar:backdrop', {
+        url: `data:image/png;base64,${strip.data}`,
+        width: box.width,
+        height: box.height,
+        x: box.x,
+        y: box.y,
+      });
+    }
+    return;
+  }
   const backdrop = taskbarBackdrop();
   if (!backdrop) return;
-  for (const { win } of taskbarZones()) {
-    if (win && !win.isDestroyed()) win.webContents.send('taskbar:backdrop', backdrop);
-  }
+  for (const { win } of zones) win.webContents.send('taskbar:backdrop', backdrop);
+}
+
+// A strip of the desktop behind one of our windows, for a surface that wears the
+// liquid-glass lens: the pane refracts what is really there, not a wallpaper.
+async function sendRegionShot(win, channel) {
+  if (!win || win.isDestroyed() || !win.isVisible()) return;
+  protectSurface(win);
+  const box = win.getBounds();
+  const strip = await requestScreenShot({
+    x: box.x,
+    y: box.y,
+    width: box.width,
+    height: box.height,
+  });
+  if (!strip || !strip.data || win.isDestroyed()) return;
+  win.webContents.send(channel, {
+    url: `data:image/png;base64,${strip.data}`,
+    width: box.width,
+    height: box.height,
+  });
+}
+
+function startTaskbarBackdropLoop() {
+  if (taskbarBackdropTimer) return;
+  sendTaskbarBackdrop();
+  taskbarBackdropTimer = setInterval(() => {
+    if (gameMode || !taskbarOn() || !usesLiveBackdrop()) return;
+    sendTaskbarBackdrop();
+  }, 1500);
+}
+
+function stopTaskbarBackdropLoop() {
+  clearInterval(taskbarBackdropTimer);
+  taskbarBackdropTimer = null;
 }
 
 // ------------------------------------------------------------- taskbar tray
@@ -3193,27 +3746,39 @@ function requestTrayList(timeout = 2500) {
 
 // The helper grabs a rectangle of the desktop with GDI. Ask it for the strip
 // that holds the tray icons; it answers with a base64 PNG.
-function requestTrayShot(rect, timeout = 2500) {
-  const proc = hookProc;
-  if (!proc || proc.killed || !proc.stdin || proc.stdin.destroyed) return Promise.resolve(null);
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (value) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      if (trayShotRequest === request) trayShotRequest = null;
-      resolve(value);
-    };
-    const timer = setTimeout(() => finish(null), timeout);
-    const request = { resolve: finish };
-    trayShotRequest = request;
-    try {
-      proc.stdin.write(`shot ${rect.x} ${rect.y} ${rect.width} ${rect.height}\n`);
-    } catch {
-      finish(null);
-    }
-  });
+// The helper answers one grab at a time on its stdout, so requests queue: the
+// tray icons and the islands both ask for strips, and an overlapping request
+// used to swallow the other one's image.
+let shotChain = Promise.resolve();
+
+function requestScreenShot(rect, timeout = 2500) {
+  const run = () =>
+    new Promise((resolve) => {
+      const proc = hookProc;
+      if (!proc || proc.killed || !proc.stdin || proc.stdin.destroyed) {
+        resolve(null);
+        return;
+      }
+      let done = false;
+      const finish = (value) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (trayShotRequest === request) trayShotRequest = null;
+        resolve(value);
+      };
+      const timer = setTimeout(() => finish(null), timeout);
+      const request = { resolve: finish };
+      trayShotRequest = request;
+      try {
+        proc.stdin.write(`shot ${rect.x} ${rect.y} ${rect.width} ${rect.height}\n`);
+      } catch {
+        finish(null);
+      }
+    });
+  const next = shotChain.then(run, run);
+  shotChain = next.catch(() => null);
+  return next;
 }
 
 // Icons are pixels, not API: the notification area draws them itself, so take
@@ -3245,7 +3810,7 @@ async function captureTrayIcons() {
   for (const win of stepped) win.hide();
   if (stepped.length) await new Promise((resolve) => setTimeout(resolve, 70));
   try {
-    const strip = await requestTrayShot({
+    const strip = await requestScreenShot({
       x: Math.round(box.left),
       y: Math.round(box.top),
       width: Math.round(box.right - box.left),
@@ -3276,7 +3841,7 @@ async function captureTrayIcons() {
 }
 
 async function refreshTray(force) {
-  if (trayBusy) return;
+  if (gameMode || trayBusy) return;
   trayBusy = true;
   try {
     const raw = await requestTrayList();
@@ -3304,12 +3869,19 @@ async function refreshTray(force) {
         name: name.split(/\s{2,}/)[0],
       });
     }
-    // The battery lives in the tray, immediately left of the clock. Its tooltip
-    // carries the charge, and the bar draws that as its own chip instead of a
-    // second battery icon.
-    const power = clockLeft === null
-      ? []
-      : rows.filter((row) => Math.abs(row.x + row.w - clockLeft) <= 18);
+    // The battery lives in the tray. Its tooltip carries the charge, and the bar
+    // draws that as its own chip instead of a second battery icon. Find it by
+    // what it says, not by where it sits: the notification area moves with the
+    // Windows taskbar, and the old "left of the clock" rule left a duplicate
+    // battery on a vertical bar.
+    const byName = rows.filter(
+      (row) => /\d{1,3}\s*%/.test(row.name) && /batter|akku|kraft|batteri/i.test(row.name),
+    );
+    const power = byName.length
+      ? byName
+      : clockLeft === null
+        ? []
+        : rows.filter((row) => Math.abs(row.x + row.w - clockLeft) <= 18);
     for (const row of power) {
       const match = /(\d{1,3})\s*%/.exec(row.name);
       if (match) trayBattery = Number(match[1]);
@@ -3389,6 +3961,8 @@ function createFlyout() {
   flyoutWin.setAlwaysOnTop(true, 'screen-saver');
   flyoutWin.setSkipTaskbar(true);
   flyoutWin.setFocusable(false);
+  // Its own glass needs the desktop behind it, never its previous frame.
+  protectSurface(flyoutWin);
   flyoutWin.loadFile(path.join(__dirname, 'src', 'taskbar-flyout.html'));
   flyoutWin.on('closed', () => {
     flyoutWin = null;
@@ -3416,7 +3990,7 @@ function startFlyoutPoll() {
   if (flyoutPoll) return;
   flyoutOutside = 0;
   flyoutPoll = setInterval(() => {
-    if (!flyoutWin || flyoutWin.isDestroyed() || !flyoutWin.isVisible() || !flyoutBounds) {
+    if (gameMode || !flyoutWin || flyoutWin.isDestroyed() || !flyoutWin.isVisible() || !flyoutBounds) {
       stopFlyoutPoll();
       return;
     }
@@ -3461,7 +4035,11 @@ function showFlyout(app, left) {
   flyoutLeft = left;
   win.setBounds({ x, y, width, height }, false);
   if (!win.isVisible()) win.showInactive();
-  win.webContents.send('flyout:rows', { rows, width });
+  const mode = taskbarMode();
+  win.webContents.send('flyout:rows', { rows, width, style: mode.style });
+  // The glass refracts the strip behind the list; the solid fallback covers the
+  // moment before it arrives.
+  if (mode.style === 'glass') sendRegionShot(win, 'flyout:backdrop');
   startFlyoutPoll();
 }
 
@@ -3562,7 +4140,7 @@ function sendTaskbarUpdate() {
   for (const { zone, win } of taskbarZones()) {
     if (!win || win.isDestroyed()) continue;
     win.webContents.send('taskbar:update', payload);
-    win.setBounds(taskbarBounds(zone), false);
+    applyTaskbarBounds(zone, win);
   }
   // The apps island goes away when there is nothing on it; the tray island
   // stays, because the clock lives there.
@@ -3577,10 +4155,11 @@ function sendTaskbarUpdate() {
     taskbarTrayWin.showInactive();
     sendTaskbarBackdrop();
   }
+  if (!taskbarBackdropTimer && taskbarOn()) startTaskbarBackdropLoop();
 }
 
 async function pollTaskbar() {
-  if (!taskbarWin || taskbarWin.isDestroyed() || taskbarBusy) return;
+  if (gameMode || !taskbarWin || taskbarWin.isDestroyed() || taskbarBusy) return;
   taskbarBusy = true;
   try {
     const rows = await readTaskbarWindows();
@@ -3682,6 +4261,10 @@ function destroyTaskbar() {
   if (taskbarTrayWin && !taskbarTrayWin.isDestroyed()) taskbarTrayWin.destroy();
   taskbarTrayWin = null;
   taskbarBuiltShape = '';
+  if (taskbarSlideTimer) clearInterval(taskbarSlideTimer);
+  taskbarSlideTimer = null;
+  taskbarY = null;
+  stopTaskbarBackdropLoop();
 }
 
 function refreshTaskbar() {
@@ -3710,20 +4293,18 @@ function setTaskbarRevealed(revealed) {
   if (taskbarRevealed === revealed) return;
   taskbarRevealed = revealed;
   if (!taskbarOn()) return;
-  for (const { zone, win } of taskbarZones()) {
-    if (win && !win.isDestroyed()) win.setBounds(taskbarBounds(zone), false);
-  }
+  slideTaskbar(revealed);
 }
 
 function revealTaskbar() {
-  if (!taskbarAutoHide() || !taskbarOn()) return;
+  if (gameMode || !taskbarAutoHide() || !taskbarOn()) return;
   if (taskbarLeaveTimer) clearTimeout(taskbarLeaveTimer);
   taskbarLeaveTimer = null;
   setTaskbarRevealed(true);
 }
 
 function tickTaskbarPeek() {
-  if (!taskbarWin || taskbarWin.isDestroyed() || !taskbarOn() || !taskbarAutoHide()) return;
+  if (gameMode || !taskbarWin || taskbarWin.isDestroyed() || !taskbarOn() || !taskbarAutoHide()) return;
   // While the Start sheet is open the bar stays out, the way Windows keeps its
   // taskbar up until Start closes again.
   if (launcherWin && !launcherWin.isDestroyed() && launcherWin.isVisible()) {
@@ -3757,7 +4338,9 @@ function tickTaskbarPeek() {
 }
 
 function syncTaskbarPeek() {
-  const wanted = taskbarOn() && taskbarAutoHide();
+  // Eight times a second is the price of a taskbar that appears the moment the
+  // cursor touches the edge; a game should not pay it.
+  const wanted = taskbarOn() && taskbarAutoHide() && !gameMode;
   if (!wanted) {
     if (taskbarPeekTimer) clearInterval(taskbarPeekTimer);
     taskbarPeekTimer = null;
@@ -3767,9 +4350,7 @@ function syncTaskbarPeek() {
   } else if (!taskbarPeekTimer) {
     taskbarPeekTimer = setInterval(tickTaskbarPeek, 120);
   }
-  for (const { zone, win } of taskbarZones()) {
-    if (win && !win.isDestroyed()) win.setBounds(taskbarBounds(zone), false);
-  }
+  for (const { zone, win } of taskbarZones()) applyTaskbarBounds(zone, win);
 }
 
 ipcMain.on('taskbar:ready', (event) => {
@@ -3868,7 +4449,7 @@ function activateTaskbarSlot(slot) {
 }
 
 function sendWidgetStats() {
-  if (!hasWidgets()) return;
+  if (gameMode || !hasWidgets()) return;
   const stats = currentStats();
   const payload = {
     cpu: Math.round(stats.cpu),
@@ -3919,7 +4500,7 @@ function stopProcSampling() {
 // Task Manager–style breakdown: PowerShell lists the busiest processes, and the
 // CPU column is the delta of their accumulated CPU seconds between samples.
 function sampleProcesses() {
-  if (procBusy || !wantsProcesses()) return;
+  if (gameMode || procBusy || !wantsProcesses()) return;
   procBusy = true;
   const script =
     'Get-Process | Where-Object { $_.WorkingSet64 -gt 20000000 } | Sort-Object CPU -Descending | Select-Object -First 12 Name,Id,CPU,WorkingSet64 | ConvertTo-Json -Compress';
@@ -4182,6 +4763,8 @@ if (!app.requestSingleInstanceLock()) {
     // Warm the launcher and its app index so the first Windows key is instant.
     createLauncher();
     buildAppIndex().catch(() => {});
+    // A fullscreen game takes the whole machine, including this shell.
+    watchForGames();
     // With the wake word on, Jarvis has to exist (hidden) to keep listening.
     if (assistantSettings().wake) createJarvis();
     // Load the voice model in the background so the first reply is not slow.

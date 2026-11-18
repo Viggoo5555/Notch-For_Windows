@@ -30,12 +30,22 @@ const CONFIG = {
   shadowOffsetY: 0,
 };
 
-// The pill is the same glass, only fitted to a 26px band: same tint, same
-// refraction, same dispersion, with the bevel scaled to the short side.
+// The pill is the same glass, only fitted to a 26px band. A 26px lens has no
+// room for a deep bevel: the curve is shallower, the rim quieter and the glass
+// darker, or the whole capsule turns into one bright highlight.
 const PILL = {
   ...CONFIG,
   cornerRadius: 13,
-  zRadius: 6,
+  zRadius: 4,
+  refraction: 0.8,
+  chromAberration: 0.09,
+  edgeHighlight: 0.05,
+  specular: 0.07,
+  fresnel: 0.45,
+  distortion: 0.008,
+  blurAmount: 0.34,
+  tintStrength: 0.34,
+  brightness: -0.16,
 };
 
 let instance = null;

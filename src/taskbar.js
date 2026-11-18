@@ -49,6 +49,9 @@ const BASE = {
 // The bevel has to stay well short of half the island's height: at 48px a 16px
 // z-radius leaves the top and bottom rims almost touching and the island reads
 // as a bright bubble instead of a slab of glass.
+// Blurred harder than the panel: the islands float over whatever the desktop
+// shows there, often a window full of text, and glass is meant to soften that
+// rather than mirror it.
 const ISLAND = {
   ...BASE,
   cornerRadius: 12,
@@ -57,8 +60,8 @@ const ISLAND = {
   edgeHighlight: 0.22,
   specular: 0.5,
   fresnel: 1.02,
-  tintStrength: 0.26,
-  blurAmount: 0.28,
+  tintStrength: 0.3,
+  blurAmount: 0.52,
 };
 
 function configFor(shape) {
@@ -76,9 +79,8 @@ let display = null;
 let built = '';
 let hoverTimer = null;
 
-const screenX = window.screenX || 0;
-const screenY = window.screenY || 0;
-
+// Live, not captured once: the bar slides with auto-hide, and its backdrop is
+// placed against wherever the window is at that moment.
 function placeSource() {
   if (!display) {
     source.style.width = '100%';
@@ -86,9 +88,11 @@ function placeSource() {
     source.style.transform = 'none';
     return;
   }
+  const left = display.x - (window.screenX || 0);
+  const top = display.y - (window.screenY || 0);
   source.style.width = `${display.width}px`;
   source.style.height = `${display.height}px`;
-  source.style.transform = `translate3d(${display.x - screenX}px, ${display.y - screenY}px, 0)`;
+  source.style.transform = `translate3d(${left}px, ${top}px, 0)`;
 }
 
 // Render a few frames for a change, then stop: an idle taskbar costs nothing.
@@ -147,12 +151,6 @@ function buildApps() {
     button.title = open ? `${app.name} — ${app.windows.length} window${app.windows.length > 1 ? 's' : ''}` : app.name;
     button.setAttribute('aria-label', app.name || 'App');
     iconOrLetters(button, app);
-    if (slot <= 10) {
-      const key = document.createElement('span');
-      key.className = 'tb-key';
-      key.textContent = slot === 10 ? '0' : String(slot);
-      button.appendChild(key);
-    }
     button.addEventListener('click', () => {
       if (api) api.group(app.key);
     });

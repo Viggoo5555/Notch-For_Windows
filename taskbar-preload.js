@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('taskbarAPI', {
   onBackdrop: (callback) => ipcRenderer.on('taskbar:backdrop', (_event, data) => callback(data)),
   // The hover list runs in its own small window above the bar.
   onRows: (callback) => ipcRenderer.on('flyout:rows', (_event, data) => callback(data)),
+  onFlyoutBackdrop: (callback) => ipcRenderer.on('flyout:backdrop', (_event, data) => callback(data)),
   flyoutReady: () => ipcRenderer.send('flyout:ready'),
   pick: (hwnd) => ipcRenderer.send('flyout:pick', hwnd),
 });

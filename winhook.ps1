@@ -9,7 +9,7 @@ param([switch]$Test)
 # extra key suppresses Start, and the Win up clears the modifier so the keyboard
 # keeps working. Chords (Win+E, Win+D, Win+L) are untouched: their Win down was
 # never intercepted.
-Add-Type -ReferencedAssemblies @('UIAutomationClient', 'UIAutomationTypes', 'WindowsBase', 'System.Drawing') -TypeDefinition @"
+Add-Type -ReferencedAssemblies @('UIAutomationClient', 'UIAutomationTypes', 'WindowsBase', 'System.Drawing', 'System.Management') -TypeDefinition @"
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -75,6 +75,55 @@ public class JarvisWinHook
     private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")]
     private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+    [DllImport("shell32.dll")]
+    private static extern int SHQueryUserNotificationState(out int state);
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    // Is something taking the whole screen right now? Windows knows when a game
+    // owns the display (it suppresses notifications for it), and a window that
+    // covers the screen without the taskbar showing is the windowed case. Either
+    // answer lets the shell get out of the way completely.
+    public static string GameState()
+    {
+        int quns = 0;
+        try { SHQueryUserNotificationState(out quns); } catch { }
+        if (quns == 3 || quns == 4) return "1\tfullscreen";
+
+        IntPtr foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero) return "0";
+        RECT rect;
+        if (!GetWindowRect(foreground, out rect)) return "0";
+        int screenWidth = GetSystemMetrics(0);
+        int screenHeight = GetSystemMetrics(1);
+        if (screenWidth <= 0 || screenHeight <= 0) return "0";
+        int width = rect.Right - rect.Left;
+        int height = rect.Bottom - rect.Top;
+        // A maximised window stops short of the taskbar; a game does not.
+        bool covers = width >= screenWidth - 2 && height >= screenHeight - 2;
+        if (!covers) return "0";
+
+        uint pid;
+        GetWindowThreadProcessId(foreground, out pid);
+        string name = "";
+        try { name = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName.ToLower(); } catch { }
+        // Our own surfaces, the shell, and the Start menu are not games.
+        if (name == "electron" || name == "explorer" || name == "searchhost" ||
+            name == "shellhost" || name == "shellexperiencehost" || name == "startmenuexperiencehost" ||
+            name == "lockapp" || name == "textinputhost") return "0";
+        return "1\tfullscreen";
+    }
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -323,6 +372,157 @@ public class JarvisWinHook
         }
     }
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll", EntryPoint = "GetClassLongPtr")]
+    private static extern IntPtr GetClassLongPtr64(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", EntryPoint = "GetClassLong")]
+    private static extern uint GetClassLong32(IntPtr hWnd, int nIndex);
+
+    private const uint WM_GETICON = 0x007F;
+    private const int ICON_SMALL = 0;
+    private const int ICON_BIG = 1;
+    private const int ICON_SMALL2 = 2;
+    private const int GCLP_HICON = -14;
+    private const int GCLP_HICONSM = -34;
+
+    private static IntPtr ClassIcon(IntPtr hWnd, int index)
+    {
+        if (IntPtr.Size == 8) return GetClassLongPtr64(hWnd, index);
+        return (IntPtr)unchecked((int)GetClassLong32(hWnd, index));
+    }
+
+    // The icon a window draws for itself. Reading the executable's icon needs a
+    // path, and packaged apps (the Store Notepad, Settings, anything UWP) do not
+    // hand one out, so those buttons used to fall back to initials.
+    public static string WindowIcon(long handle)
+    {
+        IntPtr hWnd = (IntPtr)handle;
+        if (hWnd == IntPtr.Zero || !IsWindow(hWnd)) return "-";
+        try
+        {
+            IntPtr icon = IntPtr.Zero;
+            IntPtr result;
+            int[] wanted = new int[] { ICON_BIG, ICON_SMALL2, ICON_SMALL };
+            foreach (int which in wanted)
+            {
+                result = IntPtr.Zero;
+                IntPtr ok = SendMessageTimeout(hWnd, WM_GETICON, (IntPtr)which, IntPtr.Zero, 0x0002, 150, out result);
+                if (ok != IntPtr.Zero && result != IntPtr.Zero)
+                {
+                    icon = result;
+                    break;
+                }
+            }
+            if (icon == IntPtr.Zero) icon = ClassIcon(hWnd, GCLP_HICON);
+            if (icon == IntPtr.Zero) icon = ClassIcon(hWnd, GCLP_HICONSM);
+            if (icon == IntPtr.Zero) return "-";
+            // Clone: the handle belongs to the other window, so it must not be
+            // destroyed when this copy goes away.
+            using (Icon source = Icon.FromHandle(icon))
+            using (Icon copy = (Icon)source.Clone())
+            using (Bitmap bitmap = copy.ToBitmap())
+            using (MemoryStream stream = new MemoryStream())
+            {
+                bitmap.Save(stream, ImageFormat.Png);
+                return Convert.ToBase64String(stream.ToArray());
+            }
+        }
+        catch
+        {
+            return "-";
+        }
+    }
+
+[DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr hWnd, EnumWindowsProc proc, IntPtr lParam);
+
+    private static uint _hostOwnPid;
+    private static string _hostExe = "";
+
+    private static bool HostExeChild(IntPtr child, IntPtr lParam)
+    {
+        uint pid;
+        GetWindowThreadProcessId(child, out pid);
+        if (pid != 0 && pid != _hostOwnPid)
+        {
+            string exe = ExeFor(pid);
+            if (exe.Length == 0) exe = ExeForApp(pid);
+            if (exe.Length > 0)
+            {
+                _hostExe = exe;
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // A packaged app draws inside a window owned by a shared host process, so the
+    // window's own executable is the host, not the app. The app itself runs in a
+    // window further down the tree, and that path carries the app's icon.
+    public static string HostExe(long handle)
+    {
+        IntPtr hWnd = (IntPtr)handle;
+        if (hWnd == IntPtr.Zero || !IsWindow(hWnd)) return "";
+        GetWindowThreadProcessId(hWnd, out _hostOwnPid);
+        _hostExe = "";
+        EnumChildWindows(hWnd, HostExeChild, IntPtr.Zero);
+        return _hostExe;
+    }
+
+    // A packaged app runs in a container this process may not open, so its
+    // executable is asked of the service that can see it instead.
+    private static string ExeForApp(uint pid)
+    {
+        try
+        {
+            using (System.Management.ManagementObjectSearcher searcher =
+                new System.Management.ManagementObjectSearcher(
+                    "SELECT ExecutablePath FROM Win32_Process WHERE ProcessId=" + pid))
+            {
+                foreach (System.Management.ManagementObject entry in searcher.Get())
+                {
+                    object path = entry["ExecutablePath"];
+                    if (path != null)
+                    {
+                        string text = path.ToString();
+                        if (text.Length > 0) return text;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // no answer: the caller falls back to the window's own icon
+        }
+        return "";
+    }
+
+    // The icon in an executable's own resource. Chromium's file-icon call can
+    // hand back the generic application bitmap for an app that ships a perfectly
+    // good icon, which is how Freebuff's button ended up as a blank window.
+    public static string ExeIcon(string path)
+    {
+        try
+        {
+            if (String.IsNullOrEmpty(path) || !System.IO.File.Exists(path)) return "-";
+            using (Icon icon = Icon.ExtractAssociatedIcon(path))
+            {
+                if (icon == null) return "-";
+                using (Bitmap bitmap = icon.ToBitmap())
+                using (MemoryStream stream = new MemoryStream())
+                {
+                    bitmap.Save(stream, ImageFormat.Png);
+                    return Convert.ToBase64String(stream.ToArray());
+                }
+            }
+        }
+        catch
+        {
+            return "-";
+        }
+    }
+
     // A strip of the screen as PNG, for the tray icons. GDI reads the desktop
     // surface straight away, where the Chromium capturer waits for a composited
     // frame that a still screen never delivers.
@@ -396,6 +596,29 @@ public class JarvisWinHook
                     int index;
                     if (int.TryParse(text.Substring(10), out index)) ClickTray(index);
                 }
+                else if (text.StartsWith("icons "))
+                {
+                    long iconHandle;
+                    if (long.TryParse(text.Substring(6), out iconHandle))
+                    {
+                        Console.WriteLine("ICO\t" + WindowIcon(iconHandle));
+                        Console.Out.Flush();
+                    }
+                }
+                else if (text.StartsWith("exeicon "))
+                {
+                    Console.WriteLine("ICO\t" + ExeIcon(text.Substring(8).Trim().Trim('"')));
+                    Console.Out.Flush();
+                }
+                else if (text.StartsWith("hostexe "))
+                {
+                    long hostHandle;
+                    if (long.TryParse(text.Substring(8), out hostHandle))
+                    {
+                        Console.WriteLine("EXE\t" + HostExe(hostHandle));
+                        Console.Out.Flush();
+                    }
+                }
                 else if (text.StartsWith("shot "))
                 {
                     string[] parts = text.Split(' ');
@@ -403,10 +626,15 @@ public class JarvisWinHook
                     if (parts.Length == 5 &&
                         int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y) &&
                         int.TryParse(parts[3], out w) && int.TryParse(parts[4], out h) &&
-                        w > 0 && h > 0 && w <= 4000 && h <= 400)
+                        w > 0 && h > 0 && w <= 4096 && h <= 4096 && (long)w * h <= 9000000)
                     {
                         Shot(x, y, w, h);
                     }
+                }
+                else if (text == "game")
+                {
+                    Console.WriteLine("GAME\t" + GameState());
+                    Console.Out.Flush();
                 }
                 else if (text.StartsWith("activate "))
                 {

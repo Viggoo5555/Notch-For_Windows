@@ -12,7 +12,12 @@
     <link rel="stylesheet" href="taskbar-flyout.css" />
   </head>
   <body>
-    <div class="fx" id="fxList"></div>
+    <div class="fx" id="fxRoot" data-style="glass">
+      <span class="fx-pane" id="fxPane"></span>
+      <img class="fx-source" id="fxSource" alt="" decoding="async" />
+      <span class="fx-tint" aria-hidden="true"></span>
+      <div class="fx-list" id="fxList"></div>
+    </div>
     <script type="module" src="taskbar-flyout.js"></script>
   </body>
 </html>
