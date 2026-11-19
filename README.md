@@ -12,7 +12,7 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.8.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.8/Notch-Setup-1.2.8.exe)**
+**[Notch-Setup-1.2.9.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.9/Notch-Setup-1.2.9.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -28,12 +28,12 @@ Remove it from *Settings → Apps → Notch*; your settings in
 
 No installer wanted? The portable file is only cut when someone asks for it, so the
 newest one is still [Notch-1.2.7.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.7/Notch-1.2.7.exe)
-(~300 MB) — the same app as a single file, double-click and it runs, minus the 1.2.8
-changes.
+(~300 MB) — the same app as a single file, double-click and it runs, without
+anything from 1.2.8 or 1.2.9.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
-### Upgrading from 1.2.7
+### Upgrading from 1.2.8
 
 Run the new installer over the old one; settings, pinned apps, the game library and
 the overlay's corner are kept. Nothing else is needed — the first start asks nothing.
@@ -43,8 +43,9 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
 - **Notch panel** — a 96 px pill (time, date, battery, running focus timer) on the
   top edge. Hover to expand into a glass panel; keep it out with a click on the pin
   icon. The glass is a real liquid-glass treatment: a displacement rim, specular
-  edge, chromatic dispersion and grain, sampled from your wallpaper (or the live
-  desktop) behind it.
+  edge, chromatic dispersion and grain, sampled from your wallpaper or from the
+  live desktop — which it follows frame by frame while you are near it, so what
+  moves behind the notch moves inside it too.
 - **Launcher** — tap the Windows key and a search sheet drops down over the desktop:
   a fall of 28 px with a slight scale and a couple of pixels of settle, around 200 ms,
   opacity and transform only, so it is taking keys while it is still moving. It closes
@@ -210,8 +211,8 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.8.exe`, the installer said above,
-and `Notch-1.2.8.exe`, the same app as one portable file. Neither needs Node.js on
+writes two files into `dist/`: `Notch-Setup-1.2.9.exe`, the installer said above,
+and `Notch-1.2.9.exe`, the same app as one portable file. Neither needs Node.js on
 the target machine. `npm run dist:installer` builds only the installer, which is what
 every release ships unless a portable has been asked for.
 
@@ -252,7 +253,7 @@ Panel → menu (the sliders icon) → Settings. Everything is stored in
 - **Motion** — whether animations follow Windows or always play (the override for a
   machine that has them switched off), animation speed, easing, hover delay
 - **Notch** — attached or island shape, pill width
-- **Backdrop** — sample the live desktop or a fixed wallpaper image, and what the
+- **Backdrop** — follow the live desktop or pin a wallpaper image, and what the
   glass ended up doing (`WebGL`, `flat — no WebGL`, `flat — no image`)
 - **Taskbar** — show it, glass or invisible surface, attached or island layout,
   items (both, open windows only, pins only), auto-hide
@@ -321,9 +322,11 @@ option is on.
 - Speech-to-text downloads its first model to `%APPDATA%\notch`; nothing is uploaded.
 - The studio voice needs a real graphics card. On a CPU it works but takes seconds
   per sentence, so it is not offered as the default there.
-- While the pointer rests near the notch with the live backdrop on, the capture
-  layer occasionally logs a DXGI warning. It is cosmetic and stops when the pointer
-  moves away.
+- While the pointer rests near the notch with the live backdrop on, the desktop is
+  streamed at 30 fps so the glass follows whatever moves behind it — a video, a
+  dragged window, a scrolling page. The stream stops the moment the pointer leaves;
+  if a machine refuses to hand one out, the glass falls back to a still sample
+  refreshed every few seconds.
 
 ## Credits
 
@@ -340,6 +343,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.9** — the glass follows the desktop, live. What sat behind the notch used to
+be a photograph: the screen was grabbed whole, and one grab costs about a third of a
+second on a normal PC, so the picture was refreshed every three and a half seconds and
+the glass was always a little behind whatever moved behind it. The panel now opens one
+continuous capture — the same one Windows runs for screen recording — and copies its own
+slice of every frame straight into the glass, at screen rate, while you are near the
+notch. A video, a dragged window or a scrolling page refracts as it happens. The stream
+starts on the way in and stops the moment the pointer leaves, costs nothing when the
+notch is untouched, and falls back to the old still sample on a machine that refuses to
+hand one out. The notch and its windows stay out of their own picture, so the glass
+never shows itself.
 
 **v1.2.8** — a store, a butler, and a pill that stays on top.
 
