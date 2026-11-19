@@ -151,6 +151,85 @@ let liveTime = -1;
 let liveFrame = 0;
 let liveFailedAt = 0;
 let liveWanted = false;
+let liveCursor = null;
+let cursorTracked = false;
+let cursorTimer = 0;
+
+// Chromium paints the pointer into the captured frames and ignores the `cursor`
+// constraint (the W3C one is not implemented), so a notch fed straight from that
+// stream carries a frozen arrow around inside its glass. Where the pointer is
+// therefore has to be taken back out: the box it occupies is filled from the
+// desktop immediately around it and softened, which the lens' own blur finishes.
+const CURSOR_W = 30;
+const CURSOR_H = 40;
+
+function eraseCursor(context, rect, scaleX, scaleY, sx, sy) {
+  if (!liveCursor || !liveVideo) return;
+  const left = window.screenX + rect.left;
+  const top = window.screenY + rect.top;
+  const pad = 3;
+  const box = {
+    x: Math.round((liveCursor.x - left) * scaleX) - pad,
+    y: Math.round((liveCursor.y - top) * scaleY) - pad,
+    w: Math.round(CURSOR_W * scaleX) + pad * 2,
+    h: Math.round(CURSOR_H * scaleY) + pad * 2,
+  };
+  if (box.x > live.width || box.y > live.height || box.x + box.w < 0 || box.y + box.h < 0) return;
+  const sourceW = CURSOR_W * scaleX;
+  const sourceH = CURSOR_H * scaleY;
+  // The desktop just left of the pointer, taken from the stream itself: the same
+  // pixels, only not the ones the arrow is drawn on. Read from the video rather
+  // than the canvas it is being painted into, which would copy the whole canvas
+  // back through the CPU on every frame.
+  const sourceX = Math.max(sx, sx + (liveCursor.x - left - CURSOR_W - 4) * scaleX);
+  const sourceY = sy + (liveCursor.y - top) * scaleY;
+  if (sourceY + sourceH > liveVideo.videoHeight) return;
+  context.save();
+  context.beginPath();
+  context.rect(box.x, box.y, box.w, box.h);
+  context.clip();
+  context.filter = 'blur(5px)';
+  context.drawImage(liveVideo, sourceX, sourceY, sourceW, sourceH, box.x, box.y, box.w, box.h);
+  context.restore();
+}
+
+// The pointer is only ever in the glass while it is over this window, and while it
+// is over this window the page is told where it is: no asking main for it, and
+// nothing to track when it is somewhere else.
+function trackCursor() {
+  if (cursorTracked) return;
+  cursorTracked = true;
+  // Pointer events are the quickest position and they also cover the gaps between
+  // the glass pieces, where nothing in the page is under the pointer; the poll is
+  // the position of record, kept slow enough to cost nothing.
+  const poll = async () => {
+    if (!liveOn) return;
+    cursorTimer = setTimeout(async () => {
+      try {
+        const spot = await window.notchAPI.cursorPos();
+        if (spot && liveOn) liveCursor = spot;
+      } catch {
+        /* no position: the frame is left as it is */
+      }
+      poll();
+    }, 48);
+  };
+  poll();
+  document.addEventListener(
+    'pointermove',
+    (event) => {
+      if (!liveOn) return;
+      liveCursor = { x: event.screenX, y: event.screenY };
+    },
+    { passive: true },
+  );
+  const drop = () => {
+    liveCursor = null;
+  };
+  document.addEventListener('pointerleave', drop, { passive: true });
+  window.addEventListener('blur', drop);
+  document.addEventListener('mouseleave', drop, { passive: true });
+}
 
 // Cut this window's slice out of the streamed display and put it on the canvas.
 function paintLive() {
@@ -184,6 +263,7 @@ function paintLive() {
       width,
       height,
     );
+    eraseCursor(context, rect, scaleX, scaleY, sx, sy);
   } catch {
     return false;
   }
@@ -244,6 +324,7 @@ async function startLive() {
     if (liveWanted) setPaused(false);
     api.liveActive(true);
     liveFrame = requestAnimationFrame(liveTick);
+    trackCursor();
   } catch (error) {
     liveFailedAt = Date.now();
     api.liveActive(false);
@@ -256,6 +337,9 @@ function stopLive() {
   liveOn = false;
   if (liveFrame) cancelAnimationFrame(liveFrame);
   liveFrame = 0;
+  clearTimeout(cursorTimer);
+  cursorTimer = 0;
+  liveCursor = null;
   // Hand the last streamed frame to the still image, so the next unfold shows the
   // desktop the way it was left rather than a frame from minutes ago.
   try {

@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld('notchAPI', {
   copyClip: (id) => ipcRenderer.invoke('notch:copy-clip', id),
   ready: () => ipcRenderer.send('notch:ready'),
   detachTile: (payload) => ipcRenderer.send('notch:detach', payload),
+  cursorPos: () => ipcRenderer.invoke('notch:cursor'),
+  prewarmTile: (tile) => ipcRenderer.send('notch:prewarm-tile', tile),
+  // Where the pointer is, so the glass can take it out of the picture.
   overlay: () => ipcRenderer.invoke('notch:overlay'),
   detail: (kind) => ipcRenderer.send('notch:detail', kind),
   focusState: (state) => ipcRenderer.send('focus:state', state),

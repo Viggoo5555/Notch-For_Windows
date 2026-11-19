@@ -3638,6 +3638,9 @@ ipcMain.handle('notch:bootstrap', () => {
 
 ipcMain.on('notch:ready', () => revealWindow());
 
+// The glass needs to know where the pointer is to keep it out of the picture.
+ipcMain.handle('notch:cursor', () => screen.getCursorScreenPoint());
+
 ipcMain.handle('notch:update-check', () => checkForUpdates());
 ipcMain.handle('notch:update-install', () => installUpdate());
 ipcMain.on('notch:update-page', () => {
@@ -5539,7 +5542,7 @@ function sendTileData(tile) {
   else sendWidgetStats();
 }
 
-function createWidget(tile) {
+function createWidget(tile, options = {}) {
   const card = new BrowserWindow({
     ...widgetSize(tile, tile === 'system' && widgetExpanded),
     x: 40,
@@ -5565,19 +5568,31 @@ function createWidget(tile) {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: false,
-      backgroundThrottling: false,
+      // Warmed cards sit hidden for a long time; a shown card is never throttled.
+      backgroundThrottling: true,
     },
   });
   card.__tile = tile;
+  // Warmed on the way into a drag: the window is built and loaded but stays off
+  // screen until the tile is actually pulled out, so it appears on the first move
+  // instead of after a page load.
+  card.__warm = !!options.warm;
   card.setMenu(null);
   card.setAlwaysOnTop(true, 'screen-saver');
   card.setSkipTaskbar(true);
   card.loadFile(path.join(__dirname, 'src', 'widget.html'), { query: { tile } });
   widgetWins.set(tile, card);
+  // A hidden window does not paint, so ready-to-show may never come while it is
+  // only warmed; a finished load is what tells us it can appear at once.
+  card.webContents.once('did-finish-load', () => {
+    card.__loaded = true;
+  });
   card.once('ready-to-show', () => {
     if (card.isDestroyed()) return;
+    card.__loaded = true;
     const size = widgetSize(tile, tile === 'system' && widgetExpanded);
     card.setContentSize(size.width, size.height);
+    if (card.__warm) return;
     card.showInactive();
     card.moveTop();
     startWidgetStats();
@@ -5594,6 +5609,18 @@ function createWidget(tile) {
   return card;
 }
 
+// A window created while the desktop is being captured can take a very long time to
+// come up (the stream holds the compositor), which is exactly when a card is pulled
+// out. So the draggable cards are built and loaded while nothing is being captured,
+// and pulling one out only has to show a window that is already there.
+const WARM_TILES = ['system', 'focus', 'library', 'clip'];
+
+function warmWidgetWindows() {
+  for (const tile of WARM_TILES) {
+    if (!widgetsFor(tile)) createWidget(tile, { warm: true });
+  }
+}
+
 function openWidget(tile, at) {
   const size = widgetSize(tile, tile === 'system' && widgetExpanded);
   const pos = clampWidget(
@@ -5604,14 +5631,16 @@ function openWidget(tile, at) {
   );
   const card = widgetsFor(tile) || createWidget(tile);
   if (!card) return;
+  card.__warm = false;
   card.setContentSize(size.width, size.height);
   card.setPosition(pos.x, pos.y);
-  if (card.isVisible()) {
-    card.showInactive();
-    card.moveTop();
-  } else {
-    card.once('ready-to-show', () => card.moveTop());
-  }
+  // On screen from the first move, not after a page load: the window is there and
+  // follows the pointer, and its glass fills in as soon as the page has painted.
+  card.showInactive();
+  card.moveTop();
+  startWidgetStats();
+  sendWidgetBackdrop();
+  sendTileData(tile);
   startWidgetStats();
   sendWidgetBackdrop();
   startWidgetDrag(card, { dx: size.width / 2, dy: 26 });
@@ -5718,6 +5747,11 @@ ipcMain.on('widget:restore', (event) => {
 
 ipcMain.handle('notch:overlay', () => togglePerformanceOverlay());
 
+ipcMain.on('notch:prewarm-tile', (_event, tile) => {
+  if (!WIDGET_TILES.has(tile) || widgetsFor(tile)) return;
+  createWidget(tile, { warm: true });
+});
+
 ipcMain.on('notch:detach', (_event, payload) => {
   const at = payload && Number.isFinite(payload.x) ? { x: payload.x, y: payload.y } : cursorDip();
   const tile = payload && WIDGET_TILES.has(payload.tile) ? payload.tile : 'system';
@@ -5773,6 +5807,8 @@ ipcMain.on('widget:expanded', (_event, value) => setWidgetExpanded(value));
 ipcMain.on('widget:ready', (event) => {
   const card = BrowserWindow.fromWebContents(event.sender);
   const tile = card && card.__tile ? card.__tile : 'system';
+  // The page says when it is up, which is the signal a warmed card waits for.
+  if (card) card.__loaded = true;
   startWidgetStats();
   sendWidgetBackdrop();
   sendTileData(tile);
@@ -5796,6 +5832,8 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     loadPrefs();
+    // Built while the desktop is not being captured, then simply shown on a drag.
+    setTimeout(warmWidgetWindows, 6000);
     // The assistant listens through the microphone; Chromium asks us first.
     try {
       // 'display-capture' is what Chromium asks before handing out a screen

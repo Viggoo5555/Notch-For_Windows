@@ -517,6 +517,54 @@ function resetFocus() {
   renderFocus();
 }
 
+// The dial is the way to any length of session: press it, type the minutes, Enter.
+// The presets stay as shortcuts for the common ones.
+function editableTime(dial) {
+  if (!dial || dial.dataset.editable) return;
+  dial.dataset.editable = '1';
+  dial.title = 'Set any time';
+  dial.addEventListener('pointerdown', (event) => event.stopPropagation());
+  dial.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (dial.querySelector('input')) return;
+    const label = dial.querySelector('.dial-time, .detail-dial-time');
+    if (!label) return;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'dial-input';
+    input.min = '1';
+    input.max = '180';
+    input.step = '1';
+    input.value = String(focus.minutes);
+    input.setAttribute('aria-label', 'Focus minutes');
+    label.hidden = true;
+    dial.append(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (apply) => {
+      if (done) return;
+      done = true;
+      const minutes = Math.max(1, Math.min(180, Math.round(Number(input.value)) || 0));
+      input.remove();
+      label.hidden = false;
+      if (apply && minutes) setFocusMinutes(minutes);
+      else renderFocus();
+    };
+    input.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener('blur', () => finish(true));
+  });
+}
+
 function setFocusMinutes(minutes) {
   focus.minutes = minutes;
   focus.total = minutes * 60000;
@@ -927,15 +975,29 @@ function bindDetach(tile, kind) {
     }
   };
 
+  // Hovering a tile builds its window in the background, so a drag that starts a
+  // moment later already has something to pull out.
+  tile.addEventListener('pointerenter', () => {
+    if (api.prewarmTile) api.prewarmTile(kind);
+  });
+
   tile.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
-    drag = { id: event.pointerId, x: event.screenX, y: event.screenY, started: false };
+    drag = { id: event.pointerId, x: event.screenX, y: event.screenY, started: false, warmed: false };
     tile.setPointerCapture?.(event.pointerId);
   });
 
   tile.addEventListener('pointermove', (event) => {
     if (!drag || event.pointerId !== drag.id) return;
-    if (!drag.started && Math.hypot(event.screenX - drag.x, event.screenY - drag.y) > 14) {
+    const travelled = Math.hypot(event.screenX - drag.x, event.screenY - drag.y);
+    // A couple of pixels is enough to know this is a pull, not a tap: the window is
+    // built now, while the pointer is still moving, so it is ready to appear on the
+    // move that actually starts the drag instead of a page load later.
+    if (!drag.warmed && travelled > 2) {
+      drag.warmed = true;
+      if (api.prewarmTile) api.prewarmTile(kind);
+    }
+    if (!drag.started && travelled > 6) {
       drag.started = true;
       state.detaching = true;
       tile.classList.add('detaching');
@@ -1281,6 +1343,7 @@ function renderDetailFocus(body) {
   time.id = 'detailDialTime';
   time.textContent = clockText(focus.remaining);
   dial.append(ring, time);
+  editableTime(dial);
 
   const side = document.createElement('div');
   side.className = 'detail-focus-side';
@@ -1605,6 +1668,7 @@ function bindEvents() {
 
   $('#focusToggle').addEventListener('click', toggleFocus);
   $('#focusReset').addEventListener('click', resetFocus);
+  editableTime(document.querySelector('.dial'));
   document.querySelectorAll('#presets button').forEach((button) => {
     button.addEventListener('click', () => setFocusMinutes(Number(button.dataset.min)));
   });

@@ -12,7 +12,7 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.11.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.11/Notch-Setup-1.2.11.exe)**
+**[Notch-Setup-1.2.12.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.12/Notch-Setup-1.2.12.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -33,7 +33,7 @@ anything from 1.2.8 onwards.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
-### Upgrading from 1.2.10
+### Upgrading from an earlier version
 
 Run the new installer over the old one; settings, pinned apps, the game library and
 the overlay's corner are kept. Nothing else is needed — the first start asks nothing.
@@ -211,8 +211,8 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.11.exe`, the installer said above,
-and `Notch-1.2.11.exe`, the same app as one portable file. Neither needs Node.js on
+writes two files into `dist/`: `Notch-Setup-1.2.12.exe`, the installer said above,
+and `Notch-1.2.12.exe`, the same app as one portable file. Neither needs Node.js on
 the target machine. `npm run dist:installer` builds only the installer, which is what
 every release ships unless a portable has been asked for.
 
@@ -343,6 +343,14 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.12** — the glass shows the desktop and not the pointer: Windows paints the
+cursor into every captured frame and Chromium cannot be asked to leave it out, so the
+few pixels it covers are filled from the desktop beside them and softened. Cards come
+out the moment they are pulled — the four draggable ones are built and loaded while
+nothing is being captured, a few seconds after launch, so a drag only has to show a
+window that is already there, and it starts after 6 px instead of 14. The focus dial
+takes any length of session: press it, type the minutes (1–180), Enter.
 
 **v1.2.11** — it updates itself. Notch asks GitHub for the newest release a few
 seconds after it starts and then every six hours; when there is one, a toast says so
