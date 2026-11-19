@@ -60,19 +60,29 @@ jobs:
         if: steps.check.outputs.exists != 'true'
         run: npm ci
 
+      # The voice folder has to exist even if a download is refused, or the packer
+      # has nothing to copy into the package.
+      - name: Prepare the voice folder
+        if: steps.check.outputs.exists != 'true'
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path tts, tts/piper | Out-Null
+
       # The Piper voice travels inside the installer, but it is not in the
       # repository (tts/ is ignored), so the runner fetches exactly what the
       # package expects: tts/piper/piper.exe and the two .onnx voices beside it.
+      # curl.exe is used rather than Invoke-WebRequest: it follows the redirect
+      # to the CDN, retries, and returns an exit code instead of a PowerShell
+      # error, so a refused download is a warning and not a broken job.
       - name: Fetch the Piper voice
         if: steps.check.outputs.exists != 'true'
+        continue-on-error: true
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path tts | Out-Null
-          try {
-            Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip" -OutFile piper.zip
-            Expand-Archive piper.zip -DestinationPath tts -Force
-          } catch {
-            Write-Warning "piper binary: $_"
+          $ProgressPreference = 'SilentlyContinue'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o piper.zip "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip"
+          if (Test-Path piper.zip) {
+            try { Expand-Archive piper.zip -DestinationPath tts -Force }
+            catch { Write-Warning "piper zip: $_" }
           }
           $voices = @(
             @{ name = 'en_GB-alan-medium'; url = 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium' },
@@ -80,14 +90,12 @@ jobs:
           )
           foreach ($voice in $voices) {
             foreach ($suffix in @('.onnx', '.onnx.json')) {
-              try {
-                Invoke-WebRequest -UseBasicParsing -Uri "$($voice.url)$suffix" -OutFile "tts/$($voice.name)$suffix"
-              } catch {
-                Write-Warning "$($voice.name)$suffix: $_"
-              }
+              curl.exe -L --fail --retry 3 --retry-delay 2 -o "tts/$($voice.name)$suffix" "$($voice.url)$suffix"
             }
           }
           Get-ChildItem tts -Recurse -File | Select-Object -ExpandProperty FullName
+          if (-not (Test-Path tts/piper/piper.exe)) { Write-Warning 'piper.exe did not arrive; the installer will fall back to the Windows voice.' }
+          exit 0
 
       - name: Build the installer
         if: steps.check.outputs.exists != 'true'
