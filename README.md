@@ -7,12 +7,11 @@ Jarvis sits in a small window: it listens for its name, answers with a local mod
 and does what you ask.
 
 Frameless, transparent, always on top, and built as a single Electron app —
-installed in a few clicks or run as one portable file, no browser, no web
-service.
+installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.14.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.14/Notch-Setup-1.2.14.exe)**
+**[Notch-Setup-1.2.15.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.15/Notch-Setup-1.2.15.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -26,12 +25,9 @@ It installs for your user only, so it never asks for an administrator password.
 Remove it from *Settings → Apps → Notch*; your settings in
 `%APPDATA%\notch\notch.json` are left in place.
 
-No installer wanted? **[Notch-1.2.14.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.14/Notch-1.2.14.exe)**
-(~300 MB) is the same app as one portable file: double-click it and Notch runs, with
-nothing written to *Programs* and nothing to uninstall. It keeps its settings in the
-same `%APPDATA%\notch` folder, so a portable and an installed copy are interchangeable
-— take the installer later and everything carries over. Both files are attached to
-every release.
+Every release carries the installer and nothing else: one file to download, one thing
+to uninstall, and no 300 MB portable build beside it. Settings still live in
+`%APPDATA%\notch`, so an install over an older copy keeps everything.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
@@ -62,15 +58,21 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   Hover a button with several windows and a list of them opens above the bar. Click
   a button to bring that app forward (again to put it away). `Win+1` … `Win+0`
   focus the first ten buttons. Optional auto-hide keeps the bar off-screen until you
-  touch the bottom edge or open the launcher.
+  touch the bottom edge or open the launcher. Attached is one bar along the whole
+  bottom edge: the apps stay centred on the screen while the notification tray, the
+  battery and the clock hold the right edge, the way a taskbar should, and a click on
+  a tray icon is passed to that icon.
 - **Library and store** — the library scans Steam, Epic and your own shortcuts, shows
   the cover art, and launches a game with a click; add a shortcut by hand if a
   launcher keeps it hidden. The bag icon beside those buttons opens **Store** inside
-  the panel: Steam's catalogue with today's discounts, drawn by Notch itself — its own
-  search, discount chips (−25 / −50 / −75 %), price ceilings and sorting by discount,
-  price or name, all happening in this window. SteamDB has no public API and its terms
-  forbid scraping it, so the numbers come from Steam's own storefront, which is where
-  SteamDB reads them too; a row opens the game's page when you want to buy.
+  the panel: the top of Steam's whole catalogue, best reviewed first, with what players
+  said about each game on the row ("Overwhelmingly Positive · 99%"), today's discounts,
+  its own search, discount chips (−25 / −50 / −75 %), price ceilings and sorting by
+  review score, number of reviews, discount, price or name — all happening in this
+  window. Steam's search answers a hundred games at a time, so the list is four
+  hundred deep instead of the thirty on its front page. SteamDB has no public API and
+  its terms forbid scraping it, so the numbers come from Steam's own storefront, which
+  is where SteamDB reads them too; a row opens the game's page when you want to buy.
 - **Jarvis works Notch itself** — the assistant owns the app it lives in, not just
   the machine around it: *Jarvis, make it mint*, *frosted glass*, *turn the taskbar
   on*, *open the library*, *show the performance overlay*, *focus for 25 minutes*,
@@ -84,7 +86,12 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   front: *Hey Jarvis*, *Okay Jarvis*, *Hej Jarvis*. Either way the chime plays and
   it listens for the order that follows. It can
   work the machine: *open Brave*, *open calculator and notepad*, *search Google for
-  the weather*, *play Norah Jones*, or a whole sentence asking for one of those. It
+  the weather*, *play Norah Jones*, *run ipconfig*, *volume up*, *lock the PC* — or a
+  whole sentence asking for one of those. Anything with a command is allowed: an
+  order that starts with *run* is handed to cmd exactly as spoken. It is also quick
+  to think: the model is loaded into video memory when the window opens rather than
+  when you ask, kept there between orders, and told to answer in two or three
+  sentences with the answer first. It
   also answers with two voices — a light one that starts in under a second, and a
   studio voice that sounds like a recording on machines with a graphics card. When
   it answers with a question of its own it keeps listening, so the reply can be
@@ -108,13 +115,12 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   seconds) before the wake word works.
 - **Widget** — drag the panel away from the notch and it becomes a floating card you
   can drop anywhere and keep open.
-- **Performance overlay** — *menu → Performance overlay* puts four numbers on the
-  screen with no card behind them: frames per second, CPU, GPU and RAM, the way a
-  driver overlay looks. A dragged-out System card has the same thing one click
-  away: its **–** button, next to the ✕, folds the whole card down into the
-  overlay where the card was standing — and the overlay's **↗** button, next to
-  its own ✕, opens the System card again in that same place. So the two are one
-  widget in two sizes, and the way between them is one click either way. GPU is the graphics card's 3D engine load summed across
+- **Performance overlay** — pull the System tile out of the panel and the card you
+  get is the overlay: four numbers with no card behind them — frames per second,
+  CPU, GPU and RAM — the way a driver overlay looks. There is no menu switch for it,
+  because the tile is the switch. Its **↗** button, next to the ✕, opens the full
+  System card in the same place, and the card's **–** button folds it back down into
+  the overlay. So the two are one widget in two sizes. GPU is the graphics card's 3D engine load summed across
   everything drawing on it, which is what a game shows up as. It stays above
   everything, including a running game, never takes the keyboard, and remembers
   where you dragged it. The frame rate is the rate the
@@ -213,10 +219,9 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.14.exe`, the installer said above,
-and `Notch-1.2.14.exe`, the same app as one portable file. Neither needs Node.js on
-the target machine. Both are attached to every release; `npm run dist:installer`
-builds only the installer when the portable is not wanted.
+writes `dist/Notch-Setup-1.2.15.exe`, the installer said above; it needs no Node.js on
+the target machine. `npm run dist:installer` is the same build when the portable is
+not wanted, and releases carry only the installer.
 
 The package carries Electron, the Whisper loader, `kokoro-js` and the Piper voice,
 so speech works offline out of the box. The Piper files it bundles come from `tts/`
@@ -345,6 +350,23 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.15** — the installer only, and a faster, larger Jarvis. The graphics card is
+now measured by the driver's own registry figure instead of the 32-bit one Windows
+reports, so an 8 GB card is seen as 8 GB and gets the 7B brain, whisper-small on the
+GPU and the studio voice instead of the smaller tier. The model is loaded when the
+assistant opens and kept in video memory (`keep_alive`), the reply is capped at two or
+three sentences, and answers lead with the answer — the first word now arrives when
+the question ends rather than after a 4.7 GB load. Jarvis also does more: `run`
+hands any command to cmd, and lock, sleep, shutdown, restart, volume and screenshots
+are orders of their own, alongside Settings, Camera, Photos, Device Manager and the
+rest of Windows' own apps. The store is the top four hundred of Steam's catalogue
+instead of thirty games, sorted by review score with each game's verdict on the row.
+The taskbar attached is one bar along the whole bottom edge, so the tray, battery and
+clock sit on the right of the screen and the tray icons are clickable; the bar no
+longer disappears when nothing is open. Dragging the System tile out now gives the
+performance overlay, and the menu item that used to switch it on is gone. Releases
+carry the installer only.
 
 **v1.2.14** — both downloads again. Every release now carries the installer *and*
 the single-file portable build (`Notch-1.2.14.exe`), so Notch can be run without

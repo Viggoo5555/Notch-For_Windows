@@ -1170,6 +1170,36 @@ async function assistantStatus() {
 // What the machine can actually run, so the model pick isn't a guess.
 let hardwareCache = null;
 
+// Win32_VideoController.AdapterRAM is a 32-bit figure, so a card with 8 GB of
+// memory commonly reports 4 GB — and the machine was then sized for a 3B model it
+// could carry a 7B on. The driver's own entry in the display class registry is a
+// QWORD and carries the real size, so that is read first and the adapter figure
+// is only the floor.
+function gpuMemoryBytes() {
+  if (!isWin) return 0;
+  try {
+    const raw = execFileSync(
+      'reg',
+      [
+        'query',
+        'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}',
+        '/s',
+        '/v',
+        'HardwareInformation.qwMemorySize',
+      ],
+      { encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    let best = 0;
+    for (const match of String(raw).matchAll(/REG_QWORD\s+0x([0-9a-f]+)/gi)) {
+      const value = Number.parseInt(match[1], 16);
+      if (Number.isFinite(value) && value > best) best = value;
+    }
+    return best;
+  } catch {
+    return 0;
+  }
+}
+
 function detectHardware() {
   if (hardwareCache) return hardwareCache;
   const cpus = os.cpus();
@@ -1177,7 +1207,7 @@ function detectHardware() {
   const ramGb = Math.round((os.totalmem() / 1024 ** 3) * 10) / 10;
   const cpu = String((cpus[0] && cpus[0].model) || '').replace(/\s+/g, ' ').trim();
   let gpu = '';
-  let vramGb = 0;
+  let vramGb = Math.round((gpuMemoryBytes() / 1024 ** 3) * 10) / 10;
   try {
     const raw = execFileSync(
       'powershell',
@@ -1192,10 +1222,11 @@ function detectHardware() {
     const parsed = JSON.parse(String(raw).trim() || 'null');
     if (parsed) {
       gpu = String(parsed.Name || '').trim();
-      vramGb = Math.round(((Number(parsed.vram) || 0) / 1024 ** 3) * 10) / 10;
+      const reported = Math.max(Number(parsed.vram) || 0, gpuMemoryBytes());
+      vramGb = Math.round((reported / 1024 ** 3) * 10) / 10;
     }
   } catch {
-    /* no video controller info: treat it as CPU only */
+    /* no video controller info: the registry figure, if any, is still usable */
   }
   // Integrated graphics borrow system RAM, so they count as no model space.
   const integrated = !gpu || /intel|uhd|iris|radeon\(tm\) graphics|radeon graphics|vega \d+ graphics/i.test(gpu);
@@ -1215,7 +1246,7 @@ function detectHardware() {
     tier,
     tierNote:
       tier === 'studio'
-        ? `${gpu} with ${gpuMemoryGb} GB of video memory: the studio voice, the larger listening model and a 7B brain all fit at once.`
+        ? `${gpu} with ${gpuMemoryGb} GB of video memory: the studio voice, whisper-small on the GPU and a 7B brain all fit at once, so answers start in about a second.`
         : tier === 'gpu'
           ? `${gpu} with ${gpuMemoryGb} GB of video memory: a GPU-accelerated brain and listening, with the light voice.`
           : `${cores} CPU threads and no dedicated graphics: the light voice and small models, which stay instant here.`,
@@ -1331,9 +1362,33 @@ const SYSTEM_APPS = [
   [/^(paint|mspaint)$/i, 'mspaint.exe', 'Paint'],
   [/^(file explorer|explorer|files|stifinder)$/i, 'explorer.exe', 'File Explorer'],
   [/^(command prompt|cmd|kommandoprompt)$/i, 'cmd.exe', 'Command Prompt'],
+  [/^(powershell|terminal|windows terminal)$/i, 'wt.exe', 'Terminal'],
   [/^(task manager|aktivitetsstyring)$/i, 'taskmgr.exe', 'Task Manager'],
   [/^(control panel|kontrolpanel)$/i, 'control.exe', 'Control Panel'],
   [/^(snipping tool|klippeværktøj)$/i, 'snippingtool.exe', 'Snipping Tool'],
+  [/^(device manager|enhedshåndtering)$/i, 'devmgmt.msc', 'Device Manager'],
+  [/^(services|tjenester)$/i, 'services.msc', 'Services'],
+  [/^(event viewer|hændelseslog)$/i, 'eventvwr.msc', 'Event Viewer'],
+  [/^(disk cleanup|diskoprydning)$/i, 'cleanmgr.exe', 'Disk Cleanup'],
+  [/^(resource monitor|ressourcestyring)$/i, 'resmon.exe', 'Resource Monitor'],
+  [/^(system information|systemoplysninger)$/i, 'msinfo32.exe', 'System Information'],
+  [/^(registry editor|regedit|registreringsdatabasen)$/i, 'regedit.exe', 'Registry Editor'],
+];
+
+// Apps Windows opens by protocol rather than by executable. They are what a person
+// means by "open the camera" or "open settings", and none of them live in the
+// Start menu index.
+const SHELL_URIS = [
+  [/^(settings|indstillinger|windows settings)$/i, 'ms-settings:', 'Settings'],
+  [/^(camera|kamera)$/i, 'microsoft.windows.camera:', 'Camera'],
+  [/^(photos|billeder)$/i, 'ms-photos:', 'Photos'],
+  [/^(clock|ur|alarm|alarmer)$/i, 'ms-clock:', 'Clock'],
+  [/^(mail|e-mail|post)$/i, 'outlookmail:', 'Mail'],
+  [/^(calendar|kalender)$/i, 'outlookcal:', 'Calendar'],
+  [/^(xbox)$/i, 'xbox:', 'Xbox'],
+  [/^(phone link|phone|telefon)$/i, 'ms-phone:', 'Phone Link'],
+  [/^(weather|vejr)$/i, 'bingweather:', 'Weather'],
+  [/^(screenshot|screen clip|skærmbillede)$/i, 'ms-screenclip:', 'Snipping Tool'],
 ];
 
 const ASSISTANT_SITES = [
@@ -1481,9 +1536,19 @@ async function openSomething(rawAsked) {
   // "calculator and open notepad" is two orders; matching it against the app
   // index would only produce a confident answer to the wrong question.
   if (/\b(?:and|then|og)\s+(?:open|launch|start|run|play|search|google|look)\b/i.test(asked)) return '';
-  if (/^(settings|indstillinger)$/i.test(asked)) {
-    shell.openExternal('ms-settings:');
-    return sayBoth('Opening Settings.', 'Åbner Indstillinger.');
+  const uri = SHELL_URIS.find(([pattern]) => pattern.test(asked));
+  if (uri) {
+    shell.openExternal(uri[1]);
+    return sayBoth(`Opening ${uri[2]}.`, `Åbner ${uri[2]}.`);
+  }
+  // A full path — a folder, a document, a game that no launcher lists — is opened
+  // with the program Windows would use, instead of being sent to the Start index.
+  const localPath = expandEnv(asked.replace(/^["']|["']$/g, ''));
+  if (/^[a-z]:\\/i.test(localPath) || localPath.startsWith('\\\\')) {
+    if (fs.existsSync(localPath)) {
+      const failure = await shell.openPath(localPath);
+      if (!failure) return sayBoth('Opening it.', 'Åbner den.');
+    }
   }
   const browser = findBrowser(asked);
   if (browser) {
@@ -1786,9 +1851,93 @@ async function runNotchAction(raw) {
   return '';
 }
 
+// Anything the short commands do not name by hand is still reachable: an order
+// that starts with "run" is handed to cmd as it was spoken, which is what makes
+// "do anything on my PC" true instead of a list of fifteen apps.
+function runCommand(command) {
+  const line = String(command || '').trim();
+  if (!line) return false;
+  try {
+    execFile('cmd', ['/c', line], { windowsHide: true, timeout: 60000 }, () => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sendKeys(code) {
+  try {
+    execFile(
+      'powershell',
+      [
+        '-NoProfile',
+        '-WindowStyle',
+        'Hidden',
+        '-Command',
+        `(New-Object -ComObject WScript.Shell).SendKeys([char]${code})`,
+      ],
+      { windowsHide: true },
+      () => {},
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function runAction(text) {
   const notch = await runNotchAction(text);
   if (notch) return { handled: true, say: notch };
+
+  const runMatch = text.match(/^(?:run|execute|exec|kør)\s+(.+?)[.!?]*$/i);
+  if (runMatch) {
+    const line = runMatch[1].trim();
+    if (runCommand(line)) return { handled: true, say: sayBoth(`Running ${line}.`, `Kører ${line}.`) };
+    return { handled: true, say: sayBoth('That would not run.', 'Det kunne ikke køre.') };
+  }
+
+  if (/^(?:lock|lock (?:the )?(?:pc|computer|screen|windows)|lås(?: skærmen| computeren)?)[.!?]*$/i.test(text)) {
+    // A beat for the line to be spoken before the screen goes dark.
+    setTimeout(() => {
+      execFile('rundll32.exe', ['user32.dll,LockWorkStation'], { windowsHide: true }, () => {});
+    }, 1200);
+    return { handled: true, say: sayBoth('Locking the machine.', 'Låser computeren.') };
+  }
+
+  if (/^(?:sleep|sleep (?:the )?(?:pc|computer)|sov(?: nu)?)[.!?]*$/i.test(text)) {
+    setTimeout(() => {
+      execFile('rundll32.exe', ['powrprof.dll,SetSuspendState', '0,1,0'], { windowsHide: true }, () => {});
+    }, 1200);
+    return { handled: true, say: sayBoth('Going to sleep.', 'Går i dvale.') };
+  }
+
+  if (/^(?:shut ?down|turn off (?:the )?(?:pc|computer)|sluk(?: computeren)?)[.!?]*$/i.test(text)) {
+    execFile('shutdown', ['/s', '/t', '30'], { windowsHide: true }, () => {});
+    return { handled: true, say: sayBoth('Shutting down in thirty seconds.', 'Slukker om tredive sekunder.') };
+  }
+
+  if (/^(?:restart|reboot|genstart)(?: (?:the )?(?:pc|computer))?[.!?]*$/i.test(text)) {
+    execFile('shutdown', ['/r', '/t', '30'], { windowsHide: true }, () => {});
+    return { handled: true, say: sayBoth('Restarting in thirty seconds.', 'Genstarter om tredive sekunder.') };
+  }
+
+  const volume = text.match(/^(?:volume|lydstyrke)\s+(up|op|down|ned|mute|lydløs)[.!?]*$/i);
+  if (volume) {
+    const direction = volume[1].toLowerCase();
+    if (direction === 'mute' || direction === 'lydløs') {
+      sendKeys(173);
+      return { handled: true, say: sayBoth('Sound off.', 'Lyd fra.') };
+    }
+    const up = direction === 'up' || direction === 'op';
+    sendKeys(up ? 175 : 174);
+    if (up) sendKeys(175);
+    return { handled: true, say: sayBoth(up ? 'Louder.' : 'Quieter.', up ? 'Højere.' : 'Lavere.') };
+  }
+
+  if (/^(?:screenshot|skærmbillede|capture the screen|tag et skærmbillede)[.!?]*$/i.test(text)) {
+    shell.openExternal('ms-screenclip:');
+    return { handled: true, say: sayBoth('The snipping tool is up.', 'Klippeværktøjet er fremme.') };
+  }
 
   if (/^(?:what(?:'s| is) the time|what time is it|hvad er klokken|hvad er tiden)[?.!]*$/i.test(text)) {
     const now = new Date();
@@ -2611,8 +2760,14 @@ ipcMain.handle('assistant:boot', async () => {
   if (!status.running) startOllama();
   const hardware = detectHardware();
   const recommended = recommendModel(hardware);
+  const settings = assistantSettings();
+  // A card that can read the studio voice starts on it: it is the voice that
+  // sounds recorded, and the light one is the fallback, not the point. Picking
+  // another engine in Settings writes a choice, and that choice always wins.
+  const chosen = (prefs.settings.assistant || {}).engine;
+  if (hardware.tier === 'studio' && !chosen && studioAvailable()) settings.engine = 'studio';
   return {
-    settings: assistantSettings(),
+    settings,
     status,
     voices: await listVoices(),
     presets: OLLAMA_PRESETS.map((preset) => ({
@@ -2671,7 +2826,22 @@ ipcMain.handle('assistant:chat', async (event, payload) => {
     const response = await fetch(ollamaEndpoint('/api/chat'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true }),
+      // keep_alive holds the weights in video memory between orders, so the second
+      // question does not pay for loading a 4.7 GB model again. A short answer is
+      // capped rather than cut off: Jarvis speaks in two or three sentences, and a
+      // model that is allowed to ramble costs the user a dozen seconds a reply.
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: true,
+        keep_alive: '30m',
+        options: {
+          temperature: 0.6,
+          top_p: 0.9,
+          num_ctx: 4096,
+          num_predict: 320,
+        },
+      }),
       signal,
     });
     if (!response.ok) {
@@ -2711,6 +2881,25 @@ ipcMain.handle('assistant:chat', async (event, payload) => {
     return { ok: false };
   } finally {
     chatAbort = null;
+  }
+});
+
+// Loading the model is most of the wait before a first word. The window asks for
+// this as soon as it opens, so the weights are already on the card when the user
+// gives an order instead of being read from disk at that moment.
+ipcMain.handle('assistant:warm', async () => {
+  const model = String(assistantSettings().model || '').trim();
+  if (!model) return { ok: false, reason: 'no-model' };
+  try {
+    const response = await fetch(ollamaEndpoint('/api/generate'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, prompt: '', keep_alive: '30m', options: { num_ctx: 4096 } }),
+      signal: AbortSignal.timeout(120000),
+    });
+    return { ok: response.ok };
+  } catch {
+    return { ok: false, reason: 'offline' };
   }
 });
 
@@ -3793,6 +3982,12 @@ ipcMain.handle('notch:rescan', () => {
 // them: Steam's own storefront, whose featured list is public JSON with prices
 // in the buyer's currency.
 const STORE_TTL = 10 * 60 * 1000;
+// Steam's front page lists about thirty games. Its search answers a hundred at a
+// time and can sort the whole catalogue by review score, which is the list a
+// person actually wants when they ask what to play — so the store is built from
+// the search, and the featured list is only there for today's deals and currency.
+const STORE_PAGES = 4;
+const STORE_PAGE_SIZE = 100;
 let storeCache = null;
 let storeAt = 0;
 
@@ -3806,44 +4001,189 @@ function storeCountry() {
   return 'us';
 }
 
+function decodeSteam(text) {
+  return String(text || '')
+    .replace(/&lt;br\s*\/?&gt;/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+}
+
+// One row of Steam's own search results: appid, title, the price in the smallest
+// unit of the local currency, the discount, and what players made of it.
+function parseSteamRows(html) {
+  const rows = [];
+  const chunks = String(html || '').split('<a href="https://store.steampowered.com/app/');
+  for (const chunk of chunks.slice(1)) {
+    const appid = Number((chunk.match(/data-ds-appid="(\d+)"/) || [])[1] || 0);
+    const name = decodeSteam((chunk.match(/<span class="title">([\s\S]*?)<\/span>/) || [])[1] || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!appid || !name) continue;
+    const priceMatch = chunk.match(
+      /class="search_price_discount_combined[^"]*"[^>]*data-price-final="(\d+)"/,
+    );
+    const discount = Math.max(0, Math.min(100, Number((chunk.match(/data-discount="(\d+)"/) || [])[1] || 0)));
+    const reviewMatch = chunk.match(
+      /class="search_review_summary[^"]*"[^>]*data-tooltip-html="([^"]*)"/,
+    );
+    let label = '';
+    let percent = 0;
+    let count = 0;
+    if (reviewMatch) {
+      const text = decodeSteam(reviewMatch[1]);
+      label = text
+        .split('\n')[0]
+        .replace(/\s*\d{1,3}%[\s\S]*$/, '')
+        .replace(/\s+reviews?[\s\S]*$/i, '')
+        .trim();
+      const score = text.match(/(\d{1,3})%\s+of\s+the\s+([\d.,]+)/i);
+      if (score) {
+        percent = Math.min(100, Number(score[1]));
+        count = Number(score[2].replace(/[^\d]/g, '')) || 0;
+      }
+    }
+    const final = priceMatch ? Number(priceMatch[1]) || 0 : null;
+    const original =
+      final !== null && discount
+        ? Math.round(final / Math.max(0.05, 1 - discount / 100))
+        : final;
+    rows.push({ appid, name, discount, final, original, label, percent, count });
+  }
+  return rows;
+}
+
+async function fetchSteamPage(start, extra = {}) {
+  const query = new URLSearchParams({
+    start: String(start),
+    count: String(STORE_PAGE_SIZE),
+    sort_by: 'Reviews_DESC',
+    infinite: '1',
+    cc: storeCountry(),
+    l: 'en',
+    ...extra,
+  });
+  try {
+    const response = await net.fetch(`https://store.steampowered.com/search/results/?${query}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    return parseSteamRows(data && data.results_html);
+  } catch {
+    return null;
+  }
+}
+
 async function fetchStore() {
   if (storeCache && Date.now() - storeAt < STORE_TTL) return storeCache;
-  const url = `https://store.steampowered.com/api/featuredcategories/?cc=${storeCountry()}&l=en`;
-  let data = null;
-  try {
-    const response = await net.fetch(url);
-    if (response.ok) data = await response.json();
-  } catch {
-    /* offline, or Steam is having a day */
-  }
-  if (!data) return storeCache || { at: Date.now(), items: [], error: 'offline' };
-
-  const seen = new Set();
-  const items = [];
-  const sections = [
-    ['deal', data.specials],
-    ['top', data.top_sellers],
-    ['new', data.new_releases],
-  ];
-  for (const [source, section] of sections) {
-    for (const item of (section && section.items) || []) {
-      const appid = Number(item.id);
-      if (!appid || seen.has(appid)) continue;
-      seen.add(appid);
-      const final = Math.max(0, Number(item.final_price) || 0);
-      items.push({
-        appid,
-        name: String(item.name || '').trim(),
-        source,
-        discount: Math.max(0, Number(item.discount_percent) || 0),
-        original: Math.max(0, Number(item.original_price) || 0),
-        final,
-        free: final === 0,
-        currency: String(item.currency || 'USD'),
-        art: `https://cdn.cloudflare.steamstatic.com/steam/apps/${appid}/header.jpg`,
-      });
+  const merged = new Map();
+  const keep = (row, source) => {
+    if (!row || !row.appid) return;
+    const existing = merged.get(row.appid) || {
+      appid: row.appid,
+      name: '',
+      discount: 0,
+      final: null,
+      original: null,
+      label: '',
+      percent: 0,
+      count: 0,
+      sources: new Set(),
+    };
+    if (!existing.name && row.name) existing.name = row.name;
+    if (row.final !== null && existing.final === null) existing.final = row.final;
+    if (row.final !== null) existing.final = Math.min(existing.final, row.final);
+    existing.discount = Math.max(existing.discount, row.discount || 0);
+    if (row.original !== null && row.original !== undefined) {
+      existing.original = Math.max(existing.original || 0, row.original);
     }
+    if (!existing.percent && row.percent) {
+      existing.label = row.label;
+      existing.percent = row.percent;
+      existing.count = row.count;
+    }
+    existing.sources.add(source);
+    merged.set(row.appid, existing);
+  };
+
+  // The deals page and the four catalogue pages are independent, so they go out
+  // together: the store is ready in about the time of its slowest answer.
+  const [deals, ...pages] = await Promise.all([
+    fetchSteamPage(0, { specials: '1' }),
+    ...Array.from({ length: STORE_PAGES }, (_value, page) =>
+      fetchSteamPage(page * STORE_PAGE_SIZE),
+    ),
+  ]);
+  for (const row of deals || []) keep(row, 'deal');
+  for (const page of pages) for (const row of page || []) keep(row, 'top');
+
+  let currency = 'USD';
+  try {
+    const response = await net.fetch(
+      `https://store.steampowered.com/api/featuredcategories/?cc=${storeCountry()}&l=en`,
+    );
+    if (response.ok) {
+      const data = await response.json();
+      const first =
+        (data.specials && data.specials.items && data.specials.items[0]) ||
+        (data.top_sellers && data.top_sellers.items && data.top_sellers.items[0]) ||
+        null;
+      if (first && first.currency) currency = String(first.currency);
+      for (const [source, section] of [
+        ['deal', data.specials],
+        ['top', data.top_sellers],
+        ['new', data.new_releases],
+      ]) {
+        for (const item of (section && section.items) || []) {
+          keep(
+            {
+              appid: Number(item.id) || 0,
+              name: String(item.name || '').trim(),
+              discount: Math.max(0, Number(item.discount_percent) || 0),
+              final: Number.isFinite(Number(item.final_price))
+                ? Math.max(0, Number(item.final_price))
+                : null,
+              original: Number.isFinite(Number(item.original_price))
+                ? Math.max(0, Number(item.original_price))
+                : null,
+              label: item.review_score_desc || '',
+              percent: 0,
+              count: 0,
+            },
+            source,
+          );
+        }
+      }
+    }
+  } catch {
+    /* the featured list is a bonus: the search rows carry everything essential */
   }
+
+  const items = [...merged.values()]
+    .filter((row) => row.name)
+    .map((row) => {
+      const priced = row.final !== null;
+      const final = priced ? row.final : 0;
+      return {
+        appid: row.appid,
+        name: row.name,
+        source: row.discount > 0 ? 'deal' : row.sources.has('new') ? 'new' : 'top',
+        discount: row.discount,
+        original: priced ? row.original || final : 0,
+        final,
+        priced,
+        free: priced && final === 0,
+        currency,
+        review: row.percent ? { label: row.label, percent: row.percent, count: row.count } : null,
+        art: `https://cdn.cloudflare.steamstatic.com/steam/apps/${row.appid}/header.jpg`,
+      };
+    });
   if (!items.length) return storeCache || { at: Date.now(), items: [], error: 'empty' };
   storeCache = { at: Date.now(), items };
   storeAt = Date.now();
@@ -4194,14 +4534,21 @@ function taskbarAutoHide() {
 // right edge; attached is one bar holding both.
 function taskbarGeometry(hidden, zone = 'both') {
   const display = screen.getPrimaryDisplay();
-  const width = Math.min(
-    display.bounds.width - 40,
-    Math.max(zone === 'tray' ? 140 : 200, Math.round(taskbarWidths[zone] || 300)),
-  );
+  // Attached is one bar along the whole bottom edge, the way Windows has one: that
+  // is what puts the clock and the notification tray against the right side of the
+  // screen instead of against the edge of a floating strip near the middle.
+  const attached = zone === 'both' && taskbarMode().shape !== 'islands';
+  const width = attached
+    ? display.bounds.width
+    : Math.min(
+        display.bounds.width - 40,
+        Math.max(zone === 'tray' ? 140 : 200, Math.round(taskbarWidths[zone] || 300)),
+      );
   const height = TASKBAR_H + TASKBAR_LIFT;
   const bottom = display.bounds.y + display.bounds.height;
-  const x =
-    zone === 'tray'
+  const x = attached
+    ? display.bounds.x
+    : zone === 'tray'
       ? display.bounds.x + display.bounds.width - width - 10
       : display.bounds.x + (display.bounds.width - width) / 2;
   return {
@@ -5063,11 +5410,12 @@ function sendTaskbarUpdate() {
     win.webContents.send('taskbar:update', payload);
     applyTaskbarBounds(zone, win);
   }
-  // The apps island goes away when there is nothing on it; the tray island
-  // stays, because the clock lives there.
+  // The apps island goes away when there is nothing on it; the tray island of the
+  // islands shape stays, because the clock lives there — and the attached bar is
+  // one window holding both, so it must stay for the same reason.
   if (!taskbarApps.length) {
     hideFlyout();
-    if (taskbarWin.isVisible()) taskbarWin.hide();
+    if (taskbarMode().shape === 'islands' && taskbarWin.isVisible()) taskbarWin.hide();
   } else if (!taskbarWin.isVisible()) {
     taskbarWin.showInactive();
     sendTaskbarBackdrop();
@@ -5613,7 +5961,7 @@ function createWidget(tile, options = {}) {
 // come up (the stream holds the compositor), which is exactly when a card is pulled
 // out. So the draggable cards are built and loaded while nothing is being captured,
 // and pulling one out only has to show a window that is already there.
-const WARM_TILES = ['system', 'focus', 'library', 'clip'];
+const WARM_TILES = ['perf', 'focus', 'library', 'clip'];
 
 function warmWidgetWindows() {
   for (const tile of WARM_TILES) {
@@ -5747,15 +6095,19 @@ ipcMain.on('widget:restore', (event) => {
 
 ipcMain.handle('notch:overlay', () => togglePerformanceOverlay());
 
+// The System tile is the performance overlay: pulling it out puts the four readings
+// on the screen with no card behind them, the way a driver overlay looks. The card
+// is still one click away, on the overlay's own ↗ button.
 ipcMain.on('notch:prewarm-tile', (_event, tile) => {
-  if (!WIDGET_TILES.has(tile) || widgetsFor(tile)) return;
-  createWidget(tile, { warm: true });
+  const wanted = tile === 'system' ? 'perf' : tile;
+  if (!WIDGET_TILES.has(wanted) || widgetsFor(wanted)) return;
+  createWidget(wanted, { warm: true });
 });
 
 ipcMain.on('notch:detach', (_event, payload) => {
   const at = payload && Number.isFinite(payload.x) ? { x: payload.x, y: payload.y } : cursorDip();
   const tile = payload && WIDGET_TILES.has(payload.tile) ? payload.tile : 'system';
-  openWidget(tile, at);
+  openWidget(tile === 'system' ? 'perf' : tile, at);
 });
 
 ipcMain.on('notch:detach-end', () => finishWidgetDrag());

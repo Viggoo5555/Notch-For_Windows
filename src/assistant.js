@@ -116,11 +116,13 @@ function systemPrompt() {
     );
   }
   lines.push(
-    'You can work this computer. When the user asks you to do a thing rather than explain it, do it and add one command in double square brackets at the very end:',
-    '[[open: Brave]], [[search: google for weather in Aarhus]], [[play: Norah Jones]].',
+    'Lead with the answer: no preamble, no restating the question, no summary at the end. The first sentence is the answer.',
+    'You can work this computer, and you are expected to. When the user asks for a thing rather than an explanation, do it and add one command in double square brackets at the very end:',
+    '[[open: Brave]], [[search: google for weather in Aarhus]], [[play: Norah Jones]], [[run: ipconfig]].',
+    'Anything a terminal can do is allowed: run hands the rest of the line to cmd, so [[run: dir C:\\Users]] works. Locking the machine, sleep, shutting down, restarting, volume up, volume down, mute and a screenshot are orders of their own — just carry them out.',
     'You can also work Notch, the app you live in, and you should never claim otherwise: any order that is about Notch itself goes in the same brackets with the word notch first —',
     '[[notch: open the library]], [[notch: make it mint]], [[notch: frosted glass]], [[notch: taskbar off]], [[notch: show the performance overlay]], [[notch: focus for 25 minutes]], [[notch: launch Hades II]], [[notch: rescan the library]], [[notch: start with Windows]].',
-    'What Notch answers to: opening the panel, the library, the store, the focus timer, the clipboard or the settings; the accent colour (blue, lilac, mint, pink, amber); the surface (liquid, frosted, black); tint, blur, grain, pill glow, animation speed and easing, hover delay, pill width, attached or island shape; the glass source (live desktop or wallpaper); the taskbar, its auto-hide and its style; the performance overlay; the focus timer (start, pause, reset, any number of minutes); the game library (rescan it, count it, launch a game by name); the store, which draws Steam\'s deals inside the panel with its own filters and sorting; starting with Windows; and quitting the app.',
+    'What Notch answers to: opening the panel, the library, the store, the focus timer, the clipboard or the settings; the accent colour (blue, lilac, mint, pink, amber); the surface (liquid, frosted, black); tint, blur, grain, pill glow, animation speed and easing, hover delay, pill width, attached or island shape; the glass source (live desktop or wallpaper); the taskbar, its auto-hide and its style; the focus timer (start, pause, reset, any number of minutes); the game library (rescan it, count it, launch a game by name); the store, which draws Steam\'s catalogue inside the panel, best reviewed first, with its own filters and sorting; starting with Windows; and quitting the app.',
     'The window carries the command out and removes the brackets from the reply, so say what you are doing in one short line and put the command after it.',
     'Use one of those forms per reply, and never when the user merely asked a question — "what is liquid glass" is a question, "make it liquid glass" is an order.',
   );
@@ -139,7 +141,7 @@ function refreshSystemPrompt() {
 // The model writes its orders as [[open: X]] so that any local model can drive
 // the machine without tool-calling support. They are taken out before the reply
 // is shown or spoken.
-const ACTION_TAG = /\[\[\s*(open|search|play|launch|start|notch)\s*:\s*([^\]]+?)\s*\]\]/gi;
+const ACTION_TAG = /\[\[\s*(open|search|play|launch|start|run|notch)\s*:\s*([^\]]+?)\s*\]\]/gi;
 
 function extractActions(text) {
   const actions = [];
@@ -2112,6 +2114,9 @@ window.__jarvis.gameMode = applyGameMode;
   maybeAutoPull();
   // Load the voice model now so the first spoken reply is not slow.
   if (state.neural.available) api.warmVoice().catch(() => {});
+  // Put the brain in video memory before the first order rather than during it:
+  // the reply then starts at the first token instead of after a 4.7 GB load.
+  if (state.settings.model && state.status.running && api.warm) api.warm().catch(() => {});
   // Warm the speech model once, a beat after boot: loading it while the window
   // is still settling is what used to leave it stuck at 100%, and without this
   // the first phrase you say pays the whole 20-second load.
@@ -2132,3 +2137,11 @@ setInterval(() => {
   if (document.visibilityState !== 'visible') return;
   if (els.sheet.hidden && !state.busy) refreshStatus();
 }, 8000);
+
+// A model Ollama has unloaded (an idle timeout, a game taking the card) is put
+// back the moment the window is in front of the user again, not when they ask.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (state.settings.model && state.status.running && api.warm) api.warm().catch(() => {});
+  if (!state.busy) refreshStatus();
+});

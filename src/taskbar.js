@@ -282,6 +282,9 @@ function paintClock() {
 // Apps centred on the screen, not on the bar: the left gap matches the width of
 // the tray side exactly, which is what keeps them in the middle of the display.
 function measure() {
+  // The attached bar is the width of the display: there is nothing to fit, and
+  // the apps are centred on the screen by the stylesheet.
+  if (mode.shape === 'attached') return;
   if (zone !== 'both') {
     // One island alone in its window: the window is its content and the padding
     // the row and the zone add around it.

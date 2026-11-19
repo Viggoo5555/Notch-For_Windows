@@ -104,6 +104,26 @@ body {
   padding-right: 6px;
 }
 
+/* Attached: the bar runs the width of the display, so the tray, the battery and
+   the clock hold the right edge of the screen and the apps sit in the middle of
+   the screen rather than in the middle of a floating strip. */
+.tb[data-shape="attached"] .tb-apps {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - 420px);
+}
+
+.tb[data-shape="attached"] .tb-left {
+  display: none;
+}
+
+.tb[data-shape="attached"] .tb-right {
+  margin-left: auto;
+  padding-right: 14px;
+}
+
 /* One island per window: the bar holds a single zone, so there is no tray to
    balance against and nothing to centre on. */
 .tb[data-zone="apps"] .tb-left,

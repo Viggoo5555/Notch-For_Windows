@@ -37,7 +37,7 @@ const state = {
   detail: null,
   // The store is drawn here from Steam's own prices; sorting and filtering
   // happen in this window, not on somebody's server.
-  store: { items: [], loading: false, query: '', discount: 0, budget: 0, sort: 'discount' },
+  store: { items: [], loading: false, query: '', discount: 0, budget: 0, sort: 'reviews' },
   // What the updater last heard from the releases page.
   update: {
     current: '',
@@ -1111,10 +1111,13 @@ function renderDetailLibrary(body) {
 // ------------------------------------------------------------------- store
 
 // The store is Steam's catalogue with Notch's own hands on it: one fetch of the
-// featured list, then every filter and every sort happens here, in this window.
+// top of the catalogue — sorted by what players made of it — then every filter and
+// every sort happens here, in this window.
 const STORE_DISCOUNTS = [0, 25, 50, 75];
 const STORE_BUDGETS = [0, 500, 1000, 2000];
 const STORE_SORTS = [
+  ['reviews', 'Best reviewed'],
+  ['popular', 'Most reviewed'],
   ['discount', 'Biggest discount'],
   ['price', 'Cheapest first'],
   ['pricey', 'Priciest first'],
@@ -1135,8 +1138,11 @@ function money(cents, currency) {
 }
 
 function storeSource(item) {
+  if (item.review && item.review.percent) {
+    return `${item.review.label || 'Reviewed'} · ${item.review.percent}%`;
+  }
   if (item.source === 'new') return 'New release';
-  if (item.source === 'top') return 'Top seller';
+  if (item.source === 'top') return 'Top rated';
   return item.discount ? 'Deal' : 'Steam';
 }
 
@@ -1164,11 +1170,18 @@ function storeRows() {
   const query = store.query.trim().toLowerCase();
   const rows = store.items.filter((item) => {
     if (item.discount < store.discount) return false;
-    if (store.budget && item.final > store.budget) return false;
+    // A budget is a question about a price, and a row Steam did not quote one for
+    // cannot answer it — so it steps out rather than pretending to be free.
+    if (store.budget && (!item.priced || item.final > store.budget)) return false;
     if (query && !item.name.toLowerCase().includes(query)) return false;
     return true;
   });
   const sorters = {
+    reviews: (a, b) =>
+      (b.review ? b.review.percent : -1) - (a.review ? a.review.percent : -1) ||
+      (b.review ? b.review.count : 0) - (a.review ? a.review.count : 0),
+    popular: (a, b) =>
+      (b.review ? b.review.count : -1) - (a.review ? a.review.count : -1),
     discount: (a, b) => b.discount - a.discount || a.final - b.final,
     price: (a, b) => a.final - b.final,
     pricey: (a, b) => b.final - a.final,
@@ -1213,7 +1226,11 @@ function storeRow(item) {
   }
   const final = document.createElement('span');
   final.className = 'store-final';
-  final.textContent = item.free ? 'Free' : money(item.final, item.currency);
+  final.textContent = !item.priced
+    ? '—'
+    : item.free
+      ? 'Free'
+      : money(item.final, item.currency);
   price.appendChild(final);
   if (item.discount && item.original) {
     const old = document.createElement('span');
@@ -1306,7 +1323,9 @@ function renderDetailStore(body) {
       list.appendChild(
         emptyBlock(
           'The store is closed',
-          api.store ? 'Steam did not answer. Press Refresh in a moment.' : 'Start the app from Notch.exe to reach the store.',
+          api.store
+            ? 'Steam did not answer. Press Refresh in a moment.'
+            : 'Start the app from Notch.exe to reach the store.',
         ),
       );
       return;
@@ -1640,15 +1659,6 @@ function bindEvents() {
   });
   $('#settingsBack').addEventListener('click', () => closeSettings());
 
-  $('#overlayBtn').addEventListener('click', async () => {
-    hideMenu();
-    const result = await api.overlay();
-    toast(
-      result && result.open
-        ? 'Overlay on — drag it where you want it'
-        : 'Overlay off',
-    );
-  });
   $('#quitBtn').addEventListener('click', () => api.quit());
   $('#loginToggle').addEventListener('change', async (event) => {
     state.login = await api.setLogin(event.target.checked);
