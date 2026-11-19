@@ -2055,17 +2055,19 @@ html.demo .glass-backdrop {
    Reduced motion
    ========================================================================== */
 
+/* Settings → Motion → Animations can override this: a managed machine with Windows'
+   animations off for it would otherwise never see the panel move. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  html:not(.force-motion) *,
+  html:not(.force-motion) *::before,
+  html:not(.force-motion) *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     transition-delay: 0ms !important;
   }
 
-  .glass-ambient {
+  html:not(.force-motion) .glass-ambient {
     filter: none;
   }
 }

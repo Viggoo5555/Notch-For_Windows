@@ -41,6 +41,10 @@ app.commandLine.appendSwitch('aggressive-cache-discard');
 // there are no headers to make it cross-origin isolated; the switch is what turns
 // SharedArrayBuffer on anyway, and four threads instead of one is the difference
 // between a Danish phrase taking eight seconds and two.
+// Managed machines often have no hardware WebGL, and Chromium refuses its software
+// rasterizer for WebGL unless asked: without this the glass has no context and the
+// panel falls back to the flat material.
+app.commandLine.appendSwitch('enable-unsafe-swiftshader');
 app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
 
 // The notch hangs from the top edge: the window is only as wide as the thing
@@ -82,6 +86,9 @@ const DEFAULT_SETTINGS = {
   grain: true,
   glow: true,
   motion: 100,
+  // 'system' follows Windows' animation setting; 'always' animates even where that
+  // setting is off, which is how managed and school machines usually ship.
+  animations: 'system',
   easing: 'spring',
   hoverDelay: 0,
   pillWidth: 96,
@@ -3006,7 +3013,7 @@ function syncWinHook() {
 ipcMain.handle('launcher:boot', async () => ({
   index: await buildAppIndex(),
   pinned: pinnedEntries(),
-  settings: { windowsKey: !!prefs.settings.windowsKey },
+  settings: { windowsKey: !!prefs.settings.windowsKey, animations: prefs.settings.animations },
 }));
 
 ipcMain.handle('launcher:icons', async (_event, targets) => {
@@ -3183,6 +3190,10 @@ ipcMain.handle('notch:login', (_event, value) => {
 ipcMain.handle('notch:set-settings', (_event, patch) => {
   prefs.settings = { ...DEFAULT_SETTINGS, ...prefs.settings, ...(patch || {}) };
   savePrefs();
+  // The launcher window is loaded already, so its motion choice arrives by message.
+  if (launcherWin && !launcherWin.isDestroyed()) {
+    launcherWin.webContents.send('launcher:motion', prefs.settings.animations);
+  }
   if (!usesLiveBackdrop()) {
     // Pinned image: stop sampling entirely (also the cheapest idle state) and
     // hand the renderer the wallpaper slice in place of the desktop.

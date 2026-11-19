@@ -430,10 +430,10 @@ body.out .content {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shell,
-  .content,
-  body.out .shell,
-  body.out .content {
+  html:not(.force-motion) .shell,
+  html:not(.force-motion) .content,
+  html:not(.force-motion) body.out .shell,
+  html:not(.force-motion) body.out .content {
     transition: none;
   }
 }
@@ -453,7 +453,7 @@ kbd {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
+  html:not(.force-motion) * {
     transition-duration: 0.001ms !important;
   }
 }

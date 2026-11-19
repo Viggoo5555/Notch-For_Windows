@@ -52,6 +52,10 @@ let instance = null;
 let starting = false;
 let current = '';
 let pulseFrames = 0;
+// Why the glass is or is not drawing, so Settings can say it out loud instead of
+// leaving a flat panel to be guessed at.
+let mode = 'pending';
+let reason = '';
 
 function pillConfig(overrides = {}) {
   return { ...PILL, ...overrides };
@@ -63,7 +67,11 @@ function isSolid() {
 
 async function start() {
   if (instance || starting) return;
-  if (!source.getAttribute('src')) return;
+  if (!source.getAttribute('src')) {
+    mode = 'flat';
+    reason = 'no-backdrop';
+    return;
+  }
   starting = true;
   try {
     await source.decode().catch(() => {});
@@ -75,10 +83,14 @@ async function start() {
       defaults: CONFIG,
     });
     notch.classList.add('gl');
+    mode = 'shader';
+    reason = '';
     if (isSolid()) instance.setPaused(true);
     else if (notch.classList.contains('open')) instance.setPaused(false);
     else pulse();
   } catch (error) {
+    mode = 'flat';
+    reason = 'no-webgl';
     console.warn('Liquid glass unavailable, keeping the CSS material', error);
   } finally {
     starting = false;
@@ -151,6 +163,7 @@ window.notchGlass = {
   apply,
   setPaused,
   refresh: pulse,
+  status: () => ({ mode, reason }),
 };
 
 if (window.__backdrop) setSource(window.__backdrop);

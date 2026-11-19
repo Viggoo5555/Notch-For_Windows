@@ -1223,9 +1223,9 @@ body[data-listening="true"] .mic .mic-ring {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  html:not(.force-motion) *,
+  html:not(.force-motion) *::before,
+  html:not(.force-motion) *::after {
     animation: none !important;
     transition-duration: 0.001ms !important;
   }

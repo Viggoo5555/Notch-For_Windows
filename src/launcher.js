@@ -40,7 +40,21 @@ const state = {
 // is only taken down once the faded frame is on screen, so the next show starts
 // from transparent instead of flashing the old picture.
 
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const systemReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Notch's own choice wins over Windows: 'system' follows the setting, 'always' plays
+// the sheet on machines that have animations switched off for them.
+let animations = 'system';
+
+function motionOff() {
+  return systemReducedMotion && animations !== 'always';
+}
+
+function applyMotion() {
+  document.documentElement.classList.toggle('force-motion', animations === 'always');
+}
+
+applyMotion();
 
 let openFrame = 0;
 let openTimer = 0;
@@ -74,7 +88,7 @@ function openSheet() {
     openTimer = 0;
     document.body.classList.remove('out');
   };
-  if (reducedMotion) {
+  if (motionOff()) {
     open();
     return;
   }
@@ -110,7 +124,7 @@ function closeSheet() {
   };
   els.shell.addEventListener('transitionend', closeOnEnd);
   closeTimer = setTimeout(finish, 320);
-  if (reducedMotion) finish();
+  if (motionOff()) finish();
 }
 
 const CONFIG = {
@@ -391,6 +405,10 @@ async function boot() {
   if (!data) return;
   state.index = Array.isArray(data.index) ? data.index : [];
   state.pinned = Array.isArray(data.pinned) ? data.pinned : [];
+  if (data.settings && data.settings.animations) {
+    animations = data.settings.animations === 'always' ? 'always' : 'system';
+    applyMotion();
+  }
   render();
 }
 
@@ -411,6 +429,11 @@ api.onShow(() => {
 });
 
 api.onDismiss(closeSheet);
+
+api.onMotion((value) => {
+  animations = value === 'always' ? 'always' : 'system';
+  applyMotion();
+});
 
 api.onBackdrop((data) => {
   if (!data || !data.url) return;

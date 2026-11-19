@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('launcher', {
   hidden: () => ipcRenderer.send('launcher:hidden'),
   onShow: (callback) => ipcRenderer.on('launcher:show', () => callback()),
   onDismiss: (callback) => ipcRenderer.on('launcher:dismiss', () => callback()),
+  onMotion: (callback) => ipcRenderer.on('launcher:motion', (_event, value) => callback(value)),
   onBackdrop: (callback) => ipcRenderer.on('launcher:backdrop', (_event, data) => callback(data)),
   onPinned: (callback) => ipcRenderer.on('launcher:pinned', (_event, data) => callback(data)),
 });

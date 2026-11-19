@@ -556,6 +556,17 @@ const SETTINGS_SCHEMA = [
   { key: 'grain', label: 'Grain', type: 'toggle' },
   { key: 'glow', label: 'Pill glow', type: 'toggle' },
   { group: 'Motion' },
+  {
+    key: 'animations',
+    label: 'Animations',
+    type: 'segment',
+    // Windows' own setting is the default; 'Always' is for machines that have it
+    // switched off for them, where the sheet would otherwise just appear.
+    options: [
+      ['system', 'Windows'],
+      ['always', 'Always'],
+    ],
+  },
   { key: 'motion', label: 'Animation', type: 'range', min: 50, max: 150, step: 10, suffix: '%' },
   {
     key: 'easing',
@@ -583,6 +594,17 @@ const SETTINGS_SCHEMA = [
     ],
   },
   { key: 'backdropImage', label: 'Image', type: 'action', action: 'pickWallpaper', button: 'Choose…' },
+  {
+    key: 'glassStatus',
+    label: 'Glass',
+    type: 'status',
+    text: () => {
+      const glass = window.notchGlass && window.notchGlass.status ? window.notchGlass.status() : null;
+      if (!glass || glass.mode === 'pending') return 'starting';
+      if (glass.mode === 'shader') return 'WebGL';
+      return glass.reason === 'no-webgl' ? 'flat — no WebGL' : 'flat — no image';
+    },
+  },
   { group: 'Taskbar' },
   { key: 'taskbar', label: 'Show taskbar', type: 'toggle' },
   {
@@ -623,6 +645,7 @@ function applySettings() {
   const root = document.documentElement;
   root.style.setProperty('--accent', s.accent);
   root.style.setProperty('--motion', String(s.motion / 100));
+  root.classList.toggle('force-motion', s.animations === 'always');
   root.style.setProperty('--pill-w', `${s.pillWidth}px`);
   root.style.setProperty('--grain', s.grain ? '0.026' : '0');
   root.style.setProperty('--tint-o', String(Math.max(0, Math.min(1, s.tint / 70))));
@@ -764,6 +787,12 @@ function renderSettings() {
         if (item.action === 'pickWallpaper') pickWallpaper();
       });
       row.appendChild(button);
+    } else if (item.type === 'status') {
+      if (isDemo) continue;
+      const value = document.createElement('span');
+      value.className = 'set-val';
+      value.textContent = item.text();
+      row.appendChild(value);
     } else if (item.type === 'swatch') {
       const swatches = document.createElement('div');
       swatches.className = 'swatches';
