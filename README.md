@@ -12,7 +12,7 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.6.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.6/Notch-Setup-1.2.6.exe)**
+**[Notch-Setup-1.2.7.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.7/Notch-Setup-1.2.7.exe)**
 — the installer, about 340 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -26,12 +26,12 @@ It installs for your user only, so it never asks for an administrator password.
 Remove it from *Settings → Apps → Notch*; your settings in
 `%APPDATA%\notch\notch.json` are left in place.
 
-No installer wanted? [Notch-1.2.6.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.6/Notch-1.2.6.exe)
+No installer wanted? [Notch-1.2.7.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.7/Notch-1.2.7.exe)
 is the same app as a single portable file (~300 MB) — double-click and it runs.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
-### Upgrading from 1.2.5
+### Upgrading from 1.2.6
 
 Run the new installer over the old one; settings, pinned apps, the game library and
 the overlay's corner are kept. Nothing else is needed — the first start asks nothing.
@@ -191,8 +191,8 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.6.exe`, the installer said above,
-and `Notch-1.2.6.exe`, the same app as one portable file. Neither needs Node.js on
+writes two files into `dist/`: `Notch-Setup-1.2.7.exe`, the installer said above,
+and `Notch-1.2.7.exe`, the same app as one portable file. Neither needs Node.js on
 the target machine. `npm run dist:installer` builds only the installer.
 
 The package carries Electron, the Whisper loader, `kokoro-js` and the Piper voice,
@@ -229,9 +229,11 @@ Panel → menu (the sliders icon) → Settings. Everything is stored in
 `%APPDATA%\notch\notch.json` and applied live:
 
 - **Look** — accent colour, glass (liquid or frosted), tint, blur, grain, pill glow
-- **Motion** — animation speed, easing, hover delay
+- **Motion** — whether animations follow Windows or always play (the override for a
+  machine that has them switched off), animation speed, easing, hover delay
 - **Notch** — attached or island shape, pill width
-- **Backdrop** — sample the live desktop or a fixed wallpaper image
+- **Backdrop** — sample the live desktop or a fixed wallpaper image, and what the
+  glass ended up doing (`WebGL`, `flat — no WebGL`, `flat — no image`)
 - **Taskbar** — show it, glass or invisible surface, attached or island layout,
   items (both, open windows only, pins only), auto-hide
 - **Voice** — speak replies, language (match what I write, Danish, English), the
@@ -318,6 +320,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.7** — motion and glass on machines that have neither. A school or work PC
+usually arrives with Windows' animations switched off and no usable GPU, and Notch
+obeyed both silently: the sheet appeared instead of dropping, the glass was a flat
+panel, and nothing said why. **Settings → Motion → Animations: Windows / Always** now
+lets the app play the drop, the fall back and the panel's transitions even where the
+system setting is off for you, and the Start window is told the moment it changes.
+Chromium's software rasterizer is enabled for WebGL, so the real shader runs on a
+machine with no graphics hardware instead of falling back to the flat material —
+slower, but glass, and it still parks itself while the panel is closed. The shader
+also says what it is doing: *Settings → Backdrop → Glass* reads `WebGL`, `flat — no
+WebGL` or `flat — no image`, and the last one is fixed with **Image → Choose…**.
 
 **v1.2.6** — the panel page stops pretending to be a demo. Opening `src/index.html`
 on its own — in a browser, or served by hand — put the panel into its browser-demo
