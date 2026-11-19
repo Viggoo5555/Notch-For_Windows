@@ -12,7 +12,7 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.10.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.10/Notch-Setup-1.2.10.exe)**
+**[Notch-Setup-1.2.11.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.11/Notch-Setup-1.2.11.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -33,7 +33,7 @@ anything from 1.2.8 onwards.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
-### Upgrading from 1.2.9
+### Upgrading from 1.2.10
 
 Run the new installer over the old one; settings, pinned apps, the game library and
 the overlay's corner are kept. Nothing else is needed — the first start asks nothing.
@@ -211,8 +211,8 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.10.exe`, the installer said above,
-and `Notch-1.2.10.exe`, the same app as one portable file. Neither needs Node.js on
+writes two files into `dist/`: `Notch-Setup-1.2.11.exe`, the installer said above,
+and `Notch-1.2.11.exe`, the same app as one portable file. Neither needs Node.js on
 the target machine. `npm run dist:installer` builds only the installer, which is what
 every release ships unless a portable has been asked for.
 
@@ -343,6 +343,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.11** — it updates itself. Notch asks GitHub for the newest release a few
+seconds after it starts and then every six hours; when there is one, a toast says so
+and **Settings → Update** reads *1.2.11 available* with a single **Update** button.
+One press downloads that release's installer to the temp folder, showing the
+percentage as it arrives, runs it silently and comes back as the new build — no
+release page, no hunting for the file. The check is one small request; nothing is
+downloaded until the button is pressed. On a machine that cannot reach GitHub the row
+says so and the rest of the app is untouched, and a source checkout refuses to
+self-replace.
 
 **v1.2.10** — the installer actually contains the panel. The package listed its
 preload scripts with the glob `*-preload.js`, which matches `launcher-preload.js` and

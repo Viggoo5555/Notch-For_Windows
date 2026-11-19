@@ -8,6 +8,8 @@ const bridge = window.notchAPI;
 // screen as if everything were fine.
 const served = location.protocol === 'http:' || location.protocol === 'https:';
 const isDemo = !bridge && served;
+// The version already announced, so the notice does not repeat every check.
+let announcedUpdate = '';
 
 if (isDemo) document.documentElement.classList.add('demo');
 else if (!bridge) {
@@ -36,6 +38,18 @@ const state = {
   // The store is drawn here from Steam's own prices; sorting and filtering
   // happen in this window, not on somebody's server.
   store: { items: [], loading: false, query: '', discount: 0, budget: 0, sort: 'discount' },
+  // What the updater last heard from the releases page.
+  update: {
+    current: '',
+    latest: '',
+    newer: false,
+    url: '',
+    page: '',
+    checked: false,
+    busy: false,
+    percent: 0,
+    error: '',
+  },
   settings: {
     accent: '#7c9cff',
     material: 'liquid',
@@ -647,6 +661,9 @@ const SETTINGS_SCHEMA = [
   { key: 'taskbarAutoHide', label: 'Auto-hide', type: 'toggle' },
   { group: 'Start menu' },
   { key: 'windowsKey', label: 'Windows key opens it', type: 'toggle' },
+  { group: 'Update' },
+  { key: 'version', label: 'Version', type: 'status', text: () => state.update.current || 'unknown' },
+  { key: 'update', label: 'Newer build', type: 'update' },
 ];
 
 function applySettings() {
@@ -802,6 +819,63 @@ function renderSettings() {
       value.className = 'set-val';
       value.textContent = item.text();
       row.appendChild(value);
+    } else if (item.type === 'update') {
+      if (isDemo) continue;
+      const wrap = document.createElement('span');
+      wrap.style.display = 'flex';
+      wrap.style.alignItems = 'center';
+      wrap.style.gap = '10px';
+      const u = state.update;
+      const note = document.createElement('span');
+      note.className = 'set-val';
+      if (u.busy) {
+        note.id = 'updateProgress';
+        note.textContent = `${u.percent}%`;
+      } else if (u.newer) {
+        note.textContent = `${u.latest} available`;
+      } else if (u.error) {
+        note.textContent = u.error;
+      } else if (u.checked) {
+        note.textContent = 'up to date';
+      } else {
+        note.textContent = '';
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'set-action';
+      button.disabled = u.busy;
+      if (u.busy) button.textContent = 'Updating\u2026';
+      else if (u.newer && u.url) button.textContent = 'Update';
+      else if (u.newer) button.textContent = 'Open release';
+      else button.textContent = 'Check';
+      button.addEventListener('click', async () => {
+        if (state.update.newer && state.update.url) {
+          state.update = { ...state.update, busy: true, percent: 0 };
+          renderSettings();
+          const result = await api.installUpdate();
+          if (!result || !result.ok) {
+            state.update = {
+              ...state.update,
+              busy: false,
+              error: (result && result.error) || 'Update failed',
+            };
+            renderSettings();
+          } else {
+            toast(`Installing Notch ${state.update.latest}`);
+          }
+          return;
+        }
+        if (state.update.newer) {
+          if (api.openUpdatePage) api.openUpdatePage();
+          return;
+        }
+        const result = await api.checkUpdate();
+        if (result) state.update = { ...state.update, ...result, checked: true };
+        renderSettings();
+        toast(state.update.newer ? `Notch ${state.update.latest} is ready` : 'Notch is up to date');
+      });
+      wrap.append(note, button);
+      row.appendChild(wrap);
     } else if (item.type === 'swatch') {
       const swatches = document.createElement('div');
       swatches.className = 'swatches';
@@ -1620,6 +1694,27 @@ function bindEvents() {
   }
   if (api.onIcons) api.onIcons((map) => applyIcons(map));
   if (api.onBackdrop) api.onBackdrop((url) => setBackdrop(url));
+  if (api.onUpdate) {
+    api.onUpdate((data) => {
+      if (!data) return;
+      state.update = { ...state.update, ...data, checked: true };
+      if (state.settingsOpen) renderSettings();
+      // Said once per version: a newer build is waiting, and the drawer is where it
+      // is installed from.
+      if (data.newer && data.latest && data.latest !== announcedUpdate) {
+        announcedUpdate = data.latest;
+        toast(`Notch ${data.latest} is ready — open settings to update`);
+      }
+    });
+  }
+  if (api.onUpdateProgress) {
+    api.onUpdateProgress((data) => {
+      if (!data) return;
+      state.update.percent = data.percent || 0;
+      const progress = document.getElementById('updateProgress');
+      if (progress) progress.textContent = `${state.update.percent}%`;
+    });
+  }
   // The window covers more than the notch, so the main process owns the
   // hover hit-test and hands clicks back to the desktop outside the shape.
   if (api.onPointer) {
@@ -1647,6 +1742,7 @@ async function boot() {
     }
     if (data.accent) state.settings.accent = data.accent;
     if (data.version) $('#version').textContent = `v${data.version}`;
+    if (data.version) state.update.current = String(data.version);
     if (data.wallpaper) setBackdrop(data.wallpaper);
     if (data.stats) state.stats = data.stats;
     if (data.icons && typeof data.icons === 'object') state.icons = { ...data.icons };

@@ -41,4 +41,11 @@ contextBridge.exposeInMainWorld('notchAPI', {
   onSettings: (callback) => ipcRenderer.on('notch:settings', (_event, data) => callback(data)),
   onView: (callback) => ipcRenderer.on('notch:view', (_event, kind) => callback(kind)),
   onGames: (callback) => ipcRenderer.on('notch:games', (_event, list) => callback(list)),
+  // Updates: one check against the releases, then a download the panel watches.
+  checkUpdate: () => ipcRenderer.invoke('notch:update-check'),
+  installUpdate: () => ipcRenderer.invoke('notch:update-install'),
+  openUpdatePage: () => ipcRenderer.send('notch:update-page'),
+  onUpdate: (callback) => ipcRenderer.on('notch:update', (_event, data) => callback(data)),
+  onUpdateProgress: (callback) =>
+    ipcRenderer.on('notch:update-progress', (_event, data) => callback(data)),
 });

@@ -3443,6 +3443,177 @@ function applyLogin() {
   }
 }
 
+// -------------------------------------------------------------------- updates
+
+// Notch updates itself from its own releases. The check is one small request to
+// GitHub; the release already carries the installer, so updating is a download to
+// temp and a silent install instead of hunting the release page by hand.
+const UPDATE_REPO = 'Viggoo5555/Notch-For_Windows';
+const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
+
+const updateState = {
+  current: app.getVersion(),
+  latest: '',
+  notes: '',
+  page: '',
+  url: '',
+  name: '',
+  size: 0,
+  checkedAt: 0,
+  error: '',
+  busy: false,
+  percent: 0,
+};
+
+function newerVersion(latest, current) {
+  const parse = (value) =>
+    String(value || '\u0000')
+      .replace(/^v/i, '')
+      .split(/[.+-]/)
+      .map((part) => parseInt(part, 10) || 0);
+  const next = parse(latest);
+  const now = parse(current);
+  for (let i = 0; i < Math.max(next.length, now.length); i += 1) {
+    const left = next[i] || 0;
+    const right = now[i] || 0;
+    if (left !== right) return left > right;
+  }
+  return false;
+}
+
+function publicUpdate() {
+  return {
+    current: updateState.current,
+    latest: updateState.latest,
+    newer: newerVersion(updateState.latest, updateState.current),
+    url: updateState.url,
+    page: updateState.page,
+    notes: String(updateState.notes || '').slice(0, 1500),
+    checkedAt: updateState.checkedAt,
+    error: updateState.error,
+    busy: updateState.busy,
+    percent: updateState.percent,
+  };
+}
+
+function sendUpdate() {
+  if (win && !win.isDestroyed()) win.webContents.send('notch:update', publicUpdate());
+}
+
+async function checkForUpdates() {
+  try {
+    const response = await net.fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Notch/${updateState.current}` },
+    });
+    if (!response.ok) throw new Error(`GitHub ${response.status}`);
+    const release = await response.json();
+    const asset = (release.assets || []).find((entry) => /^Notch-Setup-.*\.exe$/i.test(entry.name));
+    updateState.latest = String(release.tag_name || '').replace(/^v/i, '');
+    updateState.notes = release.body || '';
+    updateState.page = release.html_url || `https://github.com/${UPDATE_REPO}/releases`;
+    updateState.url = asset ? asset.browser_download_url : '';
+    updateState.name = asset ? asset.name : '';
+    updateState.size = asset ? asset.size : 0;
+    updateState.checkedAt = Date.now();
+    updateState.error = '';
+  } catch {
+    updateState.error = 'GitHub could not be reached';
+    updateState.checkedAt = Date.now();
+  }
+  sendUpdate();
+  return publicUpdate();
+}
+
+// Written straight to disk in chunks: a 350 MB installer has no business sitting in
+// memory, and the panel shows the percentage as it arrives.
+async function downloadInstaller(target) {
+  const response = await net.fetch(updateState.url);
+  if (!response.ok || !response.body) throw new Error(`download ${response.status}`);
+  // The size the release reports is the file's real length; content-length can be the
+  // compressed length, so it is only good enough to draw a percentage from.
+  const expected = updateState.size || 0;
+  const total = expected || Number(response.headers.get('content-length')) || 0;
+  const reader = response.body.getReader();
+  const out = fs.createWriteStream(target);
+  let received = 0;
+  let sentAt = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (!out.write(Buffer.from(value))) await new Promise((resolve) => out.once('drain', resolve));
+      const now = Date.now();
+      if (total && now - sentAt > 250) {
+        sentAt = now;
+        updateState.percent = Math.min(99, Math.round((received / total) * 100));
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('notch:update-progress', {
+            percent: updateState.percent,
+            received,
+            total,
+          });
+        }
+      }
+    }
+  } finally {
+    await new Promise((resolve) => out.end(resolve));
+  }
+  const size = fs.statSync(target).size;
+  if (expected && size !== expected) throw new Error('download was incomplete');
+  return size;
+}
+
+async function installUpdate() {
+  if (updateState.busy) return { ok: false, error: 'Already updating' };
+  if (!updateState.url) return { ok: false, error: 'Nothing to download' };
+  // A checkout is not an installation: replacing files under a running source tree
+  // is how a dev machine loses its work.
+  if (!app.isPackaged) return { ok: false, error: 'Run the installed Notch to update' };
+  updateState.busy = true;
+  updateState.percent = 0;
+  updateState.error = '';
+  sendUpdate();
+  const target = path.join(
+    app.getPath('temp'),
+    updateState.name || `Notch-Setup-${updateState.latest}.exe`,
+  );
+  try {
+    fs.rmSync(target, { force: true });
+  } catch {
+    /* nothing there */
+  }
+  try {
+    await downloadInstaller(target);
+  } catch {
+    updateState.busy = false;
+    updateState.percent = 0;
+    updateState.error = 'Download failed';
+    sendUpdate();
+    return { ok: false, error: 'Download failed' };
+  }
+  updateState.percent = 100;
+  sendUpdate();
+  // The app cannot stay open while its own files are replaced: the installer runs
+  // silently, and when it is done the installed build comes back by itself.
+  const exe = app.getPath('exe');
+  try {
+    spawn('cmd.exe', ['/c', `"${target}" /S && start "" "${exe}"`], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    }).unref();
+    app.isQuitting = true;
+    setTimeout(() => app.quit(), 900);
+    return { ok: true };
+  } catch {
+    updateState.busy = false;
+    updateState.error = 'Could not start the installer';
+    sendUpdate();
+    return { ok: false, error: updateState.error };
+  }
+}
+
 // ------------------------------------------------------------------------- ipc
 
 ipcMain.handle('notch:bootstrap', () => {
@@ -3466,6 +3637,13 @@ ipcMain.handle('notch:bootstrap', () => {
 });
 
 ipcMain.on('notch:ready', () => revealWindow());
+
+ipcMain.handle('notch:update-check', () => checkForUpdates());
+ipcMain.handle('notch:update-install', () => installUpdate());
+ipcMain.on('notch:update-page', () => {
+  const page = updateState.page || `https://github.com/${UPDATE_REPO}/releases`;
+  shell.openExternal(page).catch(() => {});
+});
 
 // Which screen the glass should stream, plus where it starts: the panel maps its
 // own slice of the picture with this.
@@ -5640,6 +5818,10 @@ if (!app.requestSingleInstanceLock()) {
     readBattery();
     createWindow();
     buildTray();
+    // One quiet check a few seconds in, then every six hours. The panel only says
+    // anything when a newer release is there to install.
+    setTimeout(() => checkForUpdates().catch(() => {}), 9000);
+    setInterval(() => checkForUpdates().catch(() => {}), UPDATE_EVERY_MS);
     applyLogin();
     refreshTaskbar();
     syncWinHook();
