@@ -12,7 +12,7 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.4.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.4/Notch-Setup-1.2.4.exe)**
+**[Notch-Setup-1.2.5.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.5/Notch-Setup-1.2.5.exe)**
 — the installer, about 340 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -26,12 +26,12 @@ It installs for your user only, so it never asks for an administrator password.
 Remove it from *Settings → Apps → Notch*; your settings in
 `%APPDATA%\notch\notch.json` are left in place.
 
-No installer wanted? [Notch-1.2.4.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.4/Notch-1.2.4.exe)
+No installer wanted? [Notch-1.2.5.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.5/Notch-1.2.5.exe)
 is the same app as a single portable file (~300 MB) — double-click and it runs.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
-### Upgrading from 1.2.3
+### Upgrading from 1.2.4
 
 Run the new installer over the old one; settings, pinned apps, the game library and
 the overlay's corner are kept. Nothing else is needed — the first start asks nothing.
@@ -44,8 +44,10 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   edge, chromatic dispersion and grain, sampled from your wallpaper (or the live
   desktop) behind it.
 - **Launcher** — tap the Windows key and a search sheet drops down over the desktop:
-  240 ms of eased fall with a couple of pixels of settle at the end, opacity and
-  transform only, so it is taking keys while it is still moving. It indexes your
+  a fall of 28 px with a slight scale and a couple of pixels of settle, around 200 ms,
+  opacity and transform only, so it is taking keys while it is still moving. It closes
+  the same way — Esc, the Esc button, opening an app, clicking away and a second press
+  of the key all play the fall out upwards before the window goes. It indexes your
   Start-menu apps, filters as you type, and opens with ↑ ↓ ↵ or a click. Pinned apps
   sit in their own row.
 - **Taskbar** — two glass islands: the apps in the middle of the screen, the tray,
@@ -189,8 +191,8 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.4.exe`, the installer said above,
-and `Notch-1.2.4.exe`, the same app as one portable file. Neither needs Node.js on
+writes two files into `dist/`: `Notch-Setup-1.2.5.exe`, the installer said above,
+and `Notch-1.2.5.exe`, the same app as one portable file. Neither needs Node.js on
 the target machine. `npm run dist:installer` builds only the installer.
 
 The package carries Electron, the Whisper loader, `kokoro-js` and the Piper voice,
@@ -316,6 +318,21 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.5** — the Start sheet opens and closes. 1.2.4's drop never really played: the
+window was shown before the sheet started moving, so the motion was spent while the
+renderer had nothing on screen and the sheet simply blinked into place. The sheet now
+waits painted in its dismissed state, so the first frame the window presents is
+transparent and the drop runs where it can be seen: a fall of 28 px with a slight
+scale, a couple of pixels of overshoot and a settle, about 200 ms of eased motion
+with the search box, results and footer rising 50 ms behind the glass. Closing is the
+same state played backwards in about 190 ms, and every way out animates — Esc, the Esc
+button, opening an app, clicking away, a second press of the Windows key — with the
+window taken down only once the faded frame is on screen, which is also the frame the
+next press starts from, so it no longer flashes the old picture. A press during the
+dismissal re-opens the sheet from wherever it had got to. Only opacity and transform
+move, so the sheet is still taking keys as it drops, and reduced-motion turns both
+directions off.
 
 **v1.2.4** — the Start sheet moves. Press the Windows key and the sheet now falls out
 from under the notch instead of blinking into place: 26 px of travel with a slight
