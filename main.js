@@ -555,6 +555,10 @@ function setGameMode(on) {
       }
     }
     gameHidden = [];
+    // A window that has been hidden and shown again does not always keep its
+    // topmost bit, so the pill asks for it back rather than trusting the one it
+    // was created with.
+    pinPillOnTop();
     if (!pointerTimer && win && !win.isDestroyed()) {
       // Hover is what brings it back; the poll has to be running for that.
       armPointerPoll();
@@ -650,7 +654,10 @@ function watchForGames() {
     } finally {
       gameBusy = false;
     }
-  }, 6000);
+    // Two seconds, not six: the pill has to be gone the moment a video or a game
+    // goes fullscreen over it, and back the moment that is over. The question is
+    // a couple of Win32 calls in the helper that is already running.
+  }, 2000);
 }
 
 function syncDesktopSampling() {
@@ -833,6 +840,14 @@ function pollPointer() {
   if (!win || win.isDestroyed() || !win.isVisible()) return;
   const rect = notchScreenRect();
   if (!rect) return;
+  // The pill belongs over every window; only a fullscreen app puts it away, and
+  // that is game mode's job. A window that is shown again after being hidden can
+  // come back below the topmost band, so the bit is checked on a slow beat — the
+  // query is the only cost, and it repaints nothing.
+  if (Date.now() - topmostCheckAt > 2000) {
+    topmostCheckAt = Date.now();
+    if (!win.isAlwaysOnTop()) pinPillOnTop();
+  }
   const point = cursorDip();
   // Exactly the visible notch, no padding: it must not open a pixel early.
   const inside = pointInRect(point, rect);
@@ -873,11 +888,28 @@ function nearRect(point, rect) {
 
 // The window is created at panel size, hidden, so the renderer can rasterise
 // the whole glass stack before it is ever visible. It then shrinks to the pill.
+
+// Over everything: the desktop, a maximised window, the taskbar. Not over a
+// fullscreen app — game mode hides the whole shell for that — and nothing else
+// takes the pill's place in the stack.
+let topmostCheckAt = 0;
+
+function pinPillOnTop() {
+  if (!win || win.isDestroyed() || gameMode) return false;
+  try {
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.moveTop();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function revealWindow() {
   if (gameMode || revealed || !win || win.isDestroyed()) return;
   revealed = true;
   win.showInactive();
-  win.moveTop();
+  pinPillOnTop();
   if (!pointerTimer) armPointerPoll();
 }
 

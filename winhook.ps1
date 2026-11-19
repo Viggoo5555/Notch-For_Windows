@@ -84,6 +84,9 @@ public class JarvisWinHook
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int index);
 
+    [DllImport("user32.dll")]
+    private static extern int GetWindowLong(IntPtr hWnd, int index);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT
     {
@@ -115,6 +118,12 @@ public class JarvisWinHook
         // A maximised window stops short of the taskbar; a game does not.
         bool covers = width >= screenWidth - 2 && height >= screenHeight - 2;
         if (!covers) return "0";
+
+        // A window that covers the screen because the taskbar is hidden is a
+        // maximised app, not a fullscreen one, and the pill belongs over it.
+        const int GWL_STYLE = -16;
+        const int WS_MAXIMIZE = 0x01000000;
+        if ((GetWindowLong(foreground, GWL_STYLE) & WS_MAXIMIZE) != 0) return "0";
 
         uint pid;
         GetWindowThreadProcessId(foreground, out pid);

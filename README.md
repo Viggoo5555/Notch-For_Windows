@@ -73,10 +73,15 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   it answers with a question of its own it keeps listening, so the reply can be
   spoken straight back without saying the wake word again. It understands Danish: write or say *åbn lommeregner*, *hvad er klokken*, *søg efter
   vejret*, and it answers in Danish with a Danish voice.
+- **Always on top** — the pill sits over the desktop, a maximised window and the
+  taskbar alike, and asks for the front of the stack again whenever it is shown. The
+  one thing it steps aside for is a fullscreen app: that is game mode, and it is now
+  asked every two seconds instead of six, so the pill is out of the way almost as
+  soon as something goes fullscreen and back as soon as it stops.
 - **Game mode** — when a game takes the full screen, the whole shell stands down:
   windows hidden, captures and scans stopped, the microphone released, Chromium
   windows parked, and every process of the app dropped to idle priority so the game
-  is never waiting behind it. Nothing is polled faster than three seconds, and the
+  is never waiting behind it. Nothing is polled faster than two seconds, and the
   performance overlay and an opened System card are the only things that keep
   moving. Measured here: 150–180 % of one core while listening falls to 2–17 % of
   one, and roughly 1.7 GB of memory to 1.1–1.4 GB. It comes back by itself when you
@@ -320,6 +325,14 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.8** — the pill is on top, except in fullscreen. It is raised again whenever
+it is shown and checked on the cursor poll, so a window that takes the front of the
+stack cannot end up over it, and a maximised app with the taskbar auto-hidden is no
+longer mistaken for a fullscreen one — which used to hide the pill over an ordinary
+window. Fullscreen itself is now asked every two seconds rather than six, so the pill
+leaves a video or a game almost at once and is back the moment it stops. No installer
+yet; the 1.2.7 build linked above is still the download until the next one is cut.
 
 **v1.2.7** — motion and glass on machines that have neither. A school or work PC
 usually arrives with Windows' animations switched off and no usable GPU, and Notch
