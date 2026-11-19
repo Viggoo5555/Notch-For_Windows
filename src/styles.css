@@ -211,6 +211,13 @@ html.demo .demo-hint {
   display: block;
 }
 
+/* No bridge and not the dev server: the shell did not come up. Say so, and leave the
+   screen alone instead of drawing the demo's full-window backdrop. */
+html.nobridge .demo-hint {
+  display: block;
+  color: rgba(255, 196, 176, 0.72);
+}
+
 /* ==========================================================================
    The notch
    ========================================================================== */

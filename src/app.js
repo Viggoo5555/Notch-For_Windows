@@ -2,9 +2,19 @@
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const bridge = window.notchAPI;
-const isDemo = !bridge;
+// The demo page is dev-server-only: it is served over http and has no preload. In
+// the app the page is a file:// document, so a missing bridge there is not a demo —
+// it is the shell failing to load, and it must not paint the demo backdrop over the
+// screen as if everything were fine.
+const served = location.protocol === 'http:' || location.protocol === 'https:';
+const isDemo = !bridge && served;
 
 if (isDemo) document.documentElement.classList.add('demo');
+else if (!bridge) {
+  document.documentElement.classList.add('nobridge');
+  const hint = $('.demo-hint');
+  if (hint) hint.textContent = 'Notch is not connected here — start the app from Notch.exe';
+}
 
 const api = bridge || createDemoBridge();
 
