@@ -37,13 +37,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $exists = $false
           gh release view "v${{ steps.version.outputs.version }}" --repo "${{ github.repository }}" *> $null
-          if ($LASTEXITCODE -eq 0) {
+          if ($LASTEXITCODE -eq 0) { $exists = $true }
+          if ($exists) {
             "exists=true" >> $env:GITHUB_OUTPUT
             Write-Host "v${{ steps.version.outputs.version }} is already published; nothing to build."
           } else {
             "exists=false" >> $env:GITHUB_OUTPUT
           }
+          # A missing release is the normal answer here, and its exit code is not
+          # this step's: the runner would otherwise fail the job on it.
+          exit 0
 
       - uses: actions/setup-node@v4
         if: steps.check.outputs.exists != 'true'
