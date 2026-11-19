@@ -983,8 +983,10 @@ function bindDetach(tile, kind) {
 
   tile.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
+    // No capture yet: capturing here retargets the click that follows to the tile, so
+    // a press on the tile's own controls never reaches them — the bag in the library
+    // opened the library instead of the store. Capture waits until there is a drag.
     drag = { id: event.pointerId, x: event.screenX, y: event.screenY, started: false, warmed: false };
-    tile.setPointerCapture?.(event.pointerId);
   });
 
   tile.addEventListener('pointermove', (event) => {
@@ -1001,6 +1003,11 @@ function bindDetach(tile, kind) {
       drag.started = true;
       state.detaching = true;
       tile.classList.add('detaching');
+      try {
+        tile.setPointerCapture?.(event.pointerId);
+      } catch {
+        /* the pointer is already gone: the drag follows the cursor from main */
+      }
       if (api.detachTile) api.detachTile({ tile: kind, x: event.screenX, y: event.screenY });
     }
   });

@@ -12,7 +12,7 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.12.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.12/Notch-Setup-1.2.12.exe)**
+**[Notch-Setup-1.2.13.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.13/Notch-Setup-1.2.13.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -211,8 +211,8 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.12.exe`, the installer said above,
-and `Notch-1.2.12.exe`, the same app as one portable file. Neither needs Node.js on
+writes two files into `dist/`: `Notch-Setup-1.2.13.exe`, the installer said above,
+and `Notch-1.2.13.exe`, the same app as one portable file. Neither needs Node.js on
 the target machine. `npm run dist:installer` builds only the installer, which is what
 every release ships unless a portable has been asked for.
 
@@ -343,6 +343,13 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.13** — the bag in the library opens the store again. Pulling a tile out gave
+the tile's own controls too much: the pointer was captured on every press, which hands
+the click that follows to the tile, so the bag (and the rescan and add buttons) never
+heard their own click and the panel simply opened the library. Capture now waits until
+six pixels of movement have made the press a real pull, so taps belong to their
+button and dragging out still works from anywhere on the tile.
 
 **v1.2.12** — the glass shows the desktop and not the pointer: Windows paints the
 cursor into every captured frame and Chromium cannot be asked to leave it out, so the
