@@ -12,8 +12,8 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.7.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.7/Notch-Setup-1.2.7.exe)**
-— the installer, about 340 MB.
+**[Notch-Setup-1.2.8.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.8/Notch-Setup-1.2.8.exe)**
+— the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
    code-signed): **More info → Run anyway**.
@@ -26,12 +26,14 @@ It installs for your user only, so it never asks for an administrator password.
 Remove it from *Settings → Apps → Notch*; your settings in
 `%APPDATA%\notch\notch.json` are left in place.
 
-No installer wanted? [Notch-1.2.7.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.7/Notch-1.2.7.exe)
-is the same app as a single portable file (~300 MB) — double-click and it runs.
+No installer wanted? The portable file is only cut when someone asks for it, so the
+newest one is still [Notch-1.2.7.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.7/Notch-1.2.7.exe)
+(~300 MB) — the same app as a single file, double-click and it runs, minus the 1.2.8
+changes.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
-### Upgrading from 1.2.6
+### Upgrading from 1.2.7
 
 Run the new installer over the old one; settings, pinned apps, the game library and
 the overlay's corner are kept. Nothing else is needed — the first start asks nothing.
@@ -208,9 +210,10 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.7.exe`, the installer said above,
-and `Notch-1.2.7.exe`, the same app as one portable file. Neither needs Node.js on
-the target machine. `npm run dist:installer` builds only the installer.
+writes two files into `dist/`: `Notch-Setup-1.2.8.exe`, the installer said above,
+and `Notch-1.2.8.exe`, the same app as one portable file. Neither needs Node.js on
+the target machine. `npm run dist:installer` builds only the installer, which is what
+every release ships unless a portable has been asked for.
 
 The package carries Electron, the Whisper loader, `kokoro-js` and the Piper voice,
 so speech works offline out of the box. The Piper files it bundles come from `tts/`
@@ -338,9 +341,7 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 
 ## Release
 
-**v1.2.8** — a store, a butler, and a pill that stays on top. *Source only: this
-release carries no installer; the 1.2.7 build linked above is still the download until
-the next one is packaged.*
+**v1.2.8** — a store, a butler, and a pill that stays on top.
 
 The pill is raised again whenever it is shown and checked on the cursor poll, so a
 window that takes the front of the stack cannot end up over it; a maximised app with
