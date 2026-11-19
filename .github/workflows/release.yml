@@ -97,11 +97,27 @@ jobs:
           if (-not (Test-Path tts/piper/piper.exe)) { Write-Warning 'piper.exe did not arrive; the installer will fall back to the Windows voice.' }
           exit 0
 
+      # The log of a failed run is not readable without admin rights, so the
+      # failure is repeated as an annotation, which is public: the last lines of
+      # the packer's output are what say why it stopped.
       - name: Build the installer
         if: steps.check.outputs.exists != 'true'
-        run: npm run dist:installer
+        shell: pwsh
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          Write-Host "node $(node -v)"
+          Write-Host "electron-builder $(npx electron-builder --version)"
+          npm run dist:installer 2>&1 | Tee-Object -FilePath build.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $tail = Get-Content build.log -Tail 8
+            foreach ($line in $tail) {
+              $safe = $line.Trim().Replace('%', '%25')
+              if ($safe) { Write-Host "::error title=Build failed::$safe" }
+            }
+          }
+          exit $code
 
       - name: Release notes
         if: steps.check.outputs.exists != 'true'
