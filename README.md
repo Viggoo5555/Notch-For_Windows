@@ -12,7 +12,7 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.13.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.13/Notch-Setup-1.2.13.exe)**
+**[Notch-Setup-1.2.14.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.14/Notch-Setup-1.2.14.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -26,10 +26,12 @@ It installs for your user only, so it never asks for an administrator password.
 Remove it from *Settings → Apps → Notch*; your settings in
 `%APPDATA%\notch\notch.json` are left in place.
 
-No installer wanted? The portable file is only cut when someone asks for it, so the
-newest one is still [Notch-1.2.7.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.7/Notch-1.2.7.exe)
-(~300 MB) — the same app as a single file, double-click and it runs, without
-anything from 1.2.8 onwards.
+No installer wanted? **[Notch-1.2.14.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.14/Notch-1.2.14.exe)**
+(~300 MB) is the same app as one portable file: double-click it and Notch runs, with
+nothing written to *Programs* and nothing to uninstall. It keeps its settings in the
+same `%APPDATA%\notch` folder, so a portable and an installed copy are interchangeable
+— take the installer later and everything carries over. Both files are attached to
+every release.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
@@ -211,10 +213,10 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.13.exe`, the installer said above,
-and `Notch-1.2.13.exe`, the same app as one portable file. Neither needs Node.js on
-the target machine. `npm run dist:installer` builds only the installer, which is what
-every release ships unless a portable has been asked for.
+writes two files into `dist/`: `Notch-Setup-1.2.14.exe`, the installer said above,
+and `Notch-1.2.14.exe`, the same app as one portable file. Neither needs Node.js on
+the target machine. Both are attached to every release; `npm run dist:installer`
+builds only the installer when the portable is not wanted.
 
 The package carries Electron, the Whisper loader, `kokoro-js` and the Piper voice,
 so speech works offline out of the box. The Piper files it bundles come from `tts/`
@@ -343,6 +345,11 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.14** — both downloads again. Every release now carries the installer *and*
+the single-file portable build (`Notch-1.2.14.exe`), so Notch can be run without
+installing anything. The app itself is 1.2.13's: the library's bag opens the store,
+the glass hides the pointer and cards come out on the first move.
 
 **v1.2.13** — the bag in the library opens the store again. Pulling a tile out gave
 the tile's own controls too much: the pointer was captured on every press, which hands
