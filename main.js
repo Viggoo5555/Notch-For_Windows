@@ -2758,12 +2758,12 @@ function createLauncher() {
   launcherWin.loadFile(path.join(__dirname, 'src', 'launcher.html'));
   launcherWin.webContents.on('did-finish-load', sendLauncherState);
   launcherWin.on('blur', () => {
-    if (launcherWin && launcherWin.isVisible()) launcherWin.hide();
+    if (launcherWin && launcherWin.isVisible()) hideLauncher();
   });
   launcherWin.on('close', (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
-      launcherWin.hide();
+      hideLauncher();
     }
   });
   launcherWin.on('closed', () => {
@@ -2812,6 +2812,9 @@ function stealLauncherFocus(window) {
 function showLauncher() {
   const window = createLauncher();
   if (!window) return;
+  // A second press while the sheet is still dismissing opens it again instead of
+  // letting the pending take-down win.
+  cancelLauncherHide();
   revealTaskbar();
   window.setBounds(launcherBounds());
   window.show();
@@ -2851,9 +2854,37 @@ function showLauncher() {
 
 ipcMain.on('launcher:ready', sendLauncherState);
 
-function hideLauncher() {
-  if (launcherWin && !launcherWin.isDestroyed() && launcherWin.isVisible()) launcherWin.hide();
+// The sheet animates itself out and says so; the window then goes away with a
+// transparent frame on screen, which is also what the next show presents. The
+// timer is only a guard for a renderer that never answers.
+const LAUNCHER_CLOSE_MS = 420;
+let launcherHide = null;
+
+function cancelLauncherHide() {
+  if (!launcherHide) return;
+  clearTimeout(launcherHide.timer);
+  launcherHide = null;
 }
+
+function hideLauncher() {
+  const window = launcherWin;
+  if (!window || window.isDestroyed() || !window.isVisible()) return;
+  if (launcherHide) return;
+  const takeDown = () => {
+    if (!launcherHide || launcherHide.takeDown !== takeDown) return;
+    clearTimeout(launcherHide.timer);
+    launcherHide = null;
+    if (window && !window.isDestroyed() && window.isVisible()) window.hide();
+  };
+  launcherHide = { takeDown, timer: setTimeout(takeDown, LAUNCHER_CLOSE_MS) };
+  window.webContents.send('launcher:dismiss');
+}
+
+ipcMain.on('launcher:hidden', (event) => {
+  if (!launcherHide) return;
+  if (!launcherWin || launcherWin.isDestroyed() || event.sender !== launcherWin.webContents) return;
+  launcherHide.takeDown();
+});
 
 function toggleLauncher() {
   if (launcherWin && !launcherWin.isDestroyed() && launcherWin.isVisible()) hideLauncher();

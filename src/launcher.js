@@ -32,6 +32,87 @@ const state = {
   glass: null,
 };
 
+// ---------------------------------------------------------------- open/close
+// The sheet sits painted in its dismissed state while the window is hidden. The
+// window is shown first and the drop is started after that, because an animation
+// that runs while the window is still unpainted is simply over when it appears —
+// which reads as a flash. Closing plays the same state backwards, and the window
+// is only taken down once the faded frame is on screen, so the next show starts
+// from transparent instead of flashing the old picture.
+
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let openFrame = 0;
+let openTimer = 0;
+let openDone = false;
+let closeTimer = 0;
+let closeDone = null;
+let closeOnEnd = null;
+
+function stopClose() {
+  clearTimeout(closeTimer);
+  closeTimer = 0;
+  closeDone = null;
+  if (closeOnEnd) {
+    els.shell.removeEventListener('transitionend', closeOnEnd);
+    closeOnEnd = null;
+  }
+}
+
+function openSheet() {
+  stopClose();
+  if (openFrame) cancelAnimationFrame(openFrame);
+  clearTimeout(openTimer);
+  openFrame = 0;
+  openTimer = 0;
+  openDone = false;
+  const open = () => {
+    if (openDone) return;
+    openDone = true;
+    openFrame = 0;
+    clearTimeout(openTimer);
+    openTimer = 0;
+    document.body.classList.remove('out');
+  };
+  if (reducedMotion) {
+    open();
+    return;
+  }
+  // One frame presents the transparent window, the next starts the drop.
+  openFrame = requestAnimationFrame(() => {
+    openFrame = requestAnimationFrame(open);
+  });
+  // A window that is not drawing yet must not swallow the sheet entirely.
+  openTimer = setTimeout(open, 140);
+}
+
+function closeSheet() {
+  if (document.body.classList.contains('out')) {
+    if (openFrame) cancelAnimationFrame(openFrame);
+    clearTimeout(openTimer);
+    openFrame = 0;
+    openTimer = 0;
+    openDone = true;
+    api.hidden();
+    return;
+  }
+  stopClose();
+  document.body.classList.add('out');
+  const finish = () => {
+    if (!closeDone) return;
+    stopClose();
+    // Two frames: the first paints the faded sheet, the second lets the window go.
+    requestAnimationFrame(() => requestAnimationFrame(() => api.hidden()));
+  };
+  closeDone = finish;
+  closeOnEnd = (event) => {
+    if (event.target === els.shell && event.propertyName === 'opacity') finish();
+  };
+  els.shell.addEventListener('transitionend', closeOnEnd);
+  closeTimer = setTimeout(finish, 320);
+  if (reducedMotion) finish();
+}
+
 const CONFIG = {
   cornerRadius: 26,
   zRadius: 46,
@@ -320,11 +401,7 @@ api.onShow(() => {
   els.query.focus();
   // The window can take focus a beat after the show message.
   setTimeout(() => els.query.focus(), 40);
-  // Restart the drop-in from the top even when two presses arrive back to back —
-  // the class has to leave and be re-applied in a frame that was laid out.
-  document.body.classList.remove('in');
-  void document.body.offsetWidth;
-  document.body.classList.add('in');
+  openSheet();
   placeSource();
   if (state.glass) {
     state.glass.markChanged(els.source);
@@ -332,6 +409,8 @@ api.onShow(() => {
     ensureGlass();
   }
 });
+
+api.onDismiss(closeSheet);
 
 api.onBackdrop((data) => {
   if (!data || !data.url) return;
