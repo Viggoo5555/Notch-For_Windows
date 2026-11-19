@@ -12,7 +12,7 @@ service.
 
 ## Download
 
-**[Notch-Setup-1.2.9.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.9/Notch-Setup-1.2.9.exe)**
+**[Notch-Setup-1.2.10.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.10/Notch-Setup-1.2.10.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -29,11 +29,11 @@ Remove it from *Settings → Apps → Notch*; your settings in
 No installer wanted? The portable file is only cut when someone asks for it, so the
 newest one is still [Notch-1.2.7.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.7/Notch-1.2.7.exe)
 (~300 MB) — the same app as a single file, double-click and it runs, without
-anything from 1.2.8 or 1.2.9.
+anything from 1.2.8 onwards.
 
 All releases live at <https://github.com/Viggoo5555/Notch-For_Windows/releases>.
 
-### Upgrading from 1.2.8
+### Upgrading from 1.2.9
 
 Run the new installer over the old one; settings, pinned apps, the game library and
 the overlay's corner are kept. Nothing else is needed — the first start asks nothing.
@@ -211,8 +211,8 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes two files into `dist/`: `Notch-Setup-1.2.9.exe`, the installer said above,
-and `Notch-1.2.9.exe`, the same app as one portable file. Neither needs Node.js on
+writes two files into `dist/`: `Notch-Setup-1.2.10.exe`, the installer said above,
+and `Notch-1.2.10.exe`, the same app as one portable file. Neither needs Node.js on
 the target machine. `npm run dist:installer` builds only the installer, which is what
 every release ships unless a portable has been asked for.
 
@@ -343,6 +343,14 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.10** — the installer actually contains the panel. The package listed its
+preload scripts with the glob `*-preload.js`, which matches `launcher-preload.js` and
+`widget-preload.js` but not the panel's own `preload.js`: every installed copy was
+missing its bridge, so the window came up saying *"Notch is not connected here — start
+the app from Notch.exe"* and the glass fell back to the flat material. The glob is now
+`*preload.js`, and the installer carries the panel. Running from source was never
+affected, which is why the app looked right there and wrong once installed.
 
 **v1.2.9** — the glass follows the desktop, live. What sat behind the notch used to
 be a photograph: the screen was grabbed whole, and one grab costs about a third of a
