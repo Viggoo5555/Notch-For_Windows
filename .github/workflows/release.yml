@@ -1,0 +1,114 @@
+name: Release
+
+# Releases carry the installer and nothing else. A version bump on main builds
+# Notch-Setup-<version>.exe on a Windows runner — the one place a Windows
+# installer can be produced without Wine — and attaches it to a release. If that
+# version already has a release, the run looks at it and stops, so ordinary
+# pushes to main cost a few seconds and never overwrite a published download.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Is this version already released?
+        id: check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "v${{ steps.version.outputs.version }}" --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            "exists=true" >> $env:GITHUB_OUTPUT
+            Write-Host "v${{ steps.version.outputs.version }} is already published; nothing to build."
+          } else {
+            "exists=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.exists != 'true'
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        if: steps.check.outputs.exists != 'true'
+        run: npm ci
+
+      # The Piper voice travels inside the installer, but it is not in the
+      # repository (tts/ is ignored), so the runner fetches exactly what the
+      # package expects: tts/piper/piper.exe and the two .onnx voices beside it.
+      - name: Fetch the Piper voice
+        if: steps.check.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path tts | Out-Null
+          try {
+            Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip" -OutFile piper.zip
+            Expand-Archive piper.zip -DestinationPath tts -Force
+          } catch {
+            Write-Warning "piper binary: $_"
+          }
+          $voices = @(
+            @{ name = 'en_GB-alan-medium'; url = 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium' },
+            @{ name = 'da_DK-talesyntese-medium'; url = 'https://huggingface.co/rhasspy/piper-voices/resolve/main/da/da_DK/talesyntese/medium/da_DK-talesyntese-medium' }
+          )
+          foreach ($voice in $voices) {
+            foreach ($suffix in @('.onnx', '.onnx.json')) {
+              try {
+                Invoke-WebRequest -UseBasicParsing -Uri "$($voice.url)$suffix" -OutFile "tts/$($voice.name)$suffix"
+              } catch {
+                Write-Warning "$($voice.name)$suffix: $_"
+              }
+            }
+          }
+          Get-ChildItem tts -Recurse -File | Select-Object -ExpandProperty FullName
+
+      - name: Build the installer
+        if: steps.check.outputs.exists != 'true'
+        run: npm run dist:installer
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Release notes
+        if: steps.check.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $text = Get-Content README.md -Raw
+          $match = [regex]::Match($text, '(?s)\*\*v[\d.]+\*\*.*?(?=\r?\n\*\*v[\d.]+\*\*)')
+          $body = if ($match.Success) { $match.Value.Trim() } else { "Notch ${{ steps.version.outputs.version }}" }
+          $body += "`n`n**Download** — the installer only: ``Notch-Setup-${{ steps.version.outputs.version }}.exe``"
+          $body | Set-Content -Encoding utf8 release-notes.md
+
+      - name: Publish
+        if: steps.check.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" `
+            "dist/Notch-Setup-${{ steps.version.outputs.version }}.exe" `
+            --repo "${{ github.repository }}" `
+            --title "Notch ${{ steps.version.outputs.version }}" `
+            --notes-file release-notes.md `
+            --target "${{ github.sha }}"

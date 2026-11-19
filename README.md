@@ -223,6 +223,12 @@ writes `dist/Notch-Setup-1.2.15.exe`, the installer said above; it needs no Node
 the target machine. `npm run dist:installer` is the same build when the portable is
 not wanted, and releases carry only the installer.
 
+Pushing a version bump to `main` does that build on GitHub's Windows runner
+(`.github/workflows/release.yml`), fetches the Piper voice it is not allowed to carry
+in the repository, and publishes the result as `v<version>` — so a release is one
+commit away and no Windows machine is needed here. A version that already has a
+release is left alone.
+
 The package carries Electron, the Whisper loader, `kokoro-js` and the Piper voice,
 so speech works offline out of the box. The Piper files it bundles come from `tts/`
 (not in the repository; copy `piper/` and the `.onnx` voice there before building
