@@ -10,3 +10,10 @@ is that library. Drive it through `src/glass.js` (and the per-surface wrappers
 adding another glass library, a second copy, or a hand-written shader.
 
 Credits for it belong in the README's **Credits** section.
+
+## Releases
+
+Ship the **installer** by default: `npm run dist:installer` builds
+`dist/Notch-Setup-<version>.exe`, and that is the artifact the release carries. Build
+the portable (`npm run dist`) only when it is asked for — it compresses for minutes on
+its own and doubles the download.
