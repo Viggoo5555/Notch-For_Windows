@@ -2178,3 +2178,179 @@ html.demo .glass-backdrop {
   overflow-x: hidden;
   scrollbar-width: thin;
 }
+
+/* ------------------------------------------------------------------- store */
+
+.store {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.store-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.store .store-search {
+  margin-top: 0;
+  flex: 1 1 auto;
+  height: 28px;
+}
+
+.store-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.store-chip {
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--hair);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease;
+}
+
+.store-chip:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.store-chip.is-on {
+  color: #0a0f1e;
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.store-sort {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 9px;
+  border: 1px solid var(--hair);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--muted);
+  font-size: 10.5px;
+  outline: 0;
+  cursor: pointer;
+}
+
+.store-sort option {
+  background: #14161c;
+  color: #eef;
+}
+
+.store-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 58px;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.store-list::-webkit-scrollbar {
+  display: none;
+}
+
+.store-row {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  height: 58px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.022);
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.24s var(--spring-micro);
+}
+
+.store-row:hover {
+  background: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.store-row:active {
+  transform: scale(0.985);
+}
+
+.store-art {
+  width: 54px;
+  height: 25px;
+  border-radius: 5px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.store-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.store-name {
+  font-size: 11.5px;
+  font-weight: 560;
+  letter-spacing: 0.004em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-meta {
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.store-price {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.store-off {
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 620;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.store-final {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.store-old {
+  font-size: 9.5px;
+  color: var(--faint);
+  text-decoration: line-through;
+}

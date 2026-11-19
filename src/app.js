@@ -33,6 +33,9 @@ const state = {
   icons: {},
   settingsOpen: false,
   detail: null,
+  // The store is drawn here from Steam's own prices; sorting and filtering
+  // happen in this window, not on somebody's server.
+  store: { items: [], loading: false, query: '', discount: 0, budget: 0, sort: 'discount' },
   settings: {
     accent: '#7c9cff',
     material: 'liquid',
@@ -346,6 +349,12 @@ async function rescanLibraries() {
   } finally {
     button.classList.remove('spin');
   }
+}
+
+// The bag in the library row opens the store page here in the panel: the rows,
+// the prices and the sorting are this window's own work.
+function openStore() {
+  openDetail('store');
 }
 
 async function addGame() {
@@ -867,7 +876,13 @@ function bindDetach(tile, kind) {
 // ---------------------------------------------------------------- detail view
 
 // Every tile can open into the whole panel: same glass, more of that widget.
-const DETAIL_TITLES = { library: 'Library', focus: 'Focus', system: 'System', clip: 'Clipboard' };
+const DETAIL_TITLES = {
+  library: 'Library',
+  store: 'Store',
+  focus: 'Focus',
+  system: 'System',
+  clip: 'Clipboard',
+};
 
 function svgNode(name, attrs = {}) {
   const node = document.createElementNS('http://www.w3.org/2000/svg', name);
@@ -907,6 +922,9 @@ function renderDetail() {
   if (kind === 'library') {
     meta.textContent = state.games.length ? `${state.games.length} games` : '';
     renderDetailLibrary(body);
+  } else if (kind === 'store') {
+    renderDetailStore(body);
+    loadStore();
   } else if (kind === 'focus') {
     renderDetailFocus(body);
   } else if (kind === 'system') {
@@ -945,6 +963,232 @@ function renderDetailLibrary(body) {
   list.className = 'game-list detail-games';
   for (const game of state.games) list.appendChild(gameCard(game));
   body.appendChild(list);
+}
+
+// ------------------------------------------------------------------- store
+
+// The store is Steam's catalogue with Notch's own hands on it: one fetch of the
+// featured list, then every filter and every sort happens here, in this window.
+const STORE_DISCOUNTS = [0, 25, 50, 75];
+const STORE_BUDGETS = [0, 500, 1000, 2000];
+const STORE_SORTS = [
+  ['discount', 'Biggest discount'],
+  ['price', 'Cheapest first'],
+  ['pricey', 'Priciest first'],
+  ['name', 'A–Z'],
+];
+
+function money(cents, currency) {
+  const value = Math.max(0, Number(cents) || 0) / 100;
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: String(currency || 'USD').toUpperCase(),
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `${value.toFixed(2)} ${String(currency || '').toUpperCase()}`.trim();
+  }
+}
+
+function storeSource(item) {
+  if (item.source === 'new') return 'New release';
+  if (item.source === 'top') return 'Top seller';
+  return item.discount ? 'Deal' : 'Steam';
+}
+
+async function loadStore() {
+  const store = state.store;
+  if (store.loading || store.tried || !api.store) return;
+  store.tried = true;
+  store.loading = true;
+  try {
+    const data = await api.store();
+    if (data && Array.isArray(data.items)) {
+      store.items = data.items;
+      if (data.error) toast('Steam is not answering');
+    }
+  } catch {
+    toast('Steam is not answering');
+  } finally {
+    store.loading = false;
+    if (state.detail === 'store') renderDetail();
+  }
+}
+
+function storeRows() {
+  const store = state.store;
+  const query = store.query.trim().toLowerCase();
+  const rows = store.items.filter((item) => {
+    if (item.discount < store.discount) return false;
+    if (store.budget && item.final > store.budget) return false;
+    if (query && !item.name.toLowerCase().includes(query)) return false;
+    return true;
+  });
+  const sorters = {
+    discount: (a, b) => b.discount - a.discount || a.final - b.final,
+    price: (a, b) => a.final - b.final,
+    pricey: (a, b) => b.final - a.final,
+    name: (a, b) => a.name.localeCompare(b.name),
+  };
+  return rows.sort(sorters[store.sort] || sorters.discount);
+}
+
+function storeRow(item) {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'store-row';
+  row.title = `${item.name} on Steam`;
+  row.addEventListener('click', () => {
+    if (api.openStorePage) api.openStorePage(item.appid);
+  });
+
+  const art = document.createElement('img');
+  art.className = 'store-art';
+  art.src = item.art;
+  art.alt = '';
+  art.loading = 'lazy';
+  art.decoding = 'async';
+
+  const text = document.createElement('span');
+  text.className = 'store-text';
+  const name = document.createElement('span');
+  name.className = 'store-name';
+  name.textContent = item.name;
+  const meta = document.createElement('span');
+  meta.className = 'store-meta';
+  meta.textContent = storeSource(item);
+  text.append(name, meta);
+
+  const price = document.createElement('span');
+  price.className = 'store-price';
+  if (item.discount) {
+    const off = document.createElement('span');
+    off.className = 'store-off';
+    off.textContent = `−${item.discount}%`;
+    price.appendChild(off);
+  }
+  const final = document.createElement('span');
+  final.className = 'store-final';
+  final.textContent = item.free ? 'Free' : money(item.final, item.currency);
+  price.appendChild(final);
+  if (item.discount && item.original) {
+    const old = document.createElement('span');
+    old.className = 'store-old';
+    old.textContent = money(item.original, item.currency);
+    price.appendChild(old);
+  }
+
+  row.append(art, text, price);
+  return row;
+}
+
+function renderDetailStore(body) {
+  const store = state.store;
+  const currency = store.items[0] ? store.items[0].currency : 'USD';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'store';
+
+  const bar = document.createElement('div');
+  bar.className = 'store-bar';
+
+  const search = document.createElement('label');
+  search.className = 'search store-search';
+  const lens = svgNode('svg', { viewBox: '0 0 16 16', 'aria-hidden': 'true' });
+  lens.append(svgNode('circle', { cx: 7, cy: 7, r: 4.4 }), svgNode('path', { d: 'm10.4 10.4 3 3' }));
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Search the store';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.value = store.query;
+  search.append(lens, input);
+  bar.appendChild(search);
+
+  const sort = document.createElement('select');
+  sort.className = 'store-sort';
+  sort.title = 'Sort';
+  for (const [value, label] of STORE_SORTS) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    option.selected = store.sort === value;
+    sort.appendChild(option);
+  }
+  bar.appendChild(sort);
+  wrap.appendChild(bar);
+
+  const chips = document.createElement('div');
+  chips.className = 'store-chips';
+  const chipButton = (label, active, onClick) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'store-chip';
+    button.textContent = label;
+    button.classList.toggle('is-on', active);
+    button.addEventListener('click', onClick);
+    chips.appendChild(button);
+  };
+  for (const value of STORE_DISCOUNTS) {
+    chipButton(value ? `−${value}% or more` : 'All', store.discount === value, () => {
+      store.discount = value;
+      renderDetail();
+    });
+  }
+  for (const value of STORE_BUDGETS) {
+    chipButton(value ? `Under ${money(value, currency)}` : 'Any price', store.budget === value, () => {
+      store.budget = value;
+      renderDetail();
+    });
+  }
+  chipButton(store.loading ? 'Asking Steam…' : 'Refresh', false, () => {
+    store.tried = false;
+    store.items = [];
+    renderDetail();
+  });
+  wrap.appendChild(chips);
+
+  const list = document.createElement('div');
+  list.className = 'store-list';
+  wrap.appendChild(list);
+
+  const paint = () => {
+    list.replaceChildren();
+    if (store.loading && !store.items.length) {
+      list.appendChild(emptyBlock('Asking Steam…', 'Prices, discounts and what is on sale today.'));
+      return;
+    }
+    if (!store.items.length) {
+      list.appendChild(
+        emptyBlock(
+          'The store is closed',
+          api.store ? 'Steam did not answer. Press Refresh in a moment.' : 'Start the app from Notch.exe to reach the store.',
+        ),
+      );
+      return;
+    }
+    const rows = storeRows();
+    if (!rows.length) {
+      list.appendChild(emptyBlock('Nothing matches', 'Loosen a filter or clear the search.'));
+      return;
+    }
+    for (const item of rows) list.appendChild(storeRow(item));
+  };
+  paint();
+
+  input.addEventListener('input', () => {
+    store.query = input.value;
+    paint();
+  });
+  sort.addEventListener('change', () => {
+    store.sort = sort.value;
+    paint();
+  });
+
+  body.appendChild(wrap);
+  const meta = $('#detailMeta');
+  if (meta) meta.textContent = store.items.length ? `${store.items.length} on the list` : '';
 }
 
 function renderDetailFocus(body) {
@@ -1269,6 +1513,7 @@ function bindEvents() {
 
   $('#rescan').addEventListener('click', rescanLibraries);
   $('#addGame').addEventListener('click', addGame);
+  $('#steamdb').addEventListener('click', openStore);
 
   const search = $('#gameSearch');
   search.addEventListener('input', () => {
@@ -1322,6 +1567,8 @@ function bindEvents() {
     api.onFocusAction((action) => {
       const text = String(action || '');
       if (text === 'reset') resetFocus();
+      else if (text === 'start') startFocus();
+      else if (text === 'pause') pauseFocus();
       else if (text.startsWith('minutes:')) setFocusMinutes(Number(text.split(':')[1]) || 25);
       else toggleFocus();
     });
@@ -1341,6 +1588,36 @@ function bindEvents() {
     }
   });
   api.onOpen(() => openNotch());
+  // Jarvis works the app from the main process: a page to open, a setting that
+  // changed, a library that was rescanned. The panel follows all three.
+  if (api.onSettings) {
+    api.onSettings((settings) => {
+      if (!settings) return;
+      state.settings = { ...state.settings, ...settings };
+      applySettings();
+      if (state.settingsOpen) renderSettings();
+    });
+  }
+  if (api.onView) {
+    api.onView((kind) => {
+      openNotch();
+      if (!kind || kind === 'panel') {
+        closeSettings();
+        closeDetail();
+        return;
+      }
+      if (kind === 'settings') openSettings();
+      else openDetail(kind);
+    });
+  }
+  if (api.onGames) {
+    api.onGames((list) => {
+      if (!Array.isArray(list)) return;
+      state.games = list;
+      renderGames();
+      if (state.detail === 'library') renderDetail();
+    });
+  }
   if (api.onIcons) api.onIcons((map) => applyIcons(map));
   if (api.onBackdrop) api.onBackdrop((url) => setBackdrop(url));
   // The window covers more than the notch, so the main process owns the

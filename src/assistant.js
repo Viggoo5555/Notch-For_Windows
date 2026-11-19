@@ -118,8 +118,11 @@ function systemPrompt() {
   lines.push(
     'You can work this computer. When the user asks you to do a thing rather than explain it, do it and add one command in double square brackets at the very end:',
     '[[open: Brave]], [[search: google for weather in Aarhus]], [[play: Norah Jones]].',
+    'You can also work Notch, the app you live in, and you should never claim otherwise: any order that is about Notch itself goes in the same brackets with the word notch first —',
+    '[[notch: open the library]], [[notch: make it mint]], [[notch: frosted glass]], [[notch: taskbar off]], [[notch: show the performance overlay]], [[notch: focus for 25 minutes]], [[notch: launch Hades II]], [[notch: rescan the library]], [[notch: start with Windows]].',
+    'What Notch answers to: opening the panel, the library, the store, the focus timer, the clipboard or the settings; the accent colour (blue, lilac, mint, pink, amber); the surface (liquid, frosted, black); tint, blur, grain, pill glow, animation speed and easing, hover delay, pill width, attached or island shape; the glass source (live desktop or wallpaper); the taskbar, its auto-hide and its style; the performance overlay; the focus timer (start, pause, reset, any number of minutes); the game library (rescan it, count it, launch a game by name); the store, which draws Steam\'s deals inside the panel with its own filters and sorting; starting with Windows; and quitting the app.',
     'The window carries the command out and removes the brackets from the reply, so say what you are doing in one short line and put the command after it.',
-    'Use those three forms only, one per reply, and never when the user merely asked a question.',
+    'Use one of those forms per reply, and never when the user merely asked a question — "what is liquid glass" is a question, "make it liquid glass" is an order.',
   );
   return lines.join(' ');
 }
@@ -136,12 +139,15 @@ function refreshSystemPrompt() {
 // The model writes its orders as [[open: X]] so that any local model can drive
 // the machine without tool-calling support. They are taken out before the reply
 // is shown or spoken.
-const ACTION_TAG = /\[\[\s*(open|search|play|launch|start)\s*:\s*([^\]]+?)\s*\]\]/gi;
+const ACTION_TAG = /\[\[\s*(open|search|play|launch|start|notch)\s*:\s*([^\]]+?)\s*\]\]/gi;
 
 function extractActions(text) {
   const actions = [];
   const clean = String(text || '').replace(ACTION_TAG, (_match, verb, target) => {
-    const order = verb.toLowerCase() === 'launch' || verb.toLowerCase() === 'start' ? 'open' : verb.toLowerCase();
+    const said = verb.toLowerCase();
+    // Notch's own orders keep their word: it is what tells main this is about the
+    // app rather than about whatever app the user named.
+    const order = said === 'launch' || said === 'start' ? 'open' : said;
     actions.push(`${order} ${target.trim()}`);
     return '';
   });

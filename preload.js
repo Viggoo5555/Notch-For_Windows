@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('notchAPI', {
   quit: () => ipcRenderer.send('notch:quit'),
   setLogin: (value) => ipcRenderer.invoke('notch:login', !!value),
   rescan: () => ipcRenderer.invoke('notch:rescan'),
+  store: () => ipcRenderer.invoke('notch:store'),
+  openStorePage: (appid) => ipcRenderer.invoke('notch:store-open', appid),
   addGame: () => ipcRenderer.invoke('notch:add-game'),
   launch: (id) => ipcRenderer.invoke('notch:launch', id),
   copyClip: (id) => ipcRenderer.invoke('notch:copy-clip', id),
@@ -30,4 +32,8 @@ contextBridge.exposeInMainWorld('notchAPI', {
   onFocusAction: (callback) => ipcRenderer.on('notch:focus-action', (_event, action) => callback(action)),
   onTogglePin: (callback) => ipcRenderer.on('notch:toggle-pin', () => callback()),
   onOpen: (callback) => ipcRenderer.on('notch:open', () => callback()),
+  // Jarvis changes the app from the main process, so the panel is told.
+  onSettings: (callback) => ipcRenderer.on('notch:settings', (_event, data) => callback(data)),
+  onView: (callback) => ipcRenderer.on('notch:view', (_event, kind) => callback(kind)),
+  onGames: (callback) => ipcRenderer.on('notch:games', (_event, list) => callback(list)),
 });

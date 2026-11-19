@@ -1503,7 +1503,271 @@ async function openSomething(rawAsked) {
   return '';
 }
 
+// ------------------------------------------------------------ driving Notch
+
+// Jarvis works this app the way it works the rest of the machine: an order in,
+// the app changed, one short line back. Every pattern below starts with a verb,
+// because this runs on every message — "what is liquid glass" has to stay a
+// question and not repaint the panel.
+const ACCENT_WORDS = new Map([
+  ['blue', '#7c9cff'],
+  ['indigo', '#7c9cff'],
+  ['blå', '#7c9cff'],
+  ['bla', '#7c9cff'],
+  ['lilac', '#bf8cff'],
+  ['purple', '#bf8cff'],
+  ['violet', '#bf8cff'],
+  ['lilla', '#bf8cff'],
+  ['green', '#6fe3b0'],
+  ['mint', '#6fe3b0'],
+  ['teal', '#6fe3b0'],
+  ['grøn', '#6fe3b0'],
+  ['gron', '#6fe3b0'],
+  ['pink', '#ff8fb8'],
+  ['rose', '#ff8fb8'],
+  ['rosa', '#ff8fb8'],
+  ['orange', '#ffb86b'],
+  ['amber', '#ffb86b'],
+  ['gold', '#ffb86b'],
+]);
+
+const NOTCH_IMPERATIVE =
+  /^(?:please\s+|venligst\s+)?(?:set|make|turn|switch|put|use|enable|disable|change|show|hide|start|stop|open|close|quit|exit|rescan|scan|give|launch|play|sæt|gør|slå|skift|vis|skjul|åbn|luk|giv|start|spil)\b/i;
+
+// "taskbar on" and "glow off" are orders too, noun first, which the verb test
+// above would throw out as a question.
+const NOTCH_NOUN_SWITCH =
+  /^(?:the\s+)?(?:taskbar|glow|grain|overlay|animations|notch)\s+(?:on|off|auto-?hide|auto hide)\b/i;
+
+function wantsOff(text) {
+  return /\b(?:off|disable|disabled|no|stop|hide|hidden|without|fra|sluk|skjul|nej)\b/i.test(text);
+}
+
+// The panel is not the launcher: it opens on its own message, and a page inside
+// it one beat later, once the panel has actually painted.
+function showNotchPanel(kind) {
+  if (!win || win.isDestroyed() || gameMode) return false;
+  win.webContents.send('notch:open');
+  setTimeout(
+    () => {
+      if (win && !win.isDestroyed()) win.webContents.send('notch:view', kind || 'panel');
+    },
+    kind ? 320 : 0,
+  );
+  return true;
+}
+
+function tellPanelFocus(action) {
+  if (win && !win.isDestroyed()) win.webContents.send('notch:focus-action', action);
+}
+
+async function runNotchAction(raw) {
+  const text = String(raw || '').trim().replace(/^notch[\s:,]+/i, '');
+  if (!text) return '';
+  const low = text.toLowerCase();
+  const yes = sayBoth;
+
+  // A question is answered with a fact, never with a change.
+  if (/^how many games\b/.test(low)) {
+    return games.length
+      ? yes(`You have ${games.length} games in the library.`, `Du har ${games.length} spil i biblioteket.`)
+      : yes('The library is empty.', 'Biblioteket er tomt.');
+  }
+
+  if (!NOTCH_IMPERATIVE.test(text) && !NOTCH_NOUN_SWITCH.test(text)) return '';
+
+  // A page of the panel.
+  const view = low.match(
+    /^(?:open|show|vis|åbn)\s+(?:the\s+|my\s+|min\s+|mit\s+)?(panel|notch|library|games|spil|settings|indstillinger|focus|clipboard|udklipsholder|launcher|start menu)\b/,
+  );
+  if (view) {
+    const word = view[1];
+    const kind =
+      {
+        library: 'library',
+        games: 'library',
+        spil: 'library',
+        focus: 'focus',
+        clipboard: 'clip',
+        udklipsholder: 'clip',
+        settings: 'settings',
+        indstillinger: 'settings',
+      }[word] || '';
+    if (!showNotchPanel(kind)) {
+      return yes('A game has the screen; the panel is standing down.', 'Et spil har skærmen; panelet holder sig væk.');
+    }
+    const en = { library: 'library', focus: 'focus timer', clip: 'clipboard', settings: 'settings' }[kind] || 'panel';
+    const da = { library: 'biblioteket', focus: 'fokus-timeren', clip: 'udklipsholderen', settings: 'indstillingerne' }[kind] || 'panelet';
+    return yes(`Opening the ${en}.`, `Åbner ${da}.`);
+  }
+
+  // Accent: "make it mint", "set the accent to pink", "sæt farven til grøn".
+  const accent =
+    low.match(/\b(?:accent|colour|color|farve)\b(?:\s+(?:to|til|as|is))?\s+([a-zæøå]+)/) ||
+    low.match(/^make it\s+([a-zæøå]+)$/);
+  if (accent && ACCENT_WORDS.has(accent[1])) {
+    applySettingsPatch({ accent: ACCENT_WORDS.get(accent[1]) });
+    return yes(`Accent set to ${accent[1]}.`, `Farven er nu ${accent[1]}.`);
+  }
+
+  // Surface, as long as the order is not about the taskbar's own surface.
+  if (!/\btaskbar\b/.test(low)) {
+    if (/\b(?:frosted|frost|matte)\b/.test(low) && /\b(?:glass|surface|material|panel|look)\b/.test(low)) {
+      applySettingsPatch({ material: 'frost' });
+      return yes('Frosted glass.', 'Mat glas.');
+    }
+    if (/\b(?:black|solid|opaque)\b/.test(low) && /\b(?:glass|surface|material|panel|look)\b/.test(low)) {
+      applySettingsPatch({ material: 'black' });
+      return yes('Black surface.', 'Sort overflade.');
+    }
+    if (/\bliquid\b/.test(low) && /\b(?:glass|surface|material|panel|look)\b/.test(low)) {
+      applySettingsPatch({ material: 'liquid' });
+      return yes('Liquid glass it is.', 'Liquid glass, som det skal være.');
+    }
+  }
+
+  // Numbers: tint, blur, animation speed, pill width, hover delay.
+  const range = (pattern, key, min, max, label) => {
+    const match = low.match(pattern);
+    if (!match) return '';
+    const value = Math.max(min, Math.min(max, Number(match[1])));
+    applySettingsPatch({ [key]: value });
+    return yes(`${label} at ${value}.`, `${label} på ${value}.`);
+  };
+  const numbered =
+    range(/\btint\b[^0-9]{0,16}(\d{1,3})/, 'tint', 0, 100, 'Tint') ||
+    range(/\bblur\b[^0-9]{0,16}(\d{1,3})/, 'blur', 0, 100, 'Blur') ||
+    range(/\b(?:motion|animation speed|speed|hastighed)\b[^0-9]{0,20}(\d{1,3})/, 'motion', 50, 150, 'Animation') ||
+    range(/\b(?:pill width|pillen|width)\b[^0-9]{0,20}(\d{1,3})/, 'pillWidth', 72, 160, 'Pill width') ||
+    range(/\bhover delay\b[^0-9]{0,20}(\d{1,3})/, 'hoverDelay', 0, 400, 'Hover delay');
+  if (numbered) return numbered;
+
+  // Switches: "turn the taskbar on", "hide glow", "slå taskbaren til".
+  const toggle = (pattern, key, on, off) => {
+    if (!pattern.test(low)) return '';
+    // "auto-hide" holds the word "hide" and would read as turning it off.
+    const value = !wantsOff(low.replace(/auto[\s-]?hide/g, 'auto'));
+    applySettingsPatch({ [key]: value });
+    return value ? on : off;
+  };
+  const flipped =
+    toggle(/\bauto.?hide\b/, 'taskbarAutoHide', yes('Taskbar auto-hides.', 'Joblinjen skjuler sig selv.'), yes('Taskbar stays out.', 'Joblinjen bliver fremme.')) ||
+    toggle(/\btaskbar\b|joblinje/, 'taskbar', yes('Taskbar on.', 'Joblinje til.'), yes('Taskbar off.', 'Joblinje fra.')) ||
+    toggle(/\bglow\b|glød/, 'glow', yes('Glow on.', 'Glød til.'), yes('Glow off.', 'Glød fra.')) ||
+    toggle(/\bgrain\b|\bnoise\b|korn/, 'grain', yes('Grain on.', 'Korn til.'), yes('Grain off.', 'Korn fra.')) ||
+    toggle(/\bwindows key\b|\bwin key\b|\bstart menu key\b/, 'windowsKey', yes('The Windows key opens Notch.', 'Windows-tasten åbner Notch.'), yes('The Windows key is yours again.', 'Windows-tasten er din igen.'));
+  if (flipped) return flipped;
+
+  // Animations: Windows' setting, or always on.
+  if (/\banimat/.test(low)) {
+    if (/\balways\b/.test(low)) {
+      applySettingsPatch({ animations: 'always' });
+      return yes('Animations always play.', 'Animationer kører altid.');
+    }
+    if (/\b(?:windows|system)\b/.test(low)) {
+      applySettingsPatch({ animations: 'system' });
+      return yes('Animations follow Windows.', 'Animationer følger Windows.');
+    }
+  }
+
+  // Shape of the notch itself.
+  if (/\bisland\b|\bø-form\b/.test(low)) {
+    applySettingsPatch({ notchStyle: 'island' });
+    return yes('Island shape.', 'Ø-form.');
+  }
+  if (/\battach/.test(low) && /\b(?:notch|shape|pill)\b/.test(low)) {
+    applySettingsPatch({ notchStyle: 'attached' });
+    return yes('Attached to the top edge.', 'Hæftet til overkanten.');
+  }
+
+  // Where the glass takes its picture from.
+  if (/\b(?:backdrop|glass source)\b/.test(low)) {
+    if (/\bwallpaper\b/.test(low)) {
+      applySettingsPatch({ backdrop: 'wallpaper' });
+      return yes('The glass samples the wallpaper.', 'Glasset bruger tapetet.');
+    }
+    if (/\b(?:live|desktop)\b/.test(low)) {
+      applySettingsPatch({ backdrop: 'live' });
+      return yes('The glass follows the desktop.', 'Glasset følger skrivebordet.');
+    }
+  }
+
+  // The performance overlay, which is a widget in two sizes.
+  if (/\boverlay\b|\bfps\b/.test(low)) {
+    const up = !!widgetsFor('perf');
+    const want = !wantsOff(low) && !/\b(?:close|hide|luk|skjul)\b/.test(low);
+    if (up !== want) togglePerformanceOverlay();
+    return want ? yes('Overlay up.', 'Overlay fremme.') : yes('Overlay away.', 'Overlay væk.');
+  }
+
+  // The focus timer: "focus for 25 minutes", "stop the focus timer".
+  if (/\b(?:focus|pomodoro|fokus)\b/.test(low)) {
+    if (/\b(?:stop|pause|end|cancel|slut|pause)\b/.test(low)) {
+      tellPanelFocus('pause');
+      return yes('Focus paused.', 'Fokus sat på pause.');
+    }
+    if (/\b(?:reset|clear|nulstil)\b/.test(low)) {
+      tellPanelFocus('reset');
+      return yes('Focus reset.', 'Fokus nulstillet.');
+    }
+    const minutes = low.match(/(\d{1,3})\s*(?:min|minutes|minutter)/);
+    const span = minutes ? Math.max(1, Math.min(180, Number(minutes[1]))) : 25;
+    tellPanelFocus(`minutes:${span}`);
+    tellPanelFocus('start');
+    return yes(`Focusing for ${span} minutes.`, `Fokus i ${span} minutter.`);
+  }
+
+  // The library: rescan it, or launch something by name.
+  if (/\brescan\b|\bscan (?:my |the )?(?:library|games)\b/.test(low)) {
+    const list = rescanGames();
+    resolveIcons();
+    if (win && !win.isDestroyed()) win.webContents.send('notch:games', list);
+    return yes(`Rescanned: ${list.length} games.`, `Gennemsøgt: ${list.length} spil.`);
+  }
+  const wantGame = low.match(/^(?:launch|start|play|spil)\s+(?:the\s+)?(?:game\s+)?(.+?)[.!?]*$/);
+  if (wantGame) {
+    const name = wantGame[1].trim();
+    const game =
+      games.find((entry) => entry.name.toLowerCase() === name) ||
+      games.find((entry) => entry.name.toLowerCase().includes(name));
+    // Nothing by that name is a song or a video, which the next order handles.
+    if (game) {
+      const result = await launchGameRecord(game);
+      if (result.ok) return yes(`Launching ${game.name}.`, `Starter ${game.name}.`);
+      return yes(`${game.name} would not start.`, `${game.name} ville ikke starte.`);
+    }
+  }
+
+  // The store the library's bag opens, which is drawn in the panel itself.
+  if (!/microsoft/.test(low) && /\bsteamdb\b|\bsteam db\b|\bdeals\b|\bstore\b|\bbutik\b/.test(low)) {
+    if (!showNotchPanel('store')) {
+      return yes('A game has the screen; the store is standing down.', 'Et spil har skærmen; butikken holder sig væk.');
+    }
+    return yes('Opening the store.', 'Åbner butikken.');
+  }
+
+  // Starting with Windows, without opening the menu for it.
+  if (/\b(?:start with windows|at login|open at login|login item|ved logon)\b/.test(low)) {
+    prefs.login = !wantsOff(low);
+    savePrefs();
+    applyLogin();
+    return prefs.login
+      ? yes('Notch will start with Windows.', 'Notch starter med Windows.')
+      : yes('Notch will not start with Windows.', 'Notch starter ikke med Windows.');
+  }
+
+  if (/^(?:quit|exit|close)\s+(?:notch|yourself|the app)\b/.test(low) || /^(?:quit|shut down)$/.test(low)) {
+    // A beat for the reply to be spoken, then the app it lives in goes away.
+    setTimeout(() => app.quit(), 1600);
+    return yes('Shutting Notch down.', 'Lukker Notch ned.');
+  }
+
+  return '';
+}
+
 async function runAction(text) {
+  const notch = await runNotchAction(text);
+  if (notch) return { handled: true, say: notch };
 
   if (/^(?:what(?:'s| is) the time|what time is it|hvad er klokken|hvad er tiden)[?.!]*$/i.test(text)) {
     const now = new Date();
@@ -3219,7 +3483,10 @@ ipcMain.handle('notch:login', (_event, value) => {
   return prefs.login;
 });
 
-ipcMain.handle('notch:set-settings', (_event, patch) => {
+// One way in for a settings change, whether the sheet's switches made it or
+// Jarvis did: saved, applied to every surface, and handed back to the panel so
+// what it shows matches what was asked for.
+function applySettingsPatch(patch) {
   prefs.settings = { ...DEFAULT_SETTINGS, ...prefs.settings, ...(patch || {}) };
   savePrefs();
   // The launcher window is loaded already, so its motion choice arrives by message.
@@ -3240,8 +3507,11 @@ ipcMain.handle('notch:set-settings', (_event, patch) => {
   syncDesktopSampling();
   sendWidgetSurface();
   syncWinHook();
+  if (win && !win.isDestroyed()) win.webContents.send('notch:settings', prefs.settings);
   return prefs.settings;
-});
+}
+
+ipcMain.handle('notch:set-settings', (_event, patch) => applySettingsPatch(patch));
 
 // Pick an image to sit behind the notch permanently. The file is copied into
 // userData so moving or deleting the original does not break the backdrop.
@@ -3289,6 +3559,81 @@ ipcMain.handle('notch:rescan', () => {
   return list;
 });
 
+// --------------------------------------------------------------- the store
+
+// The shop in the library is drawn by Notch, not handed to a browser. SteamDB
+// is where the prices are read about, but it has no public API and its terms
+// forbid scraping it, so the numbers come from the same place SteamDB gets
+// them: Steam's own storefront, whose featured list is public JSON with prices
+// in the buyer's currency.
+const STORE_TTL = 10 * 60 * 1000;
+let storeCache = null;
+let storeAt = 0;
+
+function storeCountry() {
+  try {
+    const code = String(app.getLocaleCountryCode() || '').toLowerCase();
+    if (/^[a-z]{2}$/.test(code)) return code;
+  } catch {
+    /* older Electron */
+  }
+  return 'us';
+}
+
+async function fetchStore() {
+  if (storeCache && Date.now() - storeAt < STORE_TTL) return storeCache;
+  const url = `https://store.steampowered.com/api/featuredcategories/?cc=${storeCountry()}&l=en`;
+  let data = null;
+  try {
+    const response = await net.fetch(url);
+    if (response.ok) data = await response.json();
+  } catch {
+    /* offline, or Steam is having a day */
+  }
+  if (!data) return storeCache || { at: Date.now(), items: [], error: 'offline' };
+
+  const seen = new Set();
+  const items = [];
+  const sections = [
+    ['deal', data.specials],
+    ['top', data.top_sellers],
+    ['new', data.new_releases],
+  ];
+  for (const [source, section] of sections) {
+    for (const item of (section && section.items) || []) {
+      const appid = Number(item.id);
+      if (!appid || seen.has(appid)) continue;
+      seen.add(appid);
+      const final = Math.max(0, Number(item.final_price) || 0);
+      items.push({
+        appid,
+        name: String(item.name || '').trim(),
+        source,
+        discount: Math.max(0, Number(item.discount_percent) || 0),
+        original: Math.max(0, Number(item.original_price) || 0),
+        final,
+        free: final === 0,
+        currency: String(item.currency || 'USD'),
+        art: `https://cdn.cloudflare.steamstatic.com/steam/apps/${appid}/header.jpg`,
+      });
+    }
+  }
+  if (!items.length) return storeCache || { at: Date.now(), items: [], error: 'empty' };
+  storeCache = { at: Date.now(), items };
+  storeAt = Date.now();
+  return storeCache;
+}
+
+ipcMain.handle('notch:store', () => fetchStore());
+
+// Buying is still Steam's: a row opens the game's own page.
+ipcMain.handle('notch:store-open', (_event, appid) => {
+  const id = Math.trunc(Number(appid) || 0);
+  if (id <= 0) return false;
+  shell.openExternal(`https://store.steampowered.com/app/${id}/`);
+  return true;
+});
+
 ipcMain.handle('notch:add-game', async () => {
   if (!win) return games;
   const result = await dialog.showOpenDialog(win, {
@@ -3311,8 +3656,9 @@ ipcMain.handle('notch:add-game', async () => {
   return list;
 });
 
-ipcMain.handle('notch:launch', async (_event, id) => {
-  const game = games.find((g) => g.id === id);
+// Launching a game is the same work from the library's click and from Jarvis's
+// order, so it lives here once.
+async function launchGameRecord(game) {
   if (!game) return { ok: false };
   try {
     if (game.kind === 'steam') {
@@ -3329,6 +3675,11 @@ ipcMain.handle('notch:launch', async (_event, id) => {
   } catch (error) {
     return { ok: false, error: String(error) };
   }
+}
+
+ipcMain.handle('notch:launch', async (_event, id) => {
+  const game = games.find((g) => g.id === id);
+  return launchGameRecord(game);
 });
 
 ipcMain.handle('notch:copy-clip', async (_event, id) => {

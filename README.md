@@ -58,8 +58,20 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   a button to bring that app forward (again to put it away). `Win+1` … `Win+0`
   focus the first ten buttons. Optional auto-hide keeps the bar off-screen until you
   touch the bottom edge or open the launcher.
-- **Library** — scans Steam, Epic and your own shortcuts, shows the cover art, and
-  launches a game with a click. Add a shortcut by hand if a launcher keeps it hidden.
+- **Library and store** — the library scans Steam, Epic and your own shortcuts, shows
+  the cover art, and launches a game with a click; add a shortcut by hand if a
+  launcher keeps it hidden. The bag icon beside those buttons opens **Store** inside
+  the panel: Steam's catalogue with today's discounts, drawn by Notch itself — its own
+  search, discount chips (−25 / −50 / −75 %), price ceilings and sorting by discount,
+  price or name, all happening in this window. SteamDB has no public API and its terms
+  forbid scraping it, so the numbers come from Steam's own storefront, which is where
+  SteamDB reads them too; a row opens the game's page when you want to buy.
+- **Jarvis works Notch itself** — the assistant owns the app it lives in, not just
+  the machine around it: *Jarvis, make it mint*, *frosted glass*, *turn the taskbar
+  on*, *open the library*, *show the performance overlay*, *focus for 25 minutes*,
+  *launch Hades II*, *rescan the library*, *taskbar auto-hide*, *start with Windows*,
+  *quit Notch*. The reply is one short line and the change is already on screen, and
+  the model is told the whole list, so it does not say it cannot.
 - **Jarvis** — an assistant panel with a chat model picker, push-to-talk, and a
   "Hey Jarvis" wake word that keeps listening while the window is hidden — and the
   name on its own is enough once you have spoken to it in the last five minutes —
@@ -326,13 +338,29 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 
 ## Release
 
-**v1.2.8** — the pill is on top, except in fullscreen. It is raised again whenever
-it is shown and checked on the cursor poll, so a window that takes the front of the
-stack cannot end up over it, and a maximised app with the taskbar auto-hidden is no
-longer mistaken for a fullscreen one — which used to hide the pill over an ordinary
-window. Fullscreen itself is now asked every two seconds rather than six, so the pill
-leaves a video or a game almost at once and is back the moment it stops. No installer
-yet; the 1.2.7 build linked above is still the download until the next one is cut.
+**v1.2.8** — a store, a butler, and a pill that stays on top. *Source only: this
+release carries no installer; the 1.2.7 build linked above is still the download until
+the next one is packaged.*
+
+The pill is raised again whenever it is shown and checked on the cursor poll, so a
+window that takes the front of the stack cannot end up over it; a maximised app with
+the taskbar auto-hidden no longer counts as fullscreen, which used to put the pill away
+over an ordinary window; and the fullscreen question is asked every two seconds instead
+of six, so the pill leaves a video or a game almost at once and is back the moment it
+stops.
+
+Jarvis works the app itself now, not just the machine around it: *make it mint*,
+*frosted glass*, *taskbar auto-hide*, *open the library*, *show the performance
+overlay*, *focus for 25 minutes*, *launch Hades II*, *rescan the library*, *start with
+Windows*, *quit Notch*. What it changes is pushed to an open panel, so the drawer
+matches the app, and its prompt lists everything Notch answers to, in English and
+Danish.
+
+The bag in the library opens **Store** inside the panel: Steam's own catalogue with
+today's discounts, drawn by Notch with its own search, discount chips, price ceilings
+and sorting, with nothing refetched for a filter change. SteamDB has no public API and
+forbids scraping, so the prices come from Steam's storefront — which is where SteamDB
+reads them too.
 
 **v1.2.7** — motion and glass on machines that have neither. A school or work PC
 usually arrives with Windows' animations switched off and no usable GPU, and Notch
