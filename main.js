@@ -481,12 +481,36 @@ function stopDesktopSampling() {
   desktopTimer = null;
 }
 
+// The panel streams the desktop itself once it is on screen: one continuous
+// capture at screen rate instead of a fresh full-screen grab — about 300 ms on
+// this machine — every few seconds. While that stream is up this grab loop stands
+// down; if the stream cannot start, the loop is what keeps the glass fed.
+let streamActive = false;
+
 // Live glass needs frames while anything wearing it is on screen: the pill when
 // the pointer is near, and the taskbar islands whenever they are up.
 function samplingWanted() {
-  // The islands take their own small strips; this full-screen sample is only
-  // for the panel, so it runs while the pointer is near it and no longer.
-  return usesLiveBackdrop() && !isExpanded && pointerNear && !gameMode;
+  // The islands take their own small strips; this live desktop is only for the
+  // panel, so it runs while the panel is open or the pointer is near it and no
+  // longer.
+  return (
+    usesLiveBackdrop() &&
+    (isExpanded || pointerNear) &&
+    !gameMode &&
+    !!win &&
+    !win.isDestroyed() &&
+    win.isVisible()
+  );
+}
+
+function syncDesktopSampling() {
+  const wanted = samplingWanted();
+  if (win && !win.isDestroyed()) win.webContents.send('notch:live', wanted);
+  if (!wanted) {
+    stopDesktopSampling();
+    return;
+  }
+  if (!streamActive) startDesktopSampling();
 }
 
 // ---------------------------------------------------------------- game mode
@@ -521,7 +545,7 @@ function setGameMode(on) {
   // speech model.
   tellJarvisGameMode(on);
   if (on) {
-    stopDesktopSampling();
+    syncDesktopSampling();
     stopJarvisBackdrop();
     setTaskbarRevealed(false);
     // Watched surfaces a game keeps: the performance overlay, because watching the
@@ -660,10 +684,7 @@ function watchForGames() {
   }, 2000);
 }
 
-function syncDesktopSampling() {
-  if (samplingWanted()) startDesktopSampling();
-  else stopDesktopSampling();
-}
+
 
 // ---------------------------------------------------------------- live values
 
@@ -3446,6 +3467,30 @@ ipcMain.handle('notch:bootstrap', () => {
 
 ipcMain.on('notch:ready', () => revealWindow());
 
+// Which screen the glass should stream, plus where it starts: the panel maps its
+// own slice of the picture with this.
+ipcMain.handle('notch:capture-source', async () => {
+  const display = panelDisplay();
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 1, height: 1 },
+    });
+    const pick = sources.find((entry) => String(entry.display_id) === String(display.id)) || sources[0];
+    return pick ? { id: pick.id, bounds: display.bounds } : null;
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.on('notch:live-active', (_event, active) => {
+  streamActive = !!active;
+  // The stream is doing the work now, so the grab loop can rest; if it stops or
+  // never started, the loop takes over again.
+  if (streamActive) stopDesktopSampling();
+  else if (samplingWanted()) startDesktopSampling();
+});
+
 ipcMain.on('notch:expanded', (_event, expanded) => {
   isExpanded = !!expanded;
   if (!win || win.isDestroyed()) return;
@@ -3496,7 +3541,7 @@ function applySettingsPatch(patch) {
   if (!usesLiveBackdrop()) {
     // Pinned image: stop sampling entirely (also the cheapest idle state) and
     // hand the renderer the wallpaper slice in place of the desktop.
-    stopDesktopSampling();
+    syncDesktopSampling();
     desktopFrame = null;
     launcherBackdrop = null;
     const url = panelBackdrop();
@@ -3544,7 +3589,7 @@ ipcMain.handle('notch:pick-wallpaper', async () => {
   wallpaperFittedCache.clear();
   launcherBackdrop = null;
 
-  stopDesktopSampling();
+  syncDesktopSampling();
   desktopFrame = null;
   const url = panelBackdrop();
   if (url) win.webContents.send('notch:backdrop', url);
@@ -5575,7 +5620,15 @@ if (!app.requestSingleInstanceLock()) {
     loadPrefs();
     // The assistant listens through the microphone; Chromium asks us first.
     try {
-      const allowed = new Set(['media', 'notifications', 'clipboard-read', 'clipboard-sanitized-write']);
+      // 'display-capture' is what Chromium asks before handing out a screen
+      // stream; the glass samples the desktop through it.
+      const allowed = new Set([
+        'media',
+        'display-capture',
+        'notifications',
+        'clipboard-read',
+        'clipboard-sanitized-write',
+      ]);
       session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
         callback(allowed.has(permission));
       });

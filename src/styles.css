@@ -303,6 +303,16 @@ html.nobridge .demo-hint {
   inset: 0;
 }
 
+/* While the desktop is being streamed this canvas carries the live pixels and
+   the still image steps aside; the shader samples whichever is on top. */
+#glassLive {
+  display: none;
+}
+
+#glassLive.on {
+  display: block;
+}
+
 /* Attached: the lens' rounded top corners are pushed above the screen edge so
    the panel and the pill meet the top of the display dead flat. The window
    cuts everything past the edge, leaving square corners showing. */

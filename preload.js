@@ -24,6 +24,11 @@ contextBridge.exposeInMainWorld('notchAPI', {
   setSettings: (patch) => ipcRenderer.invoke('notch:set-settings', patch),
   pickWallpaper: () => ipcRenderer.invoke('notch:pick-wallpaper'),
   onBackdrop: (callback) => ipcRenderer.on('notch:backdrop', (_event, data) => callback(data)),
+  // The live desktop: which screen to stream, whether it should be running, and
+  // whether the stream actually came up (so main knows to fall back or not).
+  captureSource: () => ipcRenderer.invoke('notch:capture-source'),
+  liveActive: (value) => ipcRenderer.send('notch:live-active', !!value),
+  onLive: (callback) => ipcRenderer.on('notch:live', (_event, value) => callback(!!value)),
   onIcons: (callback) => ipcRenderer.on('notch:icons', (_event, data) => callback(data)),
   onPointer: (callback) => ipcRenderer.on('notch:pointer', (_event, state) => callback(state)),
   onStats: (callback) => ipcRenderer.on('notch:stats', (_event, data) => callback(data)),
