@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.29.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.29/Notch-Setup-1.2.29.exe)**
+**[Notch-Setup-1.2.30.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.30/Notch-Setup-1.2.30.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,17 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.30** — the camera reads the screen again. The shot went through the
+keyboard helper's GDI grab, which answers *nothing at all* for a rectangle it does
+not like — wider or taller than 4096 px, more than nine megapixels, or refused
+because a DPI-unaware PowerShell sees a scaled desktop — and "nothing at all"
+surfaced as "the screen could not be read". There are now two independent
+captures: the helper at its own limits, with the display's DIP size as a second
+try when the scaled size is out of reach, and Chromium's desktop capturer, which
+is the path the glass backdrop already uses — so a machine whose glass works can
+photograph its screen even when the helper cannot. The message now says Windows
+refused the capture instead of pretending the screen came back empty.
 
 **v1.2.29** — the pill is yours to arrange. Settings → Pill → **Customise…** opens a
 stage showing the top of the screen with the pill hanging in it, and that pill is

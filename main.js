@@ -4378,11 +4378,85 @@ function applyLogin() {
 // the same pixels.
 let shot = null; // { file, width, height }
 
+// Two independent ways to photograph the screen. The helper's GDI grab is the
+// cheap one, and the tray icons already rely on it — but it answers nothing at
+// all for a rectangle it does not like (4096 a side, nine megapixels), and GDI is
+// not DPI-aware, so a scaled or very large display can be refused by it while
+// Chromium's own capturer still sees the screen perfectly well.
+async function captureScreen(display) {
+  const scale = display.scaleFactor || 1;
+  const physical = {
+    x: Math.round(display.bounds.x * scale),
+    y: Math.round(display.bounds.y * scale),
+    width: Math.round(display.bounds.width * scale),
+    height: Math.round(display.bounds.height * scale),
+  };
+  const dip = {
+    x: Math.round(display.bounds.x),
+    y: Math.round(display.bounds.y),
+    width: Math.round(display.bounds.width),
+    height: Math.round(display.bounds.height),
+  };
+  const within = (rect) =>
+    rect.width > 0 &&
+    rect.height > 0 &&
+    rect.width <= 4096 &&
+    rect.height <= 4096 &&
+    rect.width * rect.height <= 9000000;
+  const rects = [];
+  if (within(physical)) rects.push(physical);
+  if (within(dip) && (dip.width !== physical.width || dip.height !== physical.height)) rects.push(dip);
+  // A helper that has not reported itself ready yet would swallow the request
+  // until the timeout: Chromium answers in that time, so it is asked first-hand.
+  if (hookProc && hookReady) {
+    for (const rect of rects) {
+      const grab = await requestScreenShot(rect, 6000);
+      if (grab && grab.data) return grab;
+    }
+  }
+  return captureWithChromium(display);
+}
+
+// The Electron capturer asks the desktop compositor for a frame instead of
+// reading the display with GDI, which works where the helper is refused — and
+// where the helper is not running at all.
+async function captureWithChromium(display) {
+  const scale = display.scaleFactor || 1;
+  const width = Math.min(8192, Math.round(display.bounds.width * scale));
+  const height = Math.min(8192, Math.round(display.bounds.height * scale));
+  const grab = () =>
+    desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width, height },
+      fetchWindowIcons: false,
+    });
+  try {
+    let sources = await grab();
+    let source =
+      sources.find((entry) => String(entry.display_id) === String(display.id)) || sources[0];
+    if (!source || source.thumbnail.isEmpty()) {
+      // A frame right after the windows were made transparent can still be the
+      // old one, or none at all.
+      await new Promise((resolve) => setTimeout(resolve, 160));
+      sources = await grab();
+      source = sources.find((entry) => String(entry.display_id) === String(display.id)) || sources[0];
+    }
+    if (!source || source.thumbnail.isEmpty()) return null;
+    const size = source.thumbnail.getSize();
+    return {
+      width: size.width,
+      height: size.height,
+      data: source.thumbnail.toPNG().toString('base64'),
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function captureScreenshot() {
   if (!win || win.isDestroyed()) return { ok: false, error: 'Nothing to capture' };
   if (gameMode) return { ok: false, error: 'A game has the screen' };
   const display = screen.getPrimaryDisplay();
-  const scale = display.scaleFactor || 1;
   // The shot should not contain the shell. Hiding the windows would take the
   // pointer off the pill mid-click and close the panel, so they are made fully
   // transparent for the frame instead and put back straight after.
@@ -4400,15 +4474,7 @@ async function captureScreenshot() {
   let grab = null;
   try {
     await new Promise((resolve) => setTimeout(resolve, 120));
-    grab = await requestScreenShot(
-      {
-        x: Math.round(display.bounds.x * scale),
-        y: Math.round(display.bounds.y * scale),
-        width: Math.round(display.bounds.width * scale),
-        height: Math.round(display.bounds.height * scale),
-      },
-      6000,
-    );
+    grab = await captureScreen(display);
   } finally {
     for (const surface of faded) {
       if (surface.isDestroyed()) continue;
@@ -4419,7 +4485,9 @@ async function captureScreenshot() {
       }
     }
   }
-  if (!grab || !grab.data) return { ok: false, error: 'The screen could not be read' };
+  if (!grab || !grab.data) {
+    return { ok: false, error: 'The screen could not be read — Windows refused the capture' };
+  }
   const png = Buffer.from(grab.data, 'base64');
   const image = nativeImage.createFromBuffer(png);
   if (image.isEmpty()) return { ok: false, error: 'The screen came back empty' };

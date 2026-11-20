@@ -1,6 +1,6 @@
 {
   "name": "notch",
-  "version": "1.2.29",
+  "version": "1.2.30",
   "private": true,
   "description": "A glass notch for Windows — hover the top of your screen.",
   "main": "main.js",
