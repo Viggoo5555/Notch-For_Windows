@@ -767,7 +767,7 @@ const SETTINGS_SCHEMA = [
   { key: 'windowsKey', label: 'Windows key opens it', type: 'toggle' },
   { group: 'Update' },
   { key: 'version', label: 'Version', type: 'status', text: () => state.update.current || 'unknown' },
-  { key: 'update', label: 'Newer build', type: 'update' },
+  { key: 'update', label: 'Updates', type: 'update' },
 ];
 
 function applySettings() {
@@ -795,6 +795,22 @@ function applySettings() {
     // Black draws no glass at all, so park the shader; switching back resumes it.
     if (s.material === 'black') window.notchGlass.setPaused(true);
     else window.notchGlass.refresh();
+  }
+}
+
+// The pill carries the updater's answer without the panel being opened: when a
+// newer build is waiting the dot turns green and says so on hover, and the menu
+// foot writes the two versions side by side.
+function paintUpdate() {
+  const u = state.update;
+  const dot = $('#statusDot');
+  if (dot) {
+    dot.classList.toggle('update', !!u.newer);
+    dot.title = u.newer ? `Notch ${u.latest} is ready` : u.checked ? 'Up to date' : '';
+  }
+  const version = $('#version');
+  if (version && u.current) {
+    version.textContent = u.newer && u.latest ? `v${u.current} \u2192 v${u.latest}` : `v${u.current}`;
   }
 }
 
@@ -930,17 +946,20 @@ function renderSettings() {
       wrap.style.alignItems = 'center';
       wrap.style.gap = '10px';
       const u = state.update;
+      const when = u.checkedAt
+        ? new Date(u.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : '';
       const note = document.createElement('span');
       note.className = 'set-val';
       if (u.busy) {
         note.id = 'updateProgress';
-        note.textContent = `${u.percent}%`;
+        note.textContent = u.percent < 100 ? `Downloading ${u.percent}%` : 'Installing\u2026';
       } else if (u.newer) {
-        note.textContent = `${u.latest} available`;
+        note.textContent = `v${u.current} \u2192 v${u.latest}${when ? ` \u00b7 checked ${when}` : ''}`;
       } else if (u.error) {
         note.textContent = u.error;
       } else if (u.checked) {
-        note.textContent = 'up to date';
+        note.textContent = `v${u.current} is the newest${when ? ` \u00b7 checked ${when}` : ''}`;
       } else {
         note.textContent = '';
       }
@@ -949,9 +968,9 @@ function renderSettings() {
       button.className = 'set-action';
       button.disabled = u.busy;
       if (u.busy) button.textContent = 'Updating\u2026';
-      else if (u.newer && u.url) button.textContent = 'Update';
+      else if (u.newer && u.url) button.textContent = 'Install';
       else if (u.newer) button.textContent = 'Open release';
-      else button.textContent = 'Check';
+      else button.textContent = 'Check now';
       button.addEventListener('click', async () => {
         if (state.update.newer && state.update.url) {
           state.update = { ...state.update, busy: true, percent: 0 };
@@ -1956,6 +1975,7 @@ function bindEvents() {
     api.onUpdate((data) => {
       if (!data) return;
       state.update = { ...state.update, ...data, checked: true };
+      paintUpdate();
       if (state.settingsOpen) renderSettings();
       // Said once per version: a newer build is waiting, and the drawer is where it
       // is installed from.
@@ -1970,7 +1990,10 @@ function bindEvents() {
       if (!data) return;
       state.update.percent = data.percent || 0;
       const progress = document.getElementById('updateProgress');
-      if (progress) progress.textContent = `${state.update.percent}%`;
+      if (progress) {
+        progress.textContent =
+          state.update.percent < 100 ? `Downloading ${state.update.percent}%` : 'Installing\u2026';
+      }
     });
   }
   // The window covers more than the notch, so the main process owns the
@@ -2013,6 +2036,21 @@ async function boot() {
   }
 
   applySettings();
+  paintUpdate();
+
+  // Asked once on start as well as from the schedule in main: the drawer then has
+  // an answer to show the first time it is opened, instead of an empty row.
+  if (!isDemo && api.checkUpdate) {
+    api
+      .checkUpdate()
+      .then((data) => {
+        if (!data) return;
+        state.update = { ...state.update, ...data, checked: true };
+        paintUpdate();
+        if (state.settingsOpen) renderSettings();
+      })
+      .catch(() => {});
+  }
 
   if (isDemo) {
     $('#addGame').hidden = true;

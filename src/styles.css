@@ -666,6 +666,15 @@ html.demo .glass-backdrop {
   animation: breathe 3.4s ease-in-out infinite;
 }
 
+/* A newer build is waiting: the pill's dot turns green and pulses, so the update
+   is visible without opening the panel at all. */
+.status-dot.update {
+  background: #7ee0a8;
+  box-shadow: 0 0 12px rgba(126, 224, 168, 0.7);
+  opacity: 1;
+  animation: breathe 1.8s ease-in-out infinite;
+}
+
 @keyframes breathe {
   0%,
   100% {

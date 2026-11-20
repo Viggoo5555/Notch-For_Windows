@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.24.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.24/Notch-Setup-1.2.24.exe)**
+**[Notch-Setup-1.2.25.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.25/Notch-Setup-1.2.25.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,20 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.25** — the update check runs by itself, and shows what it found. It used to
+be asked only when the drawer's Update row was pressed, so unless you went looking
+nothing ever happened; it now runs five seconds after launch and every six hours,
+and one request answers every asker. GitHub's API is rate limited per address, and
+a shared one answers 403 — which used to end the check with "GitHub could not be
+reached". It now falls back to the releases page's own redirect, which is not
+limited, and builds the installer's address from the tag, so the update is found
+either way. The answer is visible: the pill's dot turns green and says which build
+is ready, the menu's foot reads v1.2.25 → v1.2.26, the tray menu carries
+**Check for updates**, and the drawer's Update row names the newest version and
+when it last asked. Installing shows the download as a percentage, waits four
+seconds for Notch to be gone — so the silent install is not fighting a locked
+file — then installs and starts the new build. Releases carry the installer only.
 
 **v1.2.24** — a store you can fall down, with the games' own art, and a library
 you can prune. Every row in the store carries the game's header picture now: the

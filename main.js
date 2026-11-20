@@ -1882,6 +1882,15 @@ function showNotchPanel(kind) {
   return true;
 }
 
+// The tray is the shortest way to ask: the check runs and the panel opens on the
+// row that answers it, so the answer is on screen rather than in a log.
+async function openUpdateSettings() {
+  if (!showNotchPanel('settings')) return;
+  const result = await checkForUpdates();
+  globalThis.__rebuildTray?.();
+  return result;
+}
+
 function tellPanelFocus(action) {
   if (win && !win.isDestroyed()) win.webContents.send('notch:focus-action', action);
 }
@@ -4303,6 +4312,14 @@ function buildTray() {
             savePrefs();
           },
         },
+        {
+          label: newerVersion(updateState.latest, updateState.current)
+            ? `Update to Notch ${updateState.latest}…`
+            : 'Check for updates…',
+          click: () => {
+            openUpdateSettings();
+          },
+        },
         { type: 'separator' },
         { label: 'Quit Notch', click: () => app.quit() },
       ]),
@@ -4388,28 +4405,93 @@ function sendUpdate() {
   if (win && !win.isDestroyed()) win.webContents.send('notch:update', publicUpdate());
 }
 
+// The API is the rich answer — the release notes, and the asset's own size and
+// address. It is rate limited per address, though, and a shared one runs out
+// (403). The releases page redirects to the newest tag and is not limited, so a
+// blocked API still finds the update; the installer's address follows from the tag.
+async function latestReleaseFromApi() {
+  const response = await net.fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Notch/${updateState.current}` },
+  });
+  if (!response.ok) return null;
+  const release = await response.json();
+  const latest = String(release.tag_name || '').replace(/^v/i, '');
+  if (!latest) return null;
+  const asset = (release.assets || []).find((entry) => /^Notch-Setup-.*\.exe$/i.test(entry.name));
+  return {
+    latest,
+    notes: release.body || '',
+    page: release.html_url || `https://github.com/${UPDATE_REPO}/releases/tag/v${latest}`,
+    url: asset ? asset.browser_download_url : '',
+    name: asset ? asset.name : '',
+    size: asset ? asset.size : 0,
+  };
+}
+
+async function latestReleaseFromPage() {
+  const response = await net.fetch(`https://github.com/${UPDATE_REPO}/releases/latest`, {
+    headers: { Accept: 'text/html', 'User-Agent': `Notch/${updateState.current}` },
+  });
+  if (!response.ok) return null;
+  // Following the redirect lands on /releases/tag/vX.Y.Z, which names the version.
+  const where = `${response.url || ''} ${response.headers.get('location') || ''}`;
+  const tag = (where.match(/\/tag\/([^/\s?#]+)/) || [])[1] || '';
+  const latest = tag.replace(/^v/i, '');
+  if (!latest) return null;
+  const name = `Notch-Setup-${latest}.exe`;
+  return {
+    latest,
+    notes: '',
+    page: `https://github.com/${UPDATE_REPO}/releases/tag/${tag}`,
+    url: `https://github.com/${UPDATE_REPO}/releases/download/${tag}/${name}`,
+    name,
+    size: 0,
+  };
+}
+
+// One check at a time: the start-up check, the six-hour check and the one the
+// tray or the drawer asks for can otherwise land on top of each other, and a
+// check already in flight answers them all.
+let updateCheckInFlight = null;
+
 async function checkForUpdates() {
+  if (updateState.busy) return publicUpdate();
+  if (updateCheckInFlight) return updateCheckInFlight;
+  updateCheckInFlight = (async () => {
+    let release = null;
+    try {
+      release = await latestReleaseFromApi();
+    } catch {
+      release = null;
+    }
+    if (!release) {
+      try {
+        release = await latestReleaseFromPage();
+      } catch {
+        release = null;
+      }
+    }
+    updateState.checkedAt = Date.now();
+    if (release) {
+      updateState.latest = release.latest;
+      updateState.notes = release.notes;
+      updateState.page = release.page;
+      updateState.url = release.url;
+      updateState.name = release.name;
+      updateState.size = release.size;
+      updateState.error = '';
+    } else {
+      updateState.error = 'GitHub could not be reached';
+    }
+    sendUpdate();
+    globalThis.__rebuildTray?.();
+    return publicUpdate();
+  })();
   try {
-    const response = await net.fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Notch/${updateState.current}` },
-    });
-    if (!response.ok) throw new Error(`GitHub ${response.status}`);
-    const release = await response.json();
-    const asset = (release.assets || []).find((entry) => /^Notch-Setup-.*\.exe$/i.test(entry.name));
-    updateState.latest = String(release.tag_name || '').replace(/^v/i, '');
-    updateState.notes = release.body || '';
-    updateState.page = release.html_url || `https://github.com/${UPDATE_REPO}/releases`;
-    updateState.url = asset ? asset.browser_download_url : '';
-    updateState.name = asset ? asset.name : '';
-    updateState.size = asset ? asset.size : 0;
-    updateState.checkedAt = Date.now();
-    updateState.error = '';
-  } catch {
-    updateState.error = 'GitHub could not be reached';
-    updateState.checkedAt = Date.now();
+    return await updateCheckInFlight;
+  } finally {
+    updateCheckInFlight = null;
   }
-  sendUpdate();
-  return publicUpdate();
 }
 
 // Written straight to disk in chunks: a 350 MB installer has no business sitting in
@@ -4482,17 +4564,20 @@ async function installUpdate() {
   }
   updateState.percent = 100;
   sendUpdate();
-  // The app cannot stay open while its own files are replaced: the installer runs
-  // silently, and when it is done the installed build comes back by itself.
+  // The app cannot stay open while its own files are replaced. The command waits
+  // four seconds first — long enough for this process to be gone, so the silent
+  // install is not fighting a locked file — then installs without a window and
+  // starts the new build itself. This process quits at once rather than sitting
+  // on an installer it will not live to see.
   const exe = app.getPath('exe');
   try {
-    spawn('cmd.exe', ['/c', `"${target}" /S && start "" "${exe}"`], {
+    spawn('cmd.exe', ['/c', `ping -n 5 127.0.0.1 >nul & "${target}" /S & start "" "${exe}"`], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
     }).unref();
     app.isQuitting = true;
-    setTimeout(() => app.quit(), 900);
+    setTimeout(() => app.quit(), 400);
     return { ok: true };
   } catch {
     updateState.busy = false;
@@ -7114,6 +7199,10 @@ if (!app.requestSingleInstanceLock()) {
     globalShortcut.register('Control+Alt+Q', () => app.quit());
 
     setInterval(readBattery, 15 * 60 * 1000);
+    // The update check runs by itself: shortly after the panel is up, and every
+    // six hours after that. Nothing has to be opened for the answer to exist.
+    setTimeout(checkForUpdates, 5000);
+    setInterval(checkForUpdates, UPDATE_EVERY_MS);
   });
 
   app.on('before-quit', () => {
