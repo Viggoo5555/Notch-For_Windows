@@ -545,6 +545,32 @@ function measure() {
   if (api && Math.abs(natural - window.innerWidth) > 3) api.resize({ zone, width: natural });
 }
 
+// Which boxes this window actually paints. The bar runs along the bottom edge of
+// the screen, exactly where Windows keeps its own taskbar, so whatever the window
+// leaves empty has to let clicks fall through to it — a bar with no surface of
+// its own is only its icons, and an attached bar is only its slab.
+function reportHits() {
+  if (!api || typeof api.hit !== 'function') return;
+  const rects = [];
+  const add = (el) => {
+    if (!el || el.hidden || !el.offsetWidth || !el.offsetHeight) return;
+    const box = el.getBoundingClientRect();
+    if (box.width < 1 || box.height < 1) return;
+    rects.push({ x: box.left, y: box.top, width: box.width, height: box.height });
+  };
+  if (mode.shape === 'islands') {
+    // An island is its window: the padding around the icons is part of it.
+    add(appsEl);
+    add(rightEl);
+  } else if (!bar.hidden) {
+    add(bar);
+  } else {
+    // Invisible surface: only the icons and the clock take a click.
+    for (const el of root.querySelectorAll('.tb-item, .tb-tray-item, .tb-tray-more, .tb-clock')) add(el);
+  }
+  api.hit({ rects });
+}
+
 function build() {
   const signature = JSON.stringify([
     mode,
@@ -554,6 +580,7 @@ function build() {
   ]);
   if (signature === built) {
     measure();
+    reportHits();
     return;
   }
   built = signature;
@@ -566,6 +593,7 @@ function build() {
   measure();
   placeIslandPanes();
   rebuildGlass();
+  reportHits();
 }
 
 // One pane per zone (the apps island and the tray island), copied from the
@@ -664,6 +692,7 @@ function apply(data) {
 
 window.addEventListener('resize', () => {
   measure();
+  reportHits();
   placeSource();
   // The window just grew or shrank to its zone, so the island's glass moved with
   // it. Rebuilding costs a frame or two, hence the short wait for it to settle.

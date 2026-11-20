@@ -5539,6 +5539,13 @@ let taskbarSlideTimer = null;
 // Each window measures itself: the apps island in the middle, the tray island on
 // the right, and one bar when the shape is attached.
 let taskbarWidths = { apps: 300, tray: 250, both: 620 };
+// The bar sits along the bottom edge, exactly where Windows keeps its own
+// taskbar, so a window that covers the whole strip would be a wall over it. Each
+// window reports the boxes it actually paints; the pointer decides whether that
+// window takes the click or lets it fall through.
+let taskbarHitRects = new Map(); // window id -> drawn boxes, window coordinates
+let taskbarIgnoring = new Map(); // window id -> whether clicks pass through
+let taskbarMouseTimer = null;
 
 // ------------------------------------------------------------------ tray
 
@@ -5651,6 +5658,45 @@ function applyTaskbarBounds(zone, win) {
     return;
   }
   win.setBounds(box, false);
+}
+
+// Where nothing is drawn, nothing is taken: the bar's empty stretches belong to
+// whatever is behind them, which on the bottom edge is the real taskbar.
+function syncTaskbarMouse(point) {
+  for (const { win } of taskbarZones()) {
+    if (!win || win.isDestroyed()) continue;
+    const box = win.getBounds();
+    const reported = taskbarHitRects.get(win.id);
+    // Until the surface has been measured the whole window counts as drawn,
+    // which is what it did before it reported anything.
+    const rects = reported || [{ x: 0, y: 0, width: box.width, height: box.height }];
+    const inside = rects.some(
+      (r) =>
+        point.x >= box.x + r.x &&
+        point.x <= box.x + r.x + r.width &&
+        point.y >= box.y + r.y &&
+        point.y <= box.y + r.y + r.height,
+    );
+    const ignore = !inside;
+    if (taskbarIgnoring.get(win.id) === ignore) continue;
+    taskbarIgnoring.set(win.id, ignore);
+    win.setIgnoreMouseEvents(ignore, { forward: true });
+  }
+}
+
+function startTaskbarMouseSync() {
+  if (taskbarMouseTimer) return;
+  // A cursor read on the same slow beat as the auto-hide peek: this is a
+  // question only the pointer can answer, and it repaints nothing.
+  taskbarMouseTimer = setInterval(() => {
+    if (!taskbarOn() || gameMode) return;
+    syncTaskbarMouse(cursorDip());
+  }, 40);
+}
+
+function stopTaskbarMouseSync() {
+  if (taskbarMouseTimer) clearInterval(taskbarMouseTimer);
+  taskbarMouseTimer = null;
 }
 
 // Auto-hide slides the islands out of the bottom edge: ease out on the way up,
@@ -6617,6 +6663,8 @@ function createTaskbarWindow(zone) {
   win.on('closed', () => {
     if (taskbarWin === win) taskbarWin = null;
     if (taskbarTrayWin === win) taskbarTrayWin = null;
+    taskbarHitRects.delete(win.id);
+    taskbarIgnoring.delete(win.id);
   });
   return win;
 }
@@ -6633,11 +6681,13 @@ function createTaskbar() {
   }
   startTaskbarPolling();
   seedPinnedApps();
+  startTaskbarMouseSync();
 }
 
 function destroyTaskbar() {
   hideFlyout();
   stopTaskbarPolling();
+  stopTaskbarMouseSync();
   if (taskbarPeekTimer) clearInterval(taskbarPeekTimer);
   taskbarPeekTimer = null;
   if (taskbarLeaveTimer) clearTimeout(taskbarLeaveTimer);
@@ -6788,6 +6838,27 @@ ipcMain.on('taskbar:size', (event, payload) => {
   taskbarWidths[zone] = next;
   const win = BrowserWindow.fromWebContents(event.sender);
   if (win && !win.isDestroyed()) win.setBounds(taskbarBounds(zone), false);
+});
+
+// The surface says which boxes it paints, and keeps saying it after every
+// layout: a bar that moved or emptied must not keep hold of a stretch it no
+// longer covers.
+ipcMain.on('taskbar:hit', (event, payload) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) return;
+  const rows = Array.isArray(payload && payload.rects) ? payload.rects : [];
+  taskbarHitRects.set(
+    win.id,
+    rows
+      .map((row) => ({
+        x: Math.round(Number(row && row.x) || 0),
+        y: Math.round(Number(row && row.y) || 0),
+        width: Math.round(Number(row && row.width) || 0),
+        height: Math.round(Number(row && row.height) || 0),
+      }))
+      .filter((row) => row.width > 0 && row.height > 0),
+  );
+  syncTaskbarMouse(cursorDip());
 });
 
 ipcMain.on('taskbar:hover', (_event, payload) => {

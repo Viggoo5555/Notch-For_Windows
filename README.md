@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.30.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.30/Notch-Setup-1.2.30.exe)**
+**[Notch-Setup-1.2.31.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.31/Notch-Setup-1.2.31.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,15 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.31** — the bar gives the bottom edge back. The taskbar's window is a
+strip along the bottom of the screen, exactly where Windows keeps its own, and
+it took every click in that strip — including the stretches it never draws, so a
+bar with no surface of its own left the real taskbar unclickable from end to end.
+Each window now reports the boxes it actually paints: the slab, or the two
+islands, or just the icons and the clock when the surface is invisible. The
+pointer is read 25 times a second and the window takes a click only over one of
+those boxes; everywhere else the click falls through to whatever is behind it.
 
 **v1.2.30** — the camera reads the screen again. The shot went through the
 keyboard helper's GDI grab, which answers *nothing at all* for a rectangle it does
