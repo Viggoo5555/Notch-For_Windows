@@ -275,8 +275,26 @@ const FALLBACK_TRAY = [
   },
 ];
 
+// The chevron at the head of the tray is Windows' own ^: it opens the panel of
+// notification icons the shell keeps hidden, so every icon is reachable even
+// when the bar has no room for it.
+function overflowButton() {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'tb-tray-item tb-tray-more';
+  button.title = 'Show hidden icons';
+  button.setAttribute('aria-label', 'Show hidden icons');
+  button.innerHTML =
+    '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.4 12.6 10 8l4.6 4.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>';
+  button.addEventListener('click', () => {
+    if (api) api.overflow();
+  });
+  return button;
+}
+
 function buildTray() {
   trayEl.replaceChildren();
+  trayEl.appendChild(overflowButton());
   for (const item of tray) {
     const button = document.createElement('button');
     button.type = 'button';

@@ -1,4 +1,4 @@
-param([switch]$Test)
+param([switch]$Test, [switch]$Overflow)
 
 # Watches the Windows key at the lowest keyboard level.
 #
@@ -351,18 +351,19 @@ public class JarvisWinHook
         Console.Out.Flush();
     }
 
-    // Open a tray flyout the way a click on it would.
-    public static void ClickTray(int index)
+    // One press on an element: its own Invoke where the provider has one, and a
+    // physical click at its middle where it does not (the tray's buttons are
+    // drawn by the shell, so most of them have no Invoke).
+    private static bool Press(AutomationElement element)
     {
-        if (index < 0 || index >= _tray.Count) return;
-        AutomationElement element = _tray[index];
+        if (element == null) return false;
         try
         {
             object pattern;
             if (element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern))
             {
                 ((InvokePattern)pattern).Invoke();
-                return;
+                return true;
             }
         }
         catch
@@ -372,15 +373,102 @@ public class JarvisWinHook
         try
         {
             System.Windows.Rect box = element.Current.BoundingRectangle;
-            if (box.Width <= 0) return;
+            if (box.Width <= 0 || box.Height <= 0) return false;
             SetCursorPos((int)(box.X + box.Width / 2), (int)(box.Y + box.Height / 2));
             mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
             mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+            return true;
         }
         catch
         {
-            // nothing else to try
+            return false;
         }
+    }
+
+    // Open a tray flyout the way a click on it would.
+    public static void ClickTray(int index)
+    {
+        if (index < 0 || index >= _tray.Count) return;
+        Press(_tray[index]);
+    }
+
+    // The first of these buttons whose name says what it is, in the languages
+    // Windows names it in: the name is the only thing a build without the
+    // chevron's own class gives away.
+    private static AutomationElement Named(AutomationElementCollection buttons)
+    {
+        foreach (AutomationElement button in buttons)
+        {
+            try
+            {
+                string name = (button.Current.Name ?? "").ToLowerInvariant();
+                if (name.Contains("chevron") || name.Contains("hidden icon") ||
+                    name.Contains("hidden") || name.Contains("ausgeblendet") ||
+                    name.Contains("versteckt") || name.Contains("ocult") ||
+                    name.Contains("masqu") || name.Contains("nascondi") ||
+                    name.Contains("verborgen") || name.Contains("ukry") ||
+                    name.Contains("gizli") || name.Contains("скрыт") ||
+                    name.Contains("隐藏") || name.Contains("非表示") ||
+                    name.Contains("숨긴"))
+                    return button;
+            }
+            catch
+            {
+                // an element that went away mid-walk: skip it
+            }
+        }
+        return null;
+    }
+
+    // The chevron left of the icons (the ^ that hides and shows them). Windows
+    // gives it a class of its own; older builds only give it a name, translated.
+    private static AutomationElement Chevron()
+    {
+        try
+        {
+            AutomationElement shell = AutomationElement.RootElement.FindFirst(
+                TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ClassNameProperty, "Shell_TrayWnd"));
+            if (shell == null) return null;
+            AutomationElement byClass = shell.FindFirst(
+                TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ClassNameProperty, "SystemTray.OmniButton"));
+            if (byClass != null) return byClass;
+            // Only the tray's own buttons are candidates: the taskbar's app
+            // buttons are Buttons too, and pressing one of those instead would
+            // bring an app up rather than open anything.
+            AutomationElement direct = null;
+            int directCount = 0;
+            AutomationElementCollection children = shell.FindAll(
+                TreeScope.Children,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+            foreach (AutomationElement child in children)
+            {
+                direct = child;
+                directCount += 1;
+            }
+            AutomationElement byName = Named(shell.FindAll(
+                TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)));
+            if (byName != null) return byName;
+            // One lone button under the bar is the chevron on builds that expose
+            // nothing else about it.
+            if (directCount == 1) return direct;
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // The hidden notification icons are Windows' own panel: the shell draws them,
+    // knows their tooltips, their menus and where they sit, so the chevron opens
+    // that panel rather than a copy of it. Pressing the real chevron is the only
+    // way to ask for it that leaves the shell's idea of the panel's state right.
+    public static void OpenOverflow()
+    {
+        Press(Chevron());
     }
 
     [DllImport("user32.dll")]
@@ -656,6 +744,10 @@ public class JarvisWinHook
                     int index;
                     if (int.TryParse(text.Substring(10), out index)) ClickTray(index);
                 }
+                else if (text == "trayoverflow")
+                {
+                    OpenOverflow();
+                }
                 else if (text.StartsWith("icons "))
                 {
                     long iconHandle;
@@ -852,4 +944,13 @@ public class JarvisWinHook
 "@
 
 [JarvisWinHook]::AllowInjected = $Test.IsPresent
+
+# One press of the tray chevron, for a bar whose keyboard hook is not running:
+# there is nothing to watch, so the process is over as soon as it has pressed.
+if ($Overflow.IsPresent)
+{
+    [JarvisWinHook]::OpenOverflow()
+    exit 0
+}
+
 exit [JarvisWinHook]::Run()

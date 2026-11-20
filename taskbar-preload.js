@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('taskbarAPI', {
   start: () => ipcRenderer.send('taskbar:start'),
   system: (kind) => ipcRenderer.send('taskbar:system', kind),
   trayClick: (index) => ipcRenderer.send('taskbar:tray', index),
+  overflow: () => ipcRenderer.send('taskbar:overflow'),
   resize: (payload) => ipcRenderer.send('taskbar:size', payload),
   hoverGroup: (payload) => ipcRenderer.send('taskbar:hover', payload),
   hoverEnd: () => ipcRenderer.send('taskbar:hover-end'),

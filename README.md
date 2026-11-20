@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.19.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.19/Notch-Setup-1.2.19.exe)**
+**[Notch-Setup-1.2.20.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.20/Notch-Setup-1.2.20.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -59,9 +59,9 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   a button to bring that app forward (again to put it away). `Win+1` … `Win+0`
   focus the first ten buttons. Optional auto-hide keeps the bar off-screen until you
   touch the bottom edge or open the launcher. Attached is one bar along the whole
-  bottom edge: the apps stay centred on the screen while the notification tray, the
-  battery and the clock hold the right edge, the way a taskbar should, and a click on
-  a tray icon is passed to that icon.
+  bottom edge: the apps stay centred on the screen while the notification tray,   the battery and the clock hold the right edge, the way a taskbar should, and a click on
+  a tray icon is passed to that icon. A chevron leads the tray, as on Windows: it opens
+  the notification icons the shell keeps hidden, every one of them clickable there.
 - **Library and store** — the library scans Steam, Epic and your own shortcuts, shows
   the cover art, and launches a game with a click; add a shortcut by hand if a
   launcher keeps it hidden. The bag icon beside those buttons opens **Store** inside
@@ -356,6 +356,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.20** — the hidden icons, one click away. A chevron now leads the tray, where
+Windows keeps it: it opens the panel of notification icons the shell holds back —
+Discord, Steam, your sync clients, everything that sits behind the ^ — and each of
+them can be clicked, hovered and right-clicked exactly as on the real bar. The panel
+is Windows' own, so it carries the real icons, tooltips and menus, and it is asked
+for the way a click on the shell's chevron asks for it, so its state never falls out
+of step with the taskbar. The chevron shows in the attached bar and in the tray
+island alike, and when the keyboard helper is off the bar presses the chevron in a
+one-off process instead. Releases carry the installer only.
 
 **v1.2.19** — a taskbar that works like the one it replaces, and no ghost mouse in
 the glass. The bar now starts with the pins Windows does — the browser, Terminal,

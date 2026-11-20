@@ -6357,6 +6357,35 @@ ipcMain.on('taskbar:tray', (_event, index) => {
   }
 });
 
+// The chevron opens Windows' own panel of hidden notification icons: the shell
+// draws those icons and hangs their menus off them, so pressing the shell's
+// chevron is what gives every one of them back.
+ipcMain.on('taskbar:overflow', () => {
+  if (hookProc && hookProc.stdin && !hookProc.stdin.destroyed) {
+    try {
+      hookProc.stdin.write('trayoverflow\n');
+      return;
+    } catch {
+      /* fall through to the helper process */
+    }
+  }
+  // No keyboard hook to ask: the same script presses the chevron on its own.
+  execFile(
+    'powershell',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      path.join(__dirname, 'winhook.ps1'),
+      '-Overflow',
+    ],
+    { windowsHide: true, timeout: 12000 },
+    () => {},
+  );
+});
+
 ipcMain.on('flyout:pick', (_event, hwnd) => {
   hideFlyout();
   focusTaskbarWindow(Number(hwnd));
