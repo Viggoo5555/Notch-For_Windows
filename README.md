@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.22.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.22/Notch-Setup-1.2.22.exe)**
+**[Notch-Setup-1.2.23.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.23/Notch-Setup-1.2.23.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -358,6 +358,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.23** — the bar is the library's glass in every state. When the strip of
+desktop behind the bar cannot be read — a locked screen, a display that is asleep,
+a grab that comes back empty — the bar now refracts the wallpaper, or the last
+frame it had, instead of dropping to a flat panel. The bar, the window list that
+opens above it, the panel, the Start sheet, the widgets and the assistant lens all
+go through the same copy of ybouane/liquidglass in `src/vendor/liquidglass.js`;
+there is no second glass renderer anywhere, and the only painted surfaces left are
+the ones chosen on purpose: the black material, and the single frame before the
+lens has its first picture. Releases carry the installer only.
 
 **v1.2.22** — the bar behaves like the one it replaces. The glass can no longer
 go flat white: the strip of desktop the lens refracts is now decoded before it is

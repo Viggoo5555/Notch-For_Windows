@@ -5630,6 +5630,11 @@ async function sendTaskbarBackdrop() {
   if (!zones.length) return;
   if (usesLiveBackdrop()) {
     if (protectSurfaces()) await new Promise((resolve) => setTimeout(resolve, 80));
+    // A grab can come back empty — a locked desktop, a display that is asleep,
+    // content the shell will not hand over. The lens still has to refract
+    // something, so the wallpaper (or the last desktop frame) stands in rather
+    // than leaving the bar with no picture at all.
+    const fallback = taskbarBackdrop();
     for (const { win } of zones) {
       if (win.isDestroyed() || !win.isVisible()) continue;
       const box = win.getBounds();
@@ -5639,7 +5644,11 @@ async function sendTaskbarBackdrop() {
         width: box.width,
         height: box.height,
       });
-      if (!strip || !strip.data || win.isDestroyed()) continue;
+      if (win.isDestroyed()) continue;
+      if (!strip || !strip.data) {
+        if (fallback) win.webContents.send('taskbar:backdrop', fallback);
+        continue;
+      }
       win.webContents.send('taskbar:backdrop', {
         url: `data:image/png;base64,${strip.data}`,
         width: box.width,
