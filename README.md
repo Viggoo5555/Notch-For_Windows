@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.15.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.15/Notch-Setup-1.2.15.exe)**
+**[Notch-Setup-1.2.17.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.17/Notch-Setup-1.2.17.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -356,6 +356,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.17** — three brains instead of one. The machine is read once and Jarvis
+picks three models that fit it together: a small one that answers in about a
+second, a reasoning model that thinks the harder questions through before it
+answers, and a Qwen 2.5 Coder for code. On an 8 GB card that is Qwen 2.5 3B,
+DeepSeek R1 8B and Qwen 2.5 Coder 7B — 11.8 GB in total; a 12 GB card gets 14B
+for the thinking and the code, a 24 GB one gets 32B, and a small laptop gets the
+1.5B/3B rung. One button in the model manager (`Install all three`) downloads
+them one after another, the first-run card installs whichever are missing, and
+the fast one is what starts awake. Releases carry the installer only.
 
 **v1.2.16** — no-restriction models, and the Windows key again. The model manager
 now lists abliterated and uncensored builds beside the ordinary ones —

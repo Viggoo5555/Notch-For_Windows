@@ -1142,6 +1142,19 @@ const OLLAMA_PRESETS = [
     free: true,
   },
   { name: 'dolphin3:8b', label: 'Dolphin 3 8B', size: '4.9 GB', note: 'Uncensored chat', free: true },
+  // One reasoning model and one code specialist for every size class, so each
+  // rung of recommendPlan()'s ladder has all three names it needs. The tags and
+  // sizes are the ones ollama.com publishes, so a pull finds exactly this.
+  { name: 'deepseek-r1:1.5b', label: 'DeepSeek R1 1.5B', size: '1.1 GB', note: 'Thinks, very light' },
+  { name: 'deepseek-r1:7b', label: 'DeepSeek R1 7B', size: '4.7 GB', note: 'Step-by-step reasoning' },
+  { name: 'deepseek-r1:8b', label: 'DeepSeek R1 8B', size: '5.2 GB', note: 'Reasoning for 8 GB VRAM' },
+  { name: 'deepseek-r1:14b', label: 'DeepSeek R1 14B', size: '9.0 GB', note: 'Hard problems, 12 GB VRAM' },
+  { name: 'deepseek-r1:32b', label: 'DeepSeek R1 32B', size: '20 GB', note: 'Deep reasoning, 24 GB class' },
+  { name: 'qwen2.5-coder:1.5b', label: 'Qwen 2.5 Coder 1.5B', size: '986 MB', note: 'Code, instant' },
+  { name: 'qwen2.5-coder:3b', label: 'Qwen 2.5 Coder 3B', size: '1.9 GB', note: 'Code, fast' },
+  { name: 'qwen2.5-coder:7b', label: 'Qwen 2.5 Coder 7B', size: '4.7 GB', note: 'Strong code model for 8 GB VRAM' },
+  { name: 'qwen2.5-coder:14b', label: 'Qwen 2.5 Coder 14B', size: '9.0 GB', note: 'Best code model under 24 GB' },
+  { name: 'qwen2.5-coder:32b', label: 'Qwen 2.5 Coder 32B', size: '20 GB', note: 'Code at GPT-4o class' },
 ];
 
 let jarvisWin = null;
@@ -1390,6 +1403,92 @@ function recommendFreeModel(hardware = detectHardware()) {
   return {
     name,
     reason: `Its uncensored twin is the same ${size}B model with the refusals taken out, so ${capacity} carries it exactly as well and it does what it is told.`,
+  };
+}
+
+// ------------------------------------------------------------- three brains
+
+// One brain cannot be both instant and careful, so the machine gets three: a
+// small one that answers before you finish reading, a reasoning model that
+// thinks the hard questions through, and a code specialist. Each rung of this
+// ladder names all three in the size class that rung's hardware carries, so the
+// trio fits together in the same memory instead of fighting over it.
+const MODEL_RUNGS = [
+  { key: 'small', fast: 'qwen2.5:1.5b', think: 'deepseek-r1:1.5b', code: 'qwen2.5-coder:1.5b' },
+  { key: 'light', fast: 'qwen2.5:3b', think: 'deepseek-r1:7b', code: 'qwen2.5-coder:3b' },
+  { key: 'mid', fast: 'qwen2.5:3b', think: 'deepseek-r1:8b', code: 'qwen2.5-coder:7b' },
+  { key: 'large', fast: 'qwen2.5:3b', think: 'deepseek-r1:14b', code: 'qwen2.5-coder:14b' },
+  { key: 'huge', fast: 'qwen2.5:7b', think: 'deepseek-r1:32b', code: 'qwen2.5-coder:32b' },
+];
+
+function planRung(hardware) {
+  const vram = hardware.gpuMemoryGb;
+  if (vram >= 20) return 4;
+  if (vram >= 12) return 3;
+  if (vram >= 6) return 2;
+  if (vram >= 4) return 1;
+  if (hardware.cores >= 8 && hardware.ramGb >= 16) return 1;
+  return 0;
+}
+
+function presetFor(name) {
+  return OLLAMA_PRESETS.find((preset) => preset.name === name) || null;
+}
+
+// Download sizes are stored as the readable strings the cards show; this turns
+// them back into gigabytes so the plan can add three of them up.
+function presetGb(name) {
+  const preset = presetFor(name);
+  const match = preset && String(preset.size).match(/([\d.]+)\s*(GB|MB)/i);
+  if (!match) return 0;
+  const amount = Number.parseFloat(match[1]) || 0;
+  return /mb/i.test(match[2]) ? amount / 1024 : amount;
+}
+
+function formatTotalGb(value) {
+  const rounded = Math.round(value * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} GB`;
+}
+
+// The three models this machine should carry, with the reason each one is there.
+function recommendPlan(hardware = detectHardware()) {
+  const rung = MODEL_RUNGS[planRung(hardware)];
+  const capacity =
+    hardware.gpuMemoryGb > 0
+      ? `${hardware.gpuMemoryGb} GB of video memory`
+      : `${hardware.ramGb} GB of RAM`;
+  const build = (role, name, note) => {
+    const preset = presetFor(name);
+    return {
+      role,
+      name,
+      label: preset ? preset.label : name,
+      size: preset ? preset.size : '',
+      gb: presetGb(name),
+      note,
+    };
+  };
+  const fast = build(
+    'fast',
+    rung.fast,
+    hardware.gpuMemoryGb >= 6 ? 'Fastest answers · about a second' : 'Fastest answers · stays instant here',
+  );
+  const think = build('think', rung.think, 'More thinking · reasons step by step');
+  const code = build('code', rung.code, 'Coding · writes, explains and fixes code');
+  const picks = [fast, think, code];
+  const totalGb = picks.reduce((sum, pick) => sum + pick.gb, 0);
+  return {
+    rung: rung.key,
+    fast,
+    think,
+    code,
+    picks,
+    totalGb,
+    totalLabel: formatTotalGb(totalGb),
+    note:
+      `Three brains for ${capacity}: ${fast.label} answers straight away, ` +
+      `${think.label} thinks the harder questions through, and ${code.label} is the code specialist. ` +
+      `${formatTotalGb(totalGb)} in total.`,
   };
 }
 
@@ -2814,6 +2913,10 @@ ipcMain.handle('assistant:boot', async () => {
   const hardware = detectHardware();
   const recommended = recommendModel(hardware);
   const free = recommendFreeModel(hardware);
+  const plan = recommendPlan(hardware);
+  // The three picks are tagged on their preset cards, so the model manager can
+  // say which one answers, which one thinks and which one writes code.
+  const planRoles = new Map(plan.picks.map((pick) => [pick.name, pick.role]));
   const settings = assistantSettings();
   // A card that can read the studio voice starts on it: it is the voice that
   // sounds recorded, and the light one is the fallback, not the point. Picking
@@ -2826,12 +2929,13 @@ ipcMain.handle('assistant:boot', async () => {
     voices: await listVoices(),
     presets: OLLAMA_PRESETS.map((preset) => ({
       ...preset,
-      recommended: preset.name === recommended.name,
       recommendedFree: preset.name === free.name,
+      role: planRoles.get(preset.name) || '',
     })),
     hardware,
     recommended,
     free,
+    plan,
     stt: recommendStt(hardware),
     neural: { available: neuralVoiceAvailable(), voices: NEURAL_VOICES.map(({ id, label, note }) => ({ id, label, note })) },
     studio: {

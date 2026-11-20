@@ -51,6 +51,7 @@ const els = {
   sttLine: $('sttLine'),
   voiceLine: $('voiceLine'),
   hwLine: $('hwLine'),
+  installPlan: $('installPlan'),
   toast: $('toast'),
   suggestions: $('suggestions'),
 };
@@ -72,6 +73,8 @@ const state = {
   status: { running: false, version: '', models: [] },
   presets: [],
   free: null,
+  plan: null,
+  planBusy: false,
   voices: [],
   history: [],
   busy: false,
@@ -263,23 +266,31 @@ function setConnected(connected, version = '') {
 // fits. One button does whichever of those is missing.
 function refreshSetupCard(connected = state.status.running) {
   if (state.setupBusy || state.pulling) return;
+  const plan = state.plan;
   const recName = state.recommended ? modelLabel(state.recommended.name) : '';
   const hw = state.hardware;
   if (hw) {
     const bits = [`${hw.cores} CPU threads`, `${hw.ramGb} GB RAM`];
     if (hw.gpu) bits.push(hw.gpu);
-    els.setupHw.textContent = `This PC: ${bits.join(' · ')}${recName ? ` · best fit: ${recName}` : ''}`;
+    const picks = plan
+      ? ` · picks: ${plan.fast.label}, ${plan.think.label}, ${plan.code.label}`
+      : recName
+        ? ` · best fit: ${recName}`
+        : '';
+    els.setupHw.textContent = `This PC: ${bits.join(' · ')}${picks}`;
   }
   if (connected) {
-    els.setupTitle.textContent = 'Get the model for this PC';
-    els.setupText.textContent = recName
-      ? `${recName} is the largest model that still answers quickly here. It is downloaded once and stays on this machine.`
-      : 'Download a model to start talking.';
-    els.setupInstall.textContent = recName ? `Download ${recName}` : 'Download the model';
+    els.setupTitle.textContent = plan ? 'Get the three brains for this PC' : 'Get the model for this PC';
+    els.setupText.textContent = plan
+      ? `${plan.fast.label} answers instantly, ${plan.think.label} thinks hard questions through and ${plan.code.label} handles code. ${plan.totalLabel} in total, downloaded once and kept on this machine.`
+      : recName
+        ? `${recName} is the largest model that still answers quickly here. It is downloaded once and stays on this machine.`
+        : 'Download a model to start talking.';
+    els.setupInstall.textContent = plan ? 'Download the three models' : recName ? `Download ${recName}` : 'Download the model';
   } else {
     els.setupTitle.textContent = 'Set up Jarvis';
     els.setupText.textContent =
-      'One click installs Ollama and fetches the model that fits this PC — no account, nothing sent anywhere.';
+      'One click installs Ollama and fetches the three models that fit this PC — no account, nothing sent anywhere.';
     els.setupInstall.textContent = 'Install Ollama';
   }
 }
@@ -308,15 +319,31 @@ async function runSetup() {
       }
       await refreshStatus();
     }
-    const name = state.recommended ? state.recommended.name : '';
-    if (!name || state.status.models.length) {
+    // Whichever of the three is still missing, one after another, so a first
+    // run ends with the whole trio instead of a single brain.
+    const installed = new Set(state.status.models.map((model) => model.name));
+    const queue = (state.plan ? state.plan.picks : [])
+      .map((pick) => pick.name)
+      .filter((name) => !installed.has(name));
+    if (!queue.length) {
       els.setupBar.style.width = '100%';
       els.setupStatus.textContent = 'Ready.';
       return;
     }
-    els.setupBar.style.width = '8%';
-    els.setupStatus.textContent = `Downloading ${modelLabel(name)}…`;
-    await pull(name);
+    for (let index = 0; index < queue.length; index += 1) {
+      const name = queue[index];
+      els.setupBar.style.width = '8%';
+      els.setupStatus.textContent =
+        queue.length > 1
+          ? `Downloading ${modelLabel(name)} — ${index + 1} of ${queue.length}…`
+          : `Downloading ${modelLabel(name)}…`;
+      const ok = await pull(name);
+      if (!ok) {
+        els.setupTitle.textContent = 'Almost there';
+        els.setupStatus.textContent = `${modelLabel(name)} did not download. Press the button to try again.`;
+        return;
+      }
+    }
   } finally {
     state.setupBusy = false;
     els.setupInstall.disabled = false;
@@ -1008,13 +1035,14 @@ function renderModels() {
 function renderPresets() {
   els.presets.replaceChildren();
   const installed = new Set(state.status.models.map((m) => m.name));
+  const picks = new Map((state.plan ? state.plan.picks : []).map((pick) => [pick.name, pick]));
   for (const preset of state.presets) {
     const card = document.createElement('button');
     card.type = 'button';
     const isInstalled = installed.has(preset.name);
-    const isRecommended = !!preset.recommended;
+    const pick = picks.get(preset.name);
     const isFreePick = !!preset.recommendedFree;
-    card.className = `preset${isInstalled ? ' installed' : ''}${isRecommended || isFreePick ? ' rec' : ''}${
+    card.className = `preset${isInstalled ? ' installed' : ''}${pick || isFreePick ? ' rec' : ''}${
       preset.free ? ' free' : ''
     }`;
     card.innerHTML = '';
@@ -1023,12 +1051,12 @@ function renderPresets() {
     label.textContent = preset.label;
     const note = document.createElement('span');
     note.className = 'note';
-    // Two cards are highlighted: the brain that suits this machine, and the
-    // uncensored twin of the same size, which it runs exactly as well.
+    // Four cards are highlighted: the three the machine chose for answers,
+    // thinking and code, and the uncensored twin it runs just as well.
     note.textContent = isInstalled
       ? 'Installed'
-      : isRecommended
-        ? 'Best for this PC'
+      : pick
+        ? pick.note
         : isFreePick
           ? 'Fits this PC · no refusals'
           : preset.note;
@@ -1046,21 +1074,22 @@ function renderPresets() {
     });
     els.presets.appendChild(card);
   }
+  syncPlanButton();
 }
 
 function showHardware() {
   const hw = state.hardware;
-  const rec = state.recommended;
   if (!hw) return;
   const bits = [`${hw.cores} CPU threads`, `${hw.ramGb} GB RAM`, hw.integrated ? `${hw.gpu} (integrated)` : `${hw.gpu} (${hw.vramGb} GB)`];
-  const recName = rec ? (state.presets.find((p) => p.name === rec.name) || {}).label || rec.name : '';
+  const plan = state.plan;
   const free = state.free;
   const freeName = free ? (state.presets.find((p) => p.name === free.name) || {}).label || free.name : '';
-  els.hwLine.textContent = rec
-    ? `${bits.join(' · ')}. ${rec.reason} Suggested: ${recName}.${
-        free ? ` No-restriction pick: ${freeName} — same size, so the same speed.` : ''
-      }`
-    : `${bits.join(' · ')}.`;
+  const line = plan ? `${bits.join(' · ')}. ${plan.note}` : `${bits.join(' · ')}.`;
+  // The uncensored twin is the same weights without the refusal habit, so next
+  // to the brain it mirrors it costs nothing in speed.
+  els.hwLine.textContent = free
+    ? `${line} No-restriction pick: ${freeName} — same size as the built-in brain, so the same speed.`
+    : line;
   if (els.voiceLine) {
     const studio = state.studio;
     els.voiceLine.textContent = studio.recommended
@@ -1069,16 +1098,72 @@ function showHardware() {
   }
 }
 
+// The button above the presets: one press fetches whichever of the three the
+// machine picked is not here yet, one model at a time.
+function syncPlanButton() {
+  if (!els.installPlan) return;
+  const plan = state.plan;
+  if (!plan) {
+    els.installPlan.hidden = true;
+    return;
+  }
+  els.installPlan.hidden = false;
+  const installed = new Set(state.status.models.map((model) => model.name));
+  const missing = plan.picks.filter((pick) => !installed.has(pick.name));
+  const gb = Math.round(missing.reduce((sum, pick) => sum + (pick.gb || 0), 0) * 10) / 10;
+  els.installPlan.disabled = !!state.planBusy || !state.status.running || !missing.length;
+  els.installPlan.textContent = !missing.length
+    ? 'All three are installed'
+    : state.planBusy
+      ? 'Downloading the three brains…'
+      : `Install all three · ${gb} GB`;
+}
+
+async function installPlan() {
+  const plan = state.plan;
+  if (!plan || state.planBusy) return;
+  if (!state.status.running) {
+    toast('Start Ollama first.');
+    return;
+  }
+  const installed = new Set(state.status.models.map((model) => model.name));
+  const queue = plan.picks.map((pick) => pick.name).filter((name) => !installed.has(name));
+  if (!queue.length) {
+    toast('All three are installed.');
+    return;
+  }
+  state.planBusy = true;
+  syncPlanButton();
+  toast(
+    `Downloading ${queue.length === 1 ? 'the last brain' : `${queue.length} brains`} — ${plan.totalLabel} when all three are here.`,
+    6000,
+  );
+  for (const name of queue) {
+    const ok = await pull(name);
+    if (!ok) {
+      toast(`${modelLabel(name)} did not download. Press install again to carry on.`, 6000);
+      break;
+    }
+  }
+  state.planBusy = false;
+  await refreshStatus();
+  // Leave the instant brain awake once the set is whole.
+  if (state.status.models.some((model) => model.name === plan.fast.name)) selectModel(plan.fast.name);
+  syncPlanButton();
+}
+
 // Nothing installed yet? Fetch the model this machine was made for.
 let autoPullStarted = false;
 function maybeAutoPull() {
   if (autoPullStarted || state.pulling) return;
-  if (!state.status.running || !state.recommended) return;
+  if (!state.status.running) return;
   if (state.status.models.length) return;
+  const name = preferredModel();
+  if (!name) return;
   autoPullStarted = true;
-  const preset = state.presets.find((p) => p.name === state.recommended.name);
-  toast(`Downloading ${preset ? preset.label : state.recommended.name} — the model that fits this PC.`, 5000);
-  pull(state.recommended.name);
+  const preset = state.presets.find((p) => p.name === name);
+  toast(`Downloading ${preset ? preset.label : name} — the instant brain for this PC. The gear installs the other two.`, 6000);
+  pull(name);
 }
 
 function selectModel(name) {
@@ -1086,6 +1171,13 @@ function selectModel(name) {
   api.save({ model: name });
   refreshModelChip();
   renderModels();
+}
+
+// The fast brain of the three is what should be awake; the single best-fit
+// brain only applies to an install from before the trio existed.
+function preferredModel() {
+  if (state.plan && state.plan.fast) return state.plan.fast.name;
+  return (state.recommended && state.recommended.name) || '';
 }
 
 let statusSignature = '';
@@ -1112,11 +1204,9 @@ async function refreshStatus() {
   }
   if (state.status.running && !state.settings.model && state.status.models.length) {
     // Whatever fits this machine wins over whatever happens to be installed.
-    const wanted = state.recommended && state.recommended.name;
+    const wanted = preferredModel();
     const preferred =
-      (wanted && state.status.models.find((m) => m.name === wanted)) ||
-      state.status.models.find((m) => m.name.includes('1.5b')) ||
-      state.status.models[0];
+      (wanted && state.status.models.find((m) => m.name === wanted)) || state.status.models[0];
     selectModel(preferred.name);
   }
   renderModels();
@@ -1128,11 +1218,11 @@ async function refreshStatus() {
 async function pull(name) {
   if (!state.status.running) {
     toast('Start Ollama first.');
-    return;
+    return false;
   }
   if (state.pulling) {
     toast('One download at a time.');
-    return;
+    return false;
   }
   state.pulling = name;
   els.pullProgress.hidden = false;
@@ -1148,9 +1238,11 @@ async function pull(name) {
     toast(`${name} is ready.`);
     await refreshStatus();
     selectModel(name);
+    return true;
   } else {
     toast(`Download failed: ${(result && result.message) || 'see Ollama logs'}`);
   }
+  return false;
 }
 
 api.onPull((payload) => {
@@ -1823,18 +1915,10 @@ els.hideBtn.addEventListener('click', () => {
   api.hide();
 });
 els.modelChip.addEventListener('click', openSheet);
+els.installPlan.addEventListener('click', installPlan);
 els.setupInstall.addEventListener('click', () => {
-  // Running already? The missing piece is the model, not the engine.
-  if (state.status.running && state.status.models.length === 0) {
-    const name = state.recommended ? state.recommended.name : '';
-    if (name) {
-      els.setupProgress.hidden = false;
-      els.setupBar.style.width = '6%';
-      els.setupStatus.textContent = `Downloading ${modelLabel(name)}…`;
-      pull(name);
-      return;
-    }
-  }
+  // runSetup installs the engine if it is missing, then downloads whichever of
+  // the three brains are not here yet.
   runSetup();
 });
 els.setupRetry.addEventListener('click', async () => {
@@ -2106,6 +2190,7 @@ window.__jarvis.gameMode = applyGameMode;
   state.hardware = data.hardware || null;
   state.recommended = data.recommended || null;
   state.free = data.free || null;
+  state.plan = data.plan || null;
   state.neural = data.neural || { available: false, voices: [] };
   state.studio = data.studio || state.studio;
   state.sttPlan = data.stt || null;
@@ -2124,7 +2209,7 @@ window.__jarvis.gameMode = applyGameMode;
   renderPresets();
   showHardware();
   if (state.status.models.length && !state.settings.model) {
-    const wanted = state.recommended && state.recommended.name;
+    const wanted = preferredModel();
     const match = wanted && state.status.models.find((m) => m.name === wanted);
     selectModel((match || state.status.models[0]).name);
   }
