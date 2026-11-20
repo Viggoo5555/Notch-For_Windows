@@ -78,6 +78,11 @@ let mode = { style: 'glass', shape: 'attached' };
 let display = null;
 let built = '';
 let hoverTimer = null;
+// Which backdrop is allowed to reach the shader, and which request owns it. The
+// lens paints an empty scene white, so the picture is decoded off the page and
+// only then swapped in: a strip that is still loading must never be what a
+// frame is drawn from.
+let backdropToken = 0;
 
 // Live, not captured once: the bar slides with auto-hide, and its backdrop is
 // placed against wherever the window is at that moment.
@@ -93,6 +98,56 @@ function placeSource() {
   source.style.width = `${display.width}px`;
   source.style.height = `${display.height}px`;
   source.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+}
+
+// A strip that never arrived, or that GDI handed back with no pixels in it, is
+// no use to the shader: the scene stays empty and the bar turns flat white.
+function stripUsable(image) {
+  if (!image || !image.naturalWidth || !image.naturalHeight) return false;
+  const probe = document.createElement('canvas');
+  probe.width = 8;
+  probe.height = 2;
+  const ctx = probe.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return true;
+  try {
+    ctx.drawImage(image, 0, 0, probe.width, probe.height);
+    const { data } = ctx.getImageData(0, 0, probe.width, probe.height);
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 0) return true;
+    }
+  } catch {
+    /* no readable pixels: treat it as a failed grab */
+  }
+  return false;
+}
+
+// Take a strip of the desktop from main and hand it to the lens once it is
+// ready. A picture that loses the race to a newer one, or that decoded to
+// nothing, leaves the strip already there in place.
+async function setBackdrop(data) {
+  if (!data || !data.url) return;
+  const token = ++backdropToken;
+  const next = new Image();
+  next.src = data.url;
+  try {
+    await next.decode();
+  } catch {
+    return;
+  }
+  if (token !== backdropToken) return;
+  if (!stripUsable(next)) return;
+  display =
+    data.width > 0 && data.height > 0
+      ? { width: data.width, height: data.height, x: data.x, y: data.y }
+      : null;
+  source.src = data.url;
+  placeSource();
+  if (instance) {
+    instance.markChanged(source);
+    pulse();
+  } else {
+    rebuildGlass();
+  }
 }
 
 // Render a few frames for a change, then stop: an idle taskbar costs nothing.
@@ -170,7 +225,25 @@ function wirePinControls(button, app) {
     event.preventDefault();
     if (api) api.context(app.key);
   });
-  if (!app.pin) return;
+  // A pin dropped on a running app's button goes to the end of the row: open
+  // apps always follow the pins, so there is nowhere else for it to land.
+  if (!app.pin) {
+    button.addEventListener('dragover', (event) => {
+      if (!drag.id) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      clearDropMarks();
+    });
+    button.addEventListener('drop', (event) => {
+      if (!drag.id) return;
+      event.preventDefault();
+      const id = drag.id;
+      drag.id = '';
+      clearDropMarks();
+      movePin(id, '');
+    });
+    return;
+  }
   // Only a pin can be dragged: an open app sits where its group put it until it
   // is pinned, and moving it would move nothing that outlives the window.
   button.draggable = true;
@@ -215,12 +288,13 @@ function wirePinControls(button, app) {
   });
 }
 
-// Dropping past the last button, on the bar itself, puts the pin at the end.
-appsEl.addEventListener('dragover', (event) => {
+// Dropping past the last button, anywhere on the row (the empty end of the apps
+// island or the tray side), puts the pin at the end of the row.
+row.addEventListener('dragover', (event) => {
   if (!drag.id) return;
   event.preventDefault();
 });
-appsEl.addEventListener('drop', (event) => {
+row.addEventListener('drop', (event) => {
   if (!drag.id) return;
   event.preventDefault();
   const id = drag.id;
@@ -551,6 +625,12 @@ async function rebuildGlass() {
     return;
   }
   await source.decode().catch(() => {});
+  // Nothing to refract: the dark CSS surface is the honest thing to show, where
+  // the shader over an empty scene would be one flat white bar.
+  if (!stripUsable(source)) {
+    root.classList.remove('gl');
+    return;
+  }
   const config = configFor(mode.shape);
   for (const pane of panes) pane.dataset.config = JSON.stringify(config);
   try {
@@ -598,22 +678,18 @@ window.addEventListener('resize', () => {
 paintClock();
 setInterval(paintClock, 1000);
 
+// A frame can still be drawn a tick before its picture is ready, when a resize
+// or a rebuild lands mid-decode. Draw again the moment it lands, rather than
+// leaving that one white frame up until the next thing changes.
+source.addEventListener('load', () => {
+  placeSource();
+  if (!instance) return;
+  instance.markChanged(source);
+  pulse();
+});
+
 if (api) {
   api.onUpdate(apply);
-  api.onBackdrop((data) => {
-    if (!data || !data.url) return;
-    display =
-      data.width > 0 && data.height > 0
-        ? { width: data.width, height: data.height, x: data.x, y: data.y }
-        : null;
-    source.src = data.url;
-    placeSource();
-    if (instance) {
-      instance.markChanged(source);
-      pulse();
-    } else {
-      rebuildGlass();
-    }
-  });
+  api.onBackdrop(setBackdrop);
   api.ready();
 }

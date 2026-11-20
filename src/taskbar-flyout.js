@@ -92,14 +92,33 @@ async function start() {
   }
 }
 
-function backdrop(data) {
+// The lens paints an empty scene white, so the strip is decoded off the page and
+// only then swapped in: the list must never be drawn from a picture that is
+// still loading.
+let backdropToken = 0;
+
+async function backdrop(data) {
   if (!data || !data.url) return;
+  const token = ++backdropToken;
+  const next = new Image();
+  next.src = data.url;
+  try {
+    await next.decode();
+  } catch {
+    return;
+  }
+  if (token !== backdropToken) return;
   source.src = data.url;
   source.style.width = data.width ? `${data.width}px` : '100%';
   source.style.height = data.height ? `${data.height}px` : '100%';
   if (instance) instance.markChanged(source);
   else start();
 }
+
+// If a frame is ever drawn before the strip lands, draw it again once it is in.
+source.addEventListener('load', () => {
+  if (instance) instance.markChanged(source);
+});
 
 if (api) {
   api.onRows((data) => {

@@ -3771,16 +3771,30 @@ async function addPinnedApp(entry) {
   const id = String(entry?.id || entry?.target || '').trim();
   if (!id) return false;
   const pins = Array.isArray(prefs.pinned) ? prefs.pinned.slice() : [];
-  if (pins.some((pin) => pin.id === id) || pins.length >= 12) return false;
+  if (pins.length >= 12) return false;
   const target = String(entry?.target || id);
+  // The executable a shortcut points at, so a pin and the window it opens are
+  // one button instead of two.
+  const exe = entry?.exe || (await shortcutExecutable(target));
+  // One pin per app, whichever side made it: pinning a window whose app the
+  // launcher already pinned must not put a second button beside it.
+  const key = (value) => String(value || '').replace(/\//g, '\\').toLowerCase();
+  const idKey = key(id);
+  const targetKey = key(target);
+  const exeKey = key(exe);
+  const known = pins.some(
+    (pin) =>
+      key(pin.id) === idKey ||
+      key(pin.target) === targetKey ||
+      (!!exeKey && key(pin.exe) === exeKey),
+  );
+  if (known) return false;
   pins.push({
     id,
     name: String(entry?.name || 'App').slice(0, 60),
     target,
     icon: entry?.icon || (await iconForTarget(target)),
-    // The executable a shortcut points at, so a pin and the window it opens are
-    // one button instead of two.
-    exe: entry?.exe || (await shortcutExecutable(target)),
+    exe,
   });
   prefs.pinned = pins;
   savePrefs();
@@ -5181,6 +5195,9 @@ let flyoutPoll = null;
 let flyoutOutside = 0;
 let flyoutBounds = null;
 let flyoutLeft = 0;
+// True while the bar's own right-click menu is open, so auto-hide leaves the bar
+// alone underneath it.
+let taskbarMenuOpen = false;
 
 
 function taskbarOn() {
@@ -5261,6 +5278,12 @@ function applyTaskbarBounds(zone, win) {
   if (!win || win.isDestroyed()) return;
   const box = taskbarBounds(zone);
   if (taskbarY !== null) box.y = taskbarY;
+  // Every content update runs through here; a window already where it belongs
+  // is left alone, so a poll does not re-enter the renderer's layout each time.
+  const now = win.getBounds();
+  if (now.x === box.x && now.y === box.y && now.width === box.width && now.height === box.height) {
+    return;
+  }
   win.setBounds(box, false);
 }
 
@@ -5956,15 +5979,22 @@ function startFlyoutPoll() {
       point.x <= box.x + box.width + 6 &&
       point.y >= box.y - 4 &&
       point.y <= box.y + box.height + 10;
+    // Only the button that opened the list keeps it alive under the bar: moving
+    // along the bar to another button closes it, the way Windows does. Five
+    // polls give the pointer time to cross the gap up into the list.
     const bar = taskbarWin && !taskbarWin.isDestroyed() ? taskbarWin.getBounds() : null;
-    const inBar =
-      bar && point.y >= bar.y && point.y <= bar.y + bar.height && point.x >= bar.x && point.x <= bar.x + bar.width;
-    if (inList || inBar) {
+    const inButton =
+      bar &&
+      point.x >= bar.x + flyoutLeft - 24 &&
+      point.x <= bar.x + flyoutLeft + 24 &&
+      point.y >= bar.y - 4 &&
+      point.y <= bar.y + bar.height;
+    if (inList || inButton) {
       flyoutOutside = 0;
       return;
     }
     flyoutOutside += 1;
-    if (flyoutOutside >= 4) hideFlyout();
+    if (flyoutOutside >= 5) hideFlyout();
   }, 80);
 }
 
@@ -6295,6 +6325,13 @@ function tickTaskbarPeek() {
     taskbarLeaveTimer = null;
     return;
   }
+  // A menu the bar opened, or the window list above it, is an anchor: sliding
+  // the bar away would take it out from under the pointer and the menu with it.
+  if (taskbarMenuOpen || (flyoutWin && !flyoutWin.isDestroyed() && flyoutWin.isVisible())) {
+    if (taskbarLeaveTimer) clearTimeout(taskbarLeaveTimer);
+    taskbarLeaveTimer = null;
+    return;
+  }
   const zones = taskbarZones();
   const shown = zones.map(({ zone }) => taskbarGeometry(false, zone));
   const point = cursorDip();
@@ -6384,7 +6421,10 @@ ipcMain.on('taskbar:hover', (_event, payload) => {
   showFlyout(findTaskbarApp(key), left);
 });
 
-ipcMain.on('taskbar:hover-end', () => hideFlyout());
+// Leaving a button no longer takes the window list with it: the list sits above
+// the bar, so the pointer has to cross the gap to reach it. Its own poll closes
+// it once the pointer is really away, or over a different button.
+ipcMain.on('taskbar:hover-end', () => {});
 
 ipcMain.on('taskbar:group', (_event, key) => {
   const app = findTaskbarApp(key);
@@ -6430,9 +6470,19 @@ ipcMain.on('taskbar:context', (event, payload) => {
   }
   if (!template.length) return;
   const win = BrowserWindow.fromWebContents(event.sender);
-  Menu.buildFromTemplate(template).popup({
-    window: win && !win.isDestroyed() ? win : undefined,
-  });
+  // Auto-hide stands down while the menu is up, or the poll would slide the bar
+  // (and the menu's anchor) off the screen as the pointer leaves the bar.
+  taskbarMenuOpen = true;
+  try {
+    Menu.buildFromTemplate(template).popup({
+      window: win && !win.isDestroyed() ? win : undefined,
+      callback: () => {
+        taskbarMenuOpen = false;
+      },
+    });
+  } catch {
+    taskbarMenuOpen = false;
+  }
 });
 
 // Dragging a pinned button ends with the pins in the order it left them in.

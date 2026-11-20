@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.21.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.21/Notch-Setup-1.2.21.exe)**
+**[Notch-Setup-1.2.22.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.22/Notch-Setup-1.2.22.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -358,6 +358,20 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.22** — the bar behaves like the one it replaces. The glass can no longer
+go flat white: the strip of desktop the lens refracts is now decoded before it is
+handed over, a failed grab keeps the picture that was already there, and a bar
+with nothing to refract falls back to its dark surface instead of a white one.
+The window list above a grouped button can actually be reached now — leaving the
+button no longer closes it, so the pointer has time to cross the gap into the
+list, and moving along the bar to another button closes it the way Windows does.
+Auto-hide stands down while the bar's own right-click menu or that list is open,
+so neither can be yanked off the screen. Pins are one per app whichever side made
+them, so pinning a window the launcher already pinned no longer adds a second
+button beside it, and a pin dragged anywhere onto the bar — the end of the row,
+the tray side, a running app's button — lands at the end of the row instead of
+snapping back. Releases carry the installer only.
 
 **v1.2.21** — the bar is yours to arrange. Right-click any button and the bar offers
 the one thing Windows' own menu leads with: pin a running app to the taskbar, or
