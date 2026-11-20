@@ -4458,25 +4458,57 @@ async function captureWithChromium(display) {
 // pointer off the pill mid-click and close the panel, so they are made fully
 // transparent for the frame instead and put back straight after. The picker
 // needs them gone for as long as it is up, so this is a function of its own.
+//
+// Fades can overlap — a picker still up when something else asks for the shell to
+// step aside — and a second fade that stored the opacity it found would restore
+// the zero the first one left behind. The surfaces are remembered once, and put
+// back when the last fade ends.
+let fadeDepth = 0;
+let fadedOpacities = null;
+
 function fadeShell() {
-  const faded = shellSurfaces().filter((surface) => surface.isVisible());
-  const fadedOpacity = new Map();
-  for (const surface of faded) {
-    try {
-      const was = typeof surface.getOpacity === 'function' ? surface.getOpacity() : 1;
-      fadedOpacity.set(surface, Number.isFinite(was) ? was : 1);
-      surface.setOpacity(0);
-    } catch {
-      /* already gone */
-    }
-  }
-  return () => {
-    for (const surface of faded) {
-      if (surface.isDestroyed()) continue;
+  if (fadeDepth === 0) {
+    fadedOpacities = new Map();
+    for (const surface of shellSurfaces()) {
+      if (!surface.isVisible()) continue;
       try {
-        surface.setOpacity(fadedOpacity.get(surface) ?? 1);
+        const was = typeof surface.getOpacity === 'function' ? surface.getOpacity() : 1;
+        fadedOpacities.set(surface, Number.isFinite(was) && was > 0 ? was : 1);
+        surface.setOpacity(0);
       } catch {
         /* already gone */
+      }
+    }
+  }
+  fadeDepth += 1;
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    fadeDepth = Math.max(0, fadeDepth - 1);
+    if (fadeDepth > 0 || !fadedOpacities) return;
+    const surfaces = fadedOpacities;
+    fadedOpacities = null;
+    for (const [surface, was] of surfaces) {
+      if (surface.isDestroyed()) continue;
+      try {
+        surface.setOpacity(was);
+        // A window that spent time at zero alpha can be left holding the frame
+        // from before the fade: the paint that brings the panel back is asked
+        // for, so what comes after a shot is never an empty window.
+        if (surface.webContents && typeof surface.webContents.invalidate === 'function') {
+          surface.webContents.invalidate();
+        }
+      } catch {
+        /* already gone */
+      }
+    }
+    if (win && !win.isDestroyed()) {
+      try {
+        win.showInactive();
+        win.moveTop();
+      } catch {
+        /* the window is on its way out */
       }
     }
   };
@@ -4747,18 +4779,30 @@ async function guessShotFont() {
   return runShotTool('font', 60000);
 }
 
+// One place hands a finished shot to the panel: the picture and the page that
+// carries its three actions go together, so the panel opens on the shot whatever
+// asked for it. Choosing a region closes the panel on the way out, so this may not
+// be left to whoever asked — a request that comes back after that would otherwise
+// finish with nothing on screen.
+function deliverShot(result) {
+  if (!result || !result.ok) return false;
+  if (!win || win.isDestroyed() || gameMode) return false;
+  win.webContents.send('notch:shot', result);
+  return showNotchPanel('shot');
+}
+
 // The shortcut goes through the panel, so the shot opens where its actions are.
 async function takeScreenshot() {
   const result = await regionShot();
-  if (!result.ok) return result;
-  if (win && !win.isDestroyed()) {
-    win.webContents.send('notch:shot', result);
-    showNotchPanel('shot');
-  }
+  deliverShot(result);
   return result;
 }
 
-ipcMain.handle('notch:shot-capture', () => regionShot());
+ipcMain.handle('notch:shot-capture', async () => {
+  const result = await regionShot();
+  deliverShot(result);
+  return result;
+});
 ipcMain.handle('notch:shot-save', () => saveScreenshot());
 ipcMain.handle('notch:shot-text', () => readShotText());
 ipcMain.handle('notch:shot-font', () => guessShotFont());

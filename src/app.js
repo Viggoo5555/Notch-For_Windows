@@ -2362,10 +2362,18 @@ function bindEvents() {
     }
     const button = $('#shotBtn');
     button.disabled = true;
-    const answer = await api.captureShot();
+    let answer = null;
+    try {
+      answer = await api.captureShot();
+    } catch {
+      answer = { ok: false, error: 'The screen could not be read' };
+    }
     button.disabled = false;
     if (answer && answer.cancelled) return;
     if (!answer || !answer.ok) {
+      // The drag left the pointer out on the desktop, so the panel folded itself
+      // while it was away: open it again, or the reason would be said to a folded pill.
+      openNotch();
       toast((answer && answer.error) || 'Could not take the picture');
       return;
     }

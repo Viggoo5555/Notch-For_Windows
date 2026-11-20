@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.33.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.33/Notch-Setup-1.2.33.exe)**
+**[Notch-Setup-1.2.34.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.34/Notch-Setup-1.2.34.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.34** — the picture opens on its own actions again. Choosing a region takes
+the pointer off the panel, so the panel folds away while you drag — and the shot
+view was opened by the page that asked for the capture, a request that came back
+after the fold and finished with nothing on screen. A finished capture is now
+handed to the panel by the app itself: the picture, **Save**, **Text** and
+**Font** come up together whether the shot was asked for with the camera or with
+Ctrl+Alt+S. Two smaller things behind it: a shell that stepped aside for the
+picker is put back when the *last* fade ends, and the window is asked to paint
+again, so a panel that was fully transparent for the drag cannot come back
+holding an old (or empty) frame; and if a capture does fail, the panel opens
+first so the reason is readable instead of being said to a folded pill.
 
 **v1.2.33** — the pill keeps every piece you switch on. Its layout comes from
 the editor, but the stylesheet still hid three of the pieces outright — **Date**,
