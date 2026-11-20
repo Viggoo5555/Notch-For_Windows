@@ -74,6 +74,10 @@ const state = {
     easing: 'spring',
     hoverDelay: 0,
     pillWidth: 96,
+    pillHeight: 26,
+    pillOffset: 0,
+    pillItems: ['dot', 'time', 'focus', 'date', 'battery'],
+    pillHidden: [],
     notchStyle: 'attached',
     backdrop: 'live',
     taskbar: false,
@@ -712,7 +716,7 @@ const SETTINGS_SCHEMA = [
     type: 'segment',
     options: [['attached', 'Attached'], ['island', 'Island']],
   },
-  { key: 'pillWidth', label: 'Pill width', type: 'range', min: 72, max: 160, step: 4, suffix: 'px' },
+  { key: 'pill', label: 'Pill', type: 'action', action: 'pillEditor', button: 'Customise…' },
   { group: 'Backdrop' },
   {
     key: 'backdrop',
@@ -780,6 +784,9 @@ function applySettings() {
   root.style.setProperty('--motion', String(s.motion / 100));
   root.classList.toggle('force-motion', s.animations === 'always');
   root.style.setProperty('--pill-w', `${s.pillWidth}px`);
+  root.style.setProperty('--pill-h', `${s.pillHeight}px`);
+  root.style.setProperty('--pill-offset', `${s.pillOffset}px`);
+  applyPillLayout();
   root.style.setProperty('--grain', s.grain ? '0.026' : '0');
   root.style.setProperty('--tint-o', String(Math.max(0, Math.min(1, s.tint / 70))));
   root.classList.toggle('ease-soft', s.easing === 'soft');
@@ -853,6 +860,7 @@ function openSettings() {
   clearTimeout(closeTimer);
   state.settingsOpen = true;
   state.busy = true;
+  settingsPage = 'main';
   $('#settingsSheet').hidden = false;
   renderSettings();
 }
@@ -860,13 +868,322 @@ function openSettings() {
 function closeSettings() {
   state.settingsOpen = false;
   state.busy = false;
+  settingsPage = 'main';
   $('#settingsSheet').hidden = true;
+}
+
+// ------------------------------------------------------------------- the pill
+
+// Everything the folded pill can be made of, in the order the editor offers it.
+const PILL_ITEMS = [
+  ['dot', 'Status dot'],
+  ['time', 'Clock'],
+  ['focus', 'Focus timer'],
+  ['date', 'Date'],
+  ['battery', 'Battery'],
+];
+
+// Which page of the settings sheet is open: the list, or the pill editor.
+let settingsPage = 'main';
+
+// The live pill's pieces are kept by reference: turning one off takes it out of
+// the DOM, and it has to be findable the moment it is turned back on.
+let pillParts = null;
+function pillLiveParts() {
+  // Re-read while the pill has not been found yet: the settings can be applied
+  // before the document has finished laying the pill out.
+  if (!pillParts || !pillParts.dot) {
+    pillParts = {
+      dot: $('#statusDot'),
+      time: $('#pillTime'),
+      focus: $('#focusMini'),
+      date: $('#pillDate'),
+      battery: $('#batteryPill'),
+    };
+  }
+  return pillParts;
+}
+
+function pillOrder() {
+  const known = PILL_ITEMS.map(([key]) => key);
+  const stored = Array.isArray(state.settings.pillItems) ? state.settings.pillItems : [];
+  const order = [];
+  for (const key of stored) if (known.includes(key) && !order.includes(key)) order.push(key);
+  for (const key of known) if (!order.includes(key)) order.push(key);
+  return order;
+}
+
+function pillVisible() {
+  const hidden = Array.isArray(state.settings.pillHidden) ? state.settings.pillHidden : [];
+  return pillOrder().filter((key) => !hidden.includes(key));
+}
+
+function pillSeparator(key, next) {
+  const writing = (value) => value === 'time' || value === 'date';
+  if (writing(key) && writing(next)) {
+    const sep = document.createElement('span');
+    sep.className = 'pill-sep';
+    sep.textContent = '·';
+    return sep;
+  }
+  if (next === 'battery' && key !== 'dot') {
+    const gap = document.createElement('span');
+    gap.className = 'pill-gap';
+    return gap;
+  }
+  return null;
+}
+
+// Rebuilds the folded pill in the chosen order, keeping the same nodes so the
+// clock and the battery keep writing into them.
+function applyPillLayout() {
+  const collapsed = $('#collapsed');
+  if (!collapsed) return;
+  const parts = pillLiveParts();
+  const order = pillVisible().filter((key) => parts[key]);
+  collapsed.replaceChildren();
+  order.forEach((key, index) => {
+    collapsed.appendChild(parts[key]);
+    const separator = pillSeparator(key, order[index + 1]);
+    if (separator) collapsed.appendChild(separator);
+  });
+}
+
+// The preview is drawn from copies, not the live pill: the sheet is open, so the
+// real pill is folded away, and its clock and battery belong to the real thing.
+function pillMock(key) {
+  if (key === 'dot') {
+    const dot = document.createElement('span');
+    dot.className = 'status-dot';
+    return dot;
+  }
+  if (key === 'time') {
+    const time = document.createElement('span');
+    time.className = 'pill-time';
+    time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return time;
+  }
+  if (key === 'date') {
+    const date = document.createElement('span');
+    date.className = 'pill-date';
+    date.textContent = new Intl.DateTimeFormat(undefined, {
+      weekday: 'short',
+      day: 'numeric',
+    }).format(new Date());
+    return date;
+  }
+  if (key === 'battery') {
+    const wrap = document.createElement('span');
+    wrap.className = 'battery';
+    const svg = svgNode('svg', { viewBox: '0 0 24 14', 'aria-hidden': 'true' });
+    svg.appendChild(
+      svgNode('rect', { class: 'batt-shell', x: 0.8, y: 2.4, width: 19.4, height: 9.2, rx: 2.8 }),
+    );
+    svg.appendChild(
+      svgNode('rect', { class: 'batt-fill', x: 2.6, y: 4.2, width: 11, height: 5.6, rx: 1.4 }),
+    );
+    svg.appendChild(svgNode('rect', { class: 'batt-tip', x: 21.4, y: 5.2, width: 2, height: 3.6, rx: 1 }));
+    const label = document.createElement('span');
+    label.className = 'batt-text';
+    label.textContent = '76%';
+    wrap.append(svg, label);
+    return wrap;
+  }
+  const mini = document.createElement('span');
+  mini.className = 'focus-mini';
+  const svg = svgNode('svg', { viewBox: '0 0 20 20', 'aria-hidden': 'true' });
+  svg.appendChild(svgNode('circle', { class: 'ring-track', cx: 10, cy: 10, r: 7.6 }));
+  svg.appendChild(svgNode('circle', { class: 'ring-fill', cx: 10, cy: 10, r: 7.6 }));
+  const label = document.createElement('span');
+  label.textContent = '25:00';
+  mini.append(svg, label);
+  return mini;
+}
+
+// Dragging a row in the list reorders the pill: the row follows the pointer and
+// the list is rebuilt in the new order when it is dropped.
+function beginPillItemDrag(event, row, list, key) {
+  if (event.target instanceof HTMLElement && event.target.closest('input')) return;
+  const rows = [...list.children];
+  if (rows.length < 2) return;
+  const startY = event.clientY;
+  const step = rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().top;
+  let moved = 0;
+  row.classList.add('lift');
+  const move = (moveEvent) => {
+    moved = moveEvent.clientY - startY;
+    row.style.transform = `translateY(${moved}px)`;
+  };
+  const finish = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', finish);
+    window.removeEventListener('pointercancel', finish);
+    row.style.transform = '';
+    row.classList.remove('lift');
+    const shift = step > 0 ? Math.round(moved / step) : 0;
+    if (!shift) return;
+    const order = pillOrder();
+    const from = order.indexOf(key);
+    const to = Math.max(0, Math.min(order.length - 1, from + shift));
+    if (from < 0 || to === from) return;
+    order.splice(to, 0, ...order.splice(from, 1));
+    updateSetting('pillItems', order);
+    renderSettings();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', finish);
+  window.addEventListener('pointercancel', finish);
+  event.preventDefault();
+}
+
+function renderPillEditor(body) {
+  const s = state.settings;
+
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'pill-back';
+  back.textContent = '‹ Settings';
+  back.addEventListener('click', () => {
+    settingsPage = 'main';
+    renderSettings();
+  });
+  body.appendChild(back);
+
+  // The stage is the top of the screen at a souvenir size: drag the pill across
+  // it and that is where it will hang.
+  const stage = document.createElement('div');
+  stage.className = 'pill-stage';
+  const preview = document.createElement('div');
+  preview.className = 'pill-preview';
+  preview.title = 'Drag to move the pill';
+  const shown = pillVisible();
+  shown.forEach((key, index) => {
+    preview.appendChild(pillMock(key));
+    const separator = pillSeparator(key, shown[index + 1]);
+    if (separator) preview.appendChild(separator);
+  });
+  preview.style.width = `${s.pillWidth}px`;
+  preview.style.height = `${s.pillHeight}px`;
+  stage.appendChild(preview);
+  const hint = document.createElement('span');
+  hint.className = 'pill-stage-hint';
+  hint.textContent = 'drag to move';
+  stage.appendChild(hint);
+  body.appendChild(stage);
+
+  let drag = null;
+  preview.addEventListener('pointerdown', (event) => {
+    drag = { x: event.clientX, start: Number(state.settings.pillOffset) || 0, value: 0 };
+    drag.value = drag.start;
+    preview.setPointerCapture(event.pointerId);
+    preview.classList.add('dragging');
+    event.preventDefault();
+  });
+  preview.addEventListener('pointermove', (event) => {
+    if (!drag) return;
+    const room = Math.max(0, (stage.clientWidth - preview.offsetWidth) / 2);
+    const next = Math.max(-room, Math.min(room, drag.start + (event.clientX - drag.x)));
+    drag.value = Math.round(next);
+    // Only the variable moves while the finger is down; the setting is written
+    // once, on release, so the glass is not re-rendered for every pixel.
+    document.documentElement.style.setProperty('--pill-offset', `${drag.value}px`);
+  });
+  const release = () => {
+    if (!drag) return;
+    const value = drag.value;
+    drag = null;
+    preview.classList.remove('dragging');
+    updateSetting('pillOffset', value);
+  };
+  preview.addEventListener('pointerup', release);
+  preview.addEventListener('pointercancel', release);
+
+  const rangeRow = (label, key, min, max, step, suffix) => {
+    const row = document.createElement('div');
+    row.className = 'set-row';
+    const name = document.createElement('span');
+    name.className = 'set-key';
+    name.textContent = label;
+    const wrap = document.createElement('span');
+    wrap.className = 'pill-range';
+    const value = document.createElement('span');
+    value.className = 'set-val';
+    value.textContent = `${state.settings[key]}${suffix}`;
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = min;
+    input.max = max;
+    input.step = step;
+    input.value = state.settings[key];
+    input.addEventListener('input', () => {
+      value.textContent = `${input.value}${suffix}`;
+      updateSetting(key, Number(input.value));
+      preview.style.width = `${state.settings.pillWidth}px`;
+      preview.style.height = `${state.settings.pillHeight}px`;
+    });
+    wrap.append(input, value);
+    row.append(name, wrap);
+    body.appendChild(row);
+  };
+  rangeRow('Width', 'pillWidth', 72, 200, 4, 'px');
+  rangeRow('Height', 'pillHeight', 20, 36, 2, 'px');
+
+  const group = document.createElement('div');
+  group.className = 'set-group';
+  group.textContent = 'Widgets';
+  body.appendChild(group);
+
+  const note = document.createElement('p');
+  note.className = 'pill-editor-hint';
+  note.textContent = 'Drag a row to move it in the pill. Untick to hide it.';
+  body.appendChild(note);
+
+  const list = document.createElement('div');
+  list.className = 'pill-items';
+  body.appendChild(list);
+
+  const hidden = Array.isArray(state.settings.pillHidden) ? state.settings.pillHidden : [];
+  for (const key of pillOrder()) {
+    const row = document.createElement('div');
+    row.className = 'pill-item';
+    row.dataset.key = key;
+
+    const grip = document.createElement('span');
+    grip.className = 'pill-grip';
+    grip.setAttribute('aria-hidden', 'true');
+    grip.textContent = '⠿';
+
+    const label = document.createElement('span');
+    label.className = 'pill-item-label';
+    label.textContent = (PILL_ITEMS.find(([value]) => value === key) || [key, key])[1];
+
+    const toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.className = 'set-switch';
+    toggle.checked = !hidden.includes(key);
+    toggle.addEventListener('change', () => {
+      const next = new Set(Array.isArray(state.settings.pillHidden) ? state.settings.pillHidden : []);
+      if (toggle.checked) next.delete(key);
+      else next.add(key);
+      updateSetting('pillHidden', [...next]);
+      renderSettings();
+    });
+
+    row.append(grip, label, toggle);
+    list.appendChild(row);
+    row.addEventListener('pointerdown', (event) => beginPillItemDrag(event, row, list, key));
+  }
 }
 
 function renderSettings() {
   const body = $('#settingsBody');
   body.replaceChildren();
   const s = state.settings;
+
+  if (settingsPage === 'pill') {
+    renderPillEditor(body);
+    return;
+  }
 
   for (const item of SETTINGS_SCHEMA) {
     if (item.group) {
@@ -934,6 +1251,10 @@ function renderSettings() {
       button.textContent = item.button;
       button.addEventListener('click', () => {
         if (item.action === 'pickWallpaper') pickWallpaper();
+        else if (item.action === 'pillEditor') {
+          settingsPage = 'pill';
+          renderSettings();
+        }
       });
       row.appendChild(button);
     } else if (item.type === 'status') {

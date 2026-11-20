@@ -95,6 +95,12 @@ const DEFAULT_SETTINGS = {
   easing: 'spring',
   hoverDelay: 0,
   pillWidth: 96,
+  pillHeight: 26,
+  // How far the folded pill sits from the centre of the screen, in DIP.
+  pillOffset: 0,
+  // The order the folded pill's pieces appear in, and which of them are hidden.
+  pillItems: ['dot', 'time', 'focus', 'date', 'battery'],
+  pillHidden: [],
   notchStyle: 'attached',
   backdrop: 'live',
   taskbar: false,
@@ -927,9 +933,13 @@ function notchScreenRect() {
   const wide = isExpanded || pointerInside || Date.now() < collapsesUntil;
   const width = wide ? PANEL_W : Math.max(56, Math.min(200, prefs.settings.pillWidth || PILL_W));
   const gap = prefs.settings.notchStyle === 'island' ? NOTCH_GAP : 0;
-  const height = wide ? PANEL_H - gap : PILL_H;
+  const height = wide ? PANEL_H - gap : Math.max(20, Math.min(40, prefs.settings.pillHeight || PILL_H));
+  // The pill can be dragged off centre, and the rect has to go with it — never
+  // past the window's edge, or the pointer would leave before the pill did.
+  const room = Math.max(0, (PANEL_W - width) / 2);
+  const shift = wide ? 0 : Math.max(-room, Math.min(room, Number(prefs.settings.pillOffset) || 0));
   return {
-    x: Math.round(bounds.x + (bounds.width - width) / 2),
+    x: Math.round(bounds.x + (bounds.width - width) / 2 + shift),
     y: bounds.y + gap,
     width,
     height,

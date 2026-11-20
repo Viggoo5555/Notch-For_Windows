@@ -19,6 +19,8 @@
 
   --pill-w: 96px;
   --pill-h: 26px;
+  /* How far the folded pill sits from the centre of the screen. */
+  --pill-offset: 0px;
   --notch-inset: 0px;
   --pill-radius: 0 0 13px 13px;
   --panel-radius: 0 0 var(--r-panel) var(--r-panel);
@@ -239,9 +241,9 @@ html.nobridge .demo-hint {
      or re-rasterised mid-motion, which keeps the expansion near 60fps in a
      software-composited transparent window. */
   clip-path: inset(
-    var(--notch-inset) calc((var(--glass-w) - var(--pill-w)) / 2)
+    var(--notch-inset) calc((var(--glass-w) - var(--pill-w)) / 2 - var(--pill-offset))
       calc(var(--glass-h) - var(--pill-h) - var(--notch-inset))
-      calc((var(--glass-w) - var(--pill-w)) / 2) round var(--pill-radius)
+      calc((var(--glass-w) - var(--pill-w)) / 2 + var(--pill-offset)) round var(--pill-radius)
   );
   transition: clip-path var(--dur-close) var(--ease-close);
 }
@@ -330,7 +332,7 @@ html:not(.island) .glass-pill-pane {
 /* The folded pill is its own lens, not a slice of the panel: a pill-sized pane
    at the top centre, so the shader can curve the whole 26px band. */
 .glass-pill-pane {
-  inset: 0 auto auto calc((var(--glass-w) - var(--pill-w)) / 2);
+  inset: 0 auto auto calc((var(--glass-w) - var(--pill-w)) / 2 + var(--pill-offset));
   width: var(--pill-w);
   height: var(--pill-h);
   border-radius: var(--pill-radius);
@@ -353,9 +355,9 @@ html.island .notch.gl:not(.frost):not(.open) .glass-chroma {
 /* The pill is a slice of the sheet: give the cut edge the pill's radius. */
 .notch:not(.open) .glass-root {
   clip-path: inset(
-    var(--notch-inset) calc((var(--glass-w) - var(--pill-w)) / 2)
+    var(--notch-inset) calc((var(--glass-w) - var(--pill-w)) / 2 - var(--pill-offset))
       calc(var(--glass-h) - var(--pill-h) - var(--notch-inset))
-      calc((var(--glass-w) - var(--pill-w)) / 2) round var(--pill-radius)
+      calc((var(--glass-w) - var(--pill-w)) / 2 + var(--pill-offset)) round var(--pill-radius)
   );
 }
 
@@ -602,7 +604,8 @@ html.demo .glass-backdrop {
   top: var(--notch-inset);
   left: 0;
   right: 0;
-  height: 26px;
+  height: var(--pill-h);
+  transform: translateX(var(--pill-offset));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2646,4 +2649,148 @@ html.demo .glass-backdrop {
   width: 34px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   Pill editor
+   ========================================================================== */
+
+.pill-back {
+  margin: 6px 0 4px;
+  padding: 4px 8px 4px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pill-back:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+/* The top of the screen, at a size that fits the sheet: the pill hangs from it
+   exactly where it will hang for real. */
+.pill-stage {
+  position: relative;
+  height: 84px;
+  margin: 2px 0 4px;
+  border-radius: 10px;
+  border: 1px solid var(--hair);
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.07), transparent 70%),
+    rgba(6, 8, 12, 0.45);
+  overflow: hidden;
+}
+
+.pill-stage::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+}
+
+.pill-preview {
+  position: absolute;
+  top: 14px;
+  left: calc(50% + var(--pill-offset));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  border-radius: var(--pill-radius);
+  border: 1px solid var(--hair-strong);
+  background: rgba(255, 255, 255, 0.075);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.pill-preview:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.pill-preview.dragging {
+  cursor: grabbing;
+  border-color: color-mix(in srgb, var(--accent) 58%, transparent);
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.pill-stage-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+  pointer-events: none;
+}
+
+.pill-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pill-editor-hint {
+  margin: 2px 0 8px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--faint);
+}
+
+.pill-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pill-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--hair);
+  background: rgba(255, 255, 255, 0.035);
+  touch-action: none;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
+}
+
+.pill-item:hover {
+  background: var(--surface-hover);
+}
+
+.pill-item.lift {
+  position: relative;
+  z-index: 2;
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, rgba(255, 255, 255, 0.05));
+}
+
+.pill-grip {
+  flex: none;
+  color: var(--faint);
+  font-size: 12px;
+  letter-spacing: -2px;
+  cursor: grab;
+}
+
+.pill-item-label {
+  flex: 1 1 auto;
+  font-size: 11.5px;
+  color: var(--ink-2);
 }

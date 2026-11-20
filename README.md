@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.28.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.28/Notch-Setup-1.2.28.exe)**
+**[Notch-Setup-1.2.29.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.29/Notch-Setup-1.2.29.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.29** — the pill is yours to arrange. Settings → Pill → **Customise…** opens a
+stage showing the top of the screen with the pill hanging in it, and that pill is
+the thing you edit: drag it left or right and that is where it hangs — the
+window's hover rect moves with it, so it opens exactly where it looks. Width and
+height are sliders underneath, and **Widgets** lists every piece the pill can
+carry — status dot, clock, focus timer, date, battery — each with a switch to
+show or hide it and a grip to drag into any order. The folded pill is rebuilt in
+that order from the same elements, so the clock keeps ticking and the battery
+keeps charging into it, and the separators work themselves out.
 
 **v1.2.28** — a camera in the notch. Press it (or Ctrl+Alt+S) and the screen is
 photographed with the shell left out of the frame: the windows go fully
