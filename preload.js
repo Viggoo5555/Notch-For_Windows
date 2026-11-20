@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('notchAPI', {
   bootstrap: () => ipcRenderer.invoke('notch:bootstrap'),
   setExpanded: (value) => ipcRenderer.send('notch:expanded', !!value),
+  setCollapsing: (ms) => ipcRenderer.send('notch:collapsing', ms),
   setPinned: (value) => ipcRenderer.send('notch:pinned', !!value),
   focus: () => ipcRenderer.send('notch:focus'),
   quit: () => ipcRenderer.send('notch:quit'),

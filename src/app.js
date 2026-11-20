@@ -105,6 +105,7 @@ const focus = {
 };
 
 let closeTimer = null;
+let closeSettleTimer = null;
 let toastTimer = null;
 let hoverTimer = null;
 let clockTimer = null;
@@ -1745,6 +1746,7 @@ function openNotch() {
   state.open = true;
   clearTimeout(closeTimer);
   api.setExpanded(true);
+  if (api.setCollapsing) api.setCollapsing(0);
   const notch = $('#notch');
   notch.classList.remove('closing');
   notch.classList.add('open');
@@ -1761,6 +1763,25 @@ function requestOpen() {
   else hoverTimer = setTimeout(openNotch, delay);
 }
 
+// How long the clip's close transition really runs: the animation-speed setting
+// scales it, so the window cannot assume a fixed 340ms. It keeps the panel
+// hoverable until the shape has finished shrinking, plus a little slack for the
+// last frames of the spring.
+function closeMs() {
+  const notch = $('#notch');
+  if (!notch) return 430;
+  const raw = getComputedStyle(notch).transitionDuration || '';
+  const longest = raw
+    .split(',')
+    .map((part) => {
+      const text = part.trim();
+      const value = parseFloat(text) || 0;
+      return text.endsWith('ms') ? value : value * 1000;
+    })
+    .reduce((a, b) => Math.max(a, b), 0);
+  return Math.round(longest || 340) + 90;
+}
+
 function closeNotch(force = false) {
   if (!state.open) return;
   if (state.pinned && !force) return;
@@ -1771,19 +1792,37 @@ function closeNotch(force = false) {
   notch.classList.remove('open');
   scheduleClock();
   notch.classList.add('closing');
-  setTimeout(() => {
+  // Read after the class swap, so the duration is the close one, not the open one.
+  // Everything that has to outlive the shrinking shape — the hover rect the
+  // window keeps open, the content that must not vanish mid-motion, the shader —
+  // runs off this number, not off a fixed guess that ignored the animation speed.
+  const closing = closeMs();
+  if (api.setCollapsing) api.setCollapsing(closing);
+  const settle = () => {
+    notch.removeEventListener('transitionend', onClipEnd);
     if (state.open) return;
     notch.classList.remove('closing');
     // Nothing of the shader is on screen now, so stop its render loop.
     if (window.notchGlass) window.notchGlass.setPaused(true);
-  }, 360);
+  };
+  // The transition ending is the accurate end of the shrink; the timer is only
+  // the safety net for a frame that never reports one.
+  const onClipEnd = (event) => {
+    if (event.target !== notch || event.propertyName !== 'clip-path') return;
+    clearTimeout(closeSettleTimer);
+    if (api.setCollapsing) api.setCollapsing(0);
+    settle();
+  };
+  notch.addEventListener('transitionend', onClipEnd);
+  clearTimeout(closeSettleTimer);
+  closeSettleTimer = setTimeout(settle, closing);
   notch.setAttribute('aria-expanded', 'false');
   hideMenu();
   $('#gameSearch').blur();
   clearTimeout(closeTimer);
   closeTimer = setTimeout(() => {
     if (!state.open) api.setExpanded(false);
-  }, 380);
+  }, closing + 40);
 }
 
 // Leaving the panel closes it at once — no linger timer to outrun. Only a pin

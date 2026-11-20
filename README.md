@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.25.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.25/Notch-Setup-1.2.25.exe)**
+**[Notch-Setup-1.2.26.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.26/Notch-Setup-1.2.26.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.26** — the panel stays hoverable while it closes. Its hover rect dropped
+back to the pill on a fixed 380 ms timer, whatever the close was doing — at an
+animation speed above ~112% that is before the shape has finished shrinking, so
+pointing at a panel that was visibly still there did nothing and you had to reach
+for the pill. The drawer now reports its own clip duration (it follows the
+animation-speed setting) and the hit rect follows it, ending on the transition's
+own `transitionend` with the timer only as a net. The same number drives the
+`closing` class and the shader pause, so the panel's contents no longer vanish
+mid-shrink at slower animation speeds.
 
 **v1.2.25** — the update check runs by itself, and shows what it found. It used to
 be asked only when the drawer's Update row was pressed, so unless you went looking

@@ -61,6 +61,9 @@ let win = null;
 let tray = null;
 let revealed = false;
 let isExpanded = false;
+// When the close animation stops mattering for the hit rect: the panel stays a
+// hover target for as long as any of it is still on screen.
+let collapsesUntil = 0;
 let pointerInside = false;
 let ignoringMouse = null;
 let pointerTimer = null;
@@ -911,8 +914,11 @@ function notchScreenRect() {
   const bounds = win.getBounds();
   // As soon as the cursor is on the pill the panel is on its way out, so the
   // whole panel footprint becomes the hover area right away instead of waiting
-  // for the renderer to confirm the expansion.
-  const wide = isExpanded || pointerInside;
+  // for the renderer to confirm the expansion. The same holds the other way
+  // round: while the panel is still shrinking it is still there to be pointed
+  // at, so the rect has to outlive the animation instead of snapping to the pill
+  // the moment the cursor leaves and the expansion flag drops.
+  const wide = isExpanded || pointerInside || Date.now() < collapsesUntil;
   const width = wide ? PANEL_W : Math.max(56, Math.min(200, prefs.settings.pillWidth || PILL_W));
   const gap = prefs.settings.notchStyle === 'island' ? NOTCH_GAP : 0;
   const height = wide ? PANEL_H - gap : PILL_H;
@@ -4661,6 +4667,14 @@ ipcMain.on('notch:expanded', (_event, expanded) => {
     setTimeout(syncDesktopSampling, 700);
   }
   syncDesktopSampling();
+});
+
+// The close is an animation, not an instant. The renderer knows how long its
+// own clip transition runs (it follows the animation-speed setting), so it says
+// so and the hover rect follows, rather than assuming a duration here.
+ipcMain.on('notch:collapsing', (_event, ms) => {
+  const wait = Math.max(0, Math.min(2000, Number(ms) || 0));
+  collapsesUntil = wait ? Date.now() + wait : 0;
 });
 
 ipcMain.on('notch:pinned', (_event, value) => {
