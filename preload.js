@@ -10,9 +10,11 @@ contextBridge.exposeInMainWorld('notchAPI', {
   quit: () => ipcRenderer.send('notch:quit'),
   setLogin: (value) => ipcRenderer.invoke('notch:login', !!value),
   rescan: () => ipcRenderer.invoke('notch:rescan'),
-  store: () => ipcRenderer.invoke('notch:store'),
+  // The store pages through Steam's search: one answer per screenful.
+  storePage: (options) => ipcRenderer.invoke('notch:store-page', options || {}),
   openStorePage: (appid) => ipcRenderer.invoke('notch:store-open', appid),
   addGame: () => ipcRenderer.invoke('notch:add-game'),
+  removeGame: (id) => ipcRenderer.invoke('notch:remove-game', id),
   launch: (id) => ipcRenderer.invoke('notch:launch', id),
   copyClip: (id) => ipcRenderer.invoke('notch:copy-clip', id),
   ready: () => ipcRenderer.send('notch:ready'),

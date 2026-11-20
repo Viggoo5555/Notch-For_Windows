@@ -1444,6 +1444,48 @@ html.demo .glass-backdrop {
   transform: translateY(0) scale(0.992);
 }
 
+/* Take a game out of the library: a quiet cross in the card's corner, drawn
+   when the card is under the pointer so it never competes with the artwork. */
+.game-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(10, 12, 18, 0.6);
+  color: var(--muted);
+  opacity: 0;
+  cursor: pointer;
+  transition:
+    opacity 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.game:hover .game-remove,
+.game-remove:focus-visible {
+  opacity: 1;
+}
+
+.game-remove:hover {
+  background: color-mix(in srgb, #ff7a7a 34%, transparent);
+  color: var(--ink);
+}
+
+.game-remove svg {
+  width: 9px;
+  height: 9px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
 .game .art {
   display: grid;
   place-items: center;
@@ -2294,17 +2336,39 @@ html.demo .glass-backdrop {
   color: #eef;
 }
 
+/* The scroll box holds spacers and the few rows around the viewport: the list is
+   as long as the catalogue, but only what is near the pointer is in the document. */
 .store-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: 58px;
-  gap: 7px;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
   padding-bottom: 2px;
+}
+
+.store-space {
+  width: 100%;
+}
+
+.store-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 58px;
+  gap: 7px;
+}
+
+.store-more {
+  padding: 9px 2px 2px;
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+  text-align: center;
+}
+
+.store-notice:empty {
+  display: none;
 }
 
 .store-list::-webkit-scrollbar {

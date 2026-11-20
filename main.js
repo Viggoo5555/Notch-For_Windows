@@ -143,7 +143,10 @@ function savePrefs() {
 // ---------------------------------------------------------------------- games
 
 function rescanGames() {
-  games = scanGames(prefs.customGames || []);
+  // Games taken out of the library stay out of every scan: a rescan must not
+  // bring back something that was deliberately removed.
+  const hidden = new Set(Array.isArray(prefs.hiddenGames) ? prefs.hiddenGames : []);
+  games = scanGames(prefs.customGames || []).filter((game) => !hidden.has(game.id));
   return games;
 }
 
@@ -4678,14 +4681,13 @@ ipcMain.handle('notch:rescan', () => {
 // them: Steam's own storefront, whose featured list is public JSON with prices
 // in the buyer's currency.
 const STORE_TTL = 10 * 60 * 1000;
-// Steam's front page lists about thirty games. Its search answers a hundred at a
-// time and can sort the whole catalogue by review score, which is the list a
-// person actually wants when they ask what to play — so the store is built from
-// the search, and the featured list is only there for today's deals and currency.
-const STORE_PAGES = 4;
+// The store pages through Steam's own search rather than fetching one fixed list:
+// a hundred rows per answer, in the order the view asked for, one answer per
+// screenful. The panel only draws the rows around the pointer, so the list can be
+// as long as Steam is willing to keep answering.
 const STORE_PAGE_SIZE = 100;
-let storeCache = null;
-let storeAt = 0;
+const storePageCache = new Map();
+let storeCurrencyCache = null;
 
 function storeCountry() {
   try {
@@ -4756,69 +4758,23 @@ function parseSteamRows(html) {
   return rows;
 }
 
-async function fetchSteamPage(start, extra = {}) {
-  const query = new URLSearchParams({
-    start: String(start),
-    count: String(STORE_PAGE_SIZE),
-    sort_by: 'Reviews_DESC',
-    infinite: '1',
-    cc: storeCountry(),
-    l: 'en',
-    ...extra,
-  });
-  try {
-    const response = await net.fetch(`https://store.steampowered.com/search/results/?${query}`);
-    if (!response.ok) return null;
-    const data = await response.json();
-    return parseSteamRows(data && data.results_html);
-  } catch {
-    return null;
+// Which of Steam's orders answers each sort the store offers. It has no "most
+// reviewed" or "biggest discount" order of its own, so those ride on its review
+// ranking; the deals chip asks Steam for the sale list on top of that.
+const STORE_SORT_BY = {
+  reviews: 'Reviews_DESC',
+  popular: 'Reviews_DESC',
+  discount: 'Reviews_DESC',
+  price: 'Price_ASC',
+  pricey: 'Price_DESC',
+  name: 'Name_ASC',
+};
+
+// The currency is only how a price is written, so it is asked for once and kept.
+async function storeCurrency() {
+  if (storeCurrencyCache && Date.now() - storeCurrencyCache.at < STORE_TTL) {
+    return storeCurrencyCache.currency;
   }
-}
-
-async function fetchStore() {
-  if (storeCache && Date.now() - storeAt < STORE_TTL) return storeCache;
-  const merged = new Map();
-  const keep = (row, source) => {
-    if (!row || !row.appid) return;
-    const existing = merged.get(row.appid) || {
-      appid: row.appid,
-      name: '',
-      discount: 0,
-      final: null,
-      original: null,
-      label: '',
-      percent: 0,
-      count: 0,
-      sources: new Set(),
-    };
-    if (!existing.name && row.name) existing.name = row.name;
-    if (row.final !== null && existing.final === null) existing.final = row.final;
-    if (row.final !== null) existing.final = Math.min(existing.final, row.final);
-    existing.discount = Math.max(existing.discount, row.discount || 0);
-    if (row.original !== null && row.original !== undefined) {
-      existing.original = Math.max(existing.original || 0, row.original);
-    }
-    if (!existing.percent && row.percent) {
-      existing.label = row.label;
-      existing.percent = row.percent;
-      existing.count = row.count;
-    }
-    existing.sources.add(source);
-    merged.set(row.appid, existing);
-  };
-
-  // The deals page and the four catalogue pages are independent, so they go out
-  // together: the store is ready in about the time of its slowest answer.
-  const [deals, ...pages] = await Promise.all([
-    fetchSteamPage(0, { specials: '1' }),
-    ...Array.from({ length: STORE_PAGES }, (_value, page) =>
-      fetchSteamPage(page * STORE_PAGE_SIZE),
-    ),
-  ]);
-  for (const row of deals || []) keep(row, 'deal');
-  for (const page of pages) for (const row of page || []) keep(row, 'top');
-
   let currency = 'USD';
   try {
     const response = await net.fetch(
@@ -4831,62 +4787,94 @@ async function fetchStore() {
         (data.top_sellers && data.top_sellers.items && data.top_sellers.items[0]) ||
         null;
       if (first && first.currency) currency = String(first.currency);
-      for (const [source, section] of [
-        ['deal', data.specials],
-        ['top', data.top_sellers],
-        ['new', data.new_releases],
-      ]) {
-        for (const item of (section && section.items) || []) {
-          keep(
-            {
-              appid: Number(item.id) || 0,
-              name: String(item.name || '').trim(),
-              discount: Math.max(0, Number(item.discount_percent) || 0),
-              final: Number.isFinite(Number(item.final_price))
-                ? Math.max(0, Number(item.final_price))
-                : null,
-              original: Number.isFinite(Number(item.original_price))
-                ? Math.max(0, Number(item.original_price))
-                : null,
-              label: item.review_score_desc || '',
-              percent: 0,
-              count: 0,
-            },
-            source,
-          );
-        }
-      }
     }
   } catch {
-    /* the featured list is a bonus: the search rows carry everything essential */
+    /* the rows still carry their prices; only the symbol would be a guess */
   }
-
-  const items = [...merged.values()]
-    .filter((row) => row.name)
-    .map((row) => {
-      const priced = row.final !== null;
-      const final = priced ? row.final : 0;
-      return {
-        appid: row.appid,
-        name: row.name,
-        source: row.discount > 0 ? 'deal' : row.sources.has('new') ? 'new' : 'top',
-        discount: row.discount,
-        original: priced ? row.original || final : 0,
-        final,
-        priced,
-        free: priced && final === 0,
-        currency,
-        review: row.percent ? { label: row.label, percent: row.percent, count: row.count } : null,
-        art: `https://cdn.cloudflare.steamstatic.com/steam/apps/${row.appid}/header.jpg`,
-      };
-    });
-  if (!items.length) return storeCache || { at: Date.now(), items: [], error: 'empty' };
-  storeCache = { at: Date.now(), items };
-  storeAt = Date.now();
-  return storeCache;
+  storeCurrencyCache = { at: Date.now(), currency };
+  return currency;
 }
 
-ipcMain.handle('notch:store', () => fetchStore());
+function storeItem(row, currency) {
+  const priced = row.final !== null;
+  const final = priced ? row.final : 0;
+  return {
+    appid: row.appid,
+    name: row.name,
+    source: row.discount > 0 ? 'deal' : 'top',
+    discount: row.discount,
+    original: priced ? Math.max(row.original || 0, final) : 0,
+    final,
+    priced,
+    free: priced && final === 0,
+    currency,
+    review: row.percent ? { label: row.label, percent: row.percent, count: row.count } : null,
+    art: `https://cdn.cloudflare.steamstatic.com/steam/apps/${row.appid}/header.jpg`,
+  };
+}
+
+// One page of Steam's search, in the order the store asked for it. Answers are
+// kept for the same ten minutes the old single fetch was: scrolling back up a
+// list should not ask Steam for rows it has already given.
+async function fetchStorePage(options = {}) {
+  const start = Math.max(0, Math.trunc(Number(options.start) || 0));
+  const term = String(options.term || '').trim().slice(0, 80);
+  const sort = STORE_SORT_BY[String(options.sort || '')] || STORE_SORT_BY.reviews;
+  const maxprice = Math.max(0, Number(options.maxprice) || 0);
+  const query = new URLSearchParams({
+    start: String(start),
+    count: String(STORE_PAGE_SIZE),
+    sort_by: sort,
+    infinite: '1',
+    cc: storeCountry(),
+    l: 'en',
+  });
+  if (term) query.set('term', term);
+  // The sale list is the one filter Steam can answer for itself; a threshold
+  // inside it (25 % or more) is left to the view.
+  if (options.deals) query.set('specials', '1');
+  if (maxprice) query.set('maxprice', String(maxprice));
+
+  const key = query.toString();
+  const hit = storePageCache.get(key);
+  if (hit && Date.now() - hit.at < STORE_TTL) return hit;
+
+  let rows = null;
+  try {
+    const response = await net.fetch(`https://store.steampowered.com/search/results/?${query}`);
+    if (response.ok) {
+      const data = await response.json();
+      rows = parseSteamRows(data && data.results_html);
+    }
+  } catch {
+    rows = null;
+  }
+  if (!rows) return { items: [], more: false, error: 'unreachable' };
+
+  const currency = await storeCurrency();
+  const result = {
+    at: Date.now(),
+    items: rows.map((row) => storeItem(row, currency)),
+    // A full page means there is another behind it; Steam answers with what it
+    // has left on the last one.
+    more: rows.length >= STORE_PAGE_SIZE,
+  };
+  storePageCache.set(key, result);
+  if (storePageCache.size > 80) {
+    let oldestKey = null;
+    let oldestAt = Infinity;
+    for (const [cacheKey, value] of storePageCache) {
+      if (value.at < oldestAt) {
+        oldestAt = value.at;
+        oldestKey = cacheKey;
+      }
+    }
+    if (oldestKey) storePageCache.delete(oldestKey);
+  }
+  return result;
+}
+
+ipcMain.handle('notch:store-page', (_event, options) => fetchStorePage(options || {}));
 
 // Buying is still Steam's: a row opens the game's own page.
 ipcMain.handle('notch:store-open', (_event, appid) => {
@@ -4915,6 +4903,29 @@ ipcMain.handle('notch:add-game', async () => {
   savePrefs();
   const list = rescanGames();
   resolveIcons();
+  return list;
+});
+
+// Removing a game never touches a file on disk: it is taken out of the library,
+// and the scan is asked not to bring it back. A game added by hand also leaves
+// the list of shortcuts, since that list is where it came from.
+ipcMain.handle('notch:remove-game', (_event, id) => {
+  const key = String(id || '');
+  if (!key) return games;
+  const game = games.find((entry) => entry.id === key) || null;
+  if (game && game.kind === 'local' && game.path) {
+    const wanted = String(game.path).toLowerCase();
+    prefs.customGames = (prefs.customGames || []).filter(
+      (entry) => String((entry && entry.path) || '').toLowerCase() !== wanted,
+    );
+  }
+  const hidden = new Set(Array.isArray(prefs.hiddenGames) ? prefs.hiddenGames : []);
+  hidden.add(key);
+  // Bounded, so a long-lived settings file cannot grow forever.
+  prefs.hiddenGames = [...hidden].slice(-500);
+  savePrefs();
+  const list = rescanGames();
+  if (win && !win.isDestroyed()) win.webContents.send('notch:games', list);
   return list;
 });
 

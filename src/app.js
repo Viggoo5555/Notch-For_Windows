@@ -35,9 +35,20 @@ const state = {
   icons: {},
   settingsOpen: false,
   detail: null,
-  // The store is drawn here from Steam's own prices; sorting and filtering
-  // happen in this window, not on somebody's server.
-  store: { items: [], loading: false, query: '', discount: 0, budget: 0, sort: 'reviews' },
+  // The store is drawn here from Steam's own prices, paged by Steam's search and
+  // filled in as the list is scrolled: items are what has been fetched so far.
+  store: {
+    items: [],
+    seen: new Set(),
+    more: true,
+    loading: false,
+    tried: false,
+    epoch: 0,
+    query: '',
+    discount: 0,
+    budget: 0,
+    sort: 'reviews',
+  },
   // What the updater last heard from the releases page.
   update: {
     current: '',
@@ -306,9 +317,54 @@ function gameCard(game) {
   triangle.setAttribute('d', 'M3.4 1.9 9.9 6l-6.5 4.1Z');
   play.appendChild(triangle);
 
-  button.append(art, text, play);
+  // A cross in the corner takes the game out of the library; the card still
+  // launches it, so the press has to stop there rather than bubble up.
+  // A span, not a button: the card is one, and a button cannot sit inside one.
+  const remove = document.createElement('span');
+  remove.className = 'game-remove';
+  remove.setAttribute('role', 'button');
+  remove.tabIndex = 0;
+  remove.title = 'Remove from library';
+  remove.setAttribute('aria-label', `Remove ${game.name} from the library`);
+  const cross = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  cross.setAttribute('viewBox', '0 0 12 12');
+  cross.setAttribute('aria-hidden', 'true');
+  const stroke = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  stroke.setAttribute('d', 'M3.2 3.2 8.8 8.8M8.8 3.2 3.2 8.8');
+  cross.appendChild(stroke);
+  remove.appendChild(cross);
+  remove.addEventListener('pointerdown', (event) => event.stopPropagation());
+  remove.addEventListener('click', (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    removeGame(game);
+  });
+  remove.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    event.stopPropagation();
+    removeGame(game);
+  });
+
+  button.append(art, text, play, remove);
   button.addEventListener('click', () => launchGame(game));
   return button;
+}
+
+// The library is a list of what you want to see: taking a game out is Notch's
+// own note, and nothing on disk is touched.
+async function removeGame(game) {
+  if (!api.removeGame || !game) return;
+  try {
+    const list = await api.removeGame(game.id);
+    if (!Array.isArray(list)) return;
+    state.games = list;
+    renderGames();
+    if (state.detail === 'library') renderDetail();
+    toast(`Removed ${game.name}`);
+  } catch {
+    toast('Could not remove that game');
+  }
 }
 
 // Icons arrive after the first paint: swap them in without re-rendering the
@@ -1047,6 +1103,8 @@ function openDetail(kind) {
 function closeDetail() {
   if (!state.detail) return;
   state.detail = null;
+  // The store view is gone: a page that lands after this has nothing to paint.
+  storePaint = null;
   if (api.detail) api.detail(null);
   $('#detail').hidden = true;
   $('#grid').hidden = false;
@@ -1067,7 +1125,6 @@ function renderDetail() {
     renderDetailLibrary(body);
   } else if (kind === 'store') {
     renderDetailStore(body);
-    loadStore();
   } else if (kind === 'focus') {
     renderDetailFocus(body);
   } else if (kind === 'system') {
@@ -1110,9 +1167,9 @@ function renderDetailLibrary(body) {
 
 // ------------------------------------------------------------------- store
 
-// The store is Steam's catalogue with Notch's own hands on it: one fetch of the
-// top of the catalogue — sorted by what players made of it — then every filter and
-// every sort happens here, in this window.
+// The store is Steam's catalogue with Notch's own hands on it. The list is paged
+// out of Steam's own search — a hundred rows at a time, in the order chosen here —
+// and drawn a screenful at a time, so it scrolls as far as it is scrolled.
 const STORE_DISCOUNTS = [0, 25, 50, 75];
 const STORE_BUDGETS = [0, 500, 1000, 2000];
 const STORE_SORTS = [
@@ -1146,48 +1203,84 @@ function storeSource(item) {
   return item.discount ? 'Deal' : 'Steam';
 }
 
-async function loadStore() {
+// The view is drawn into this, so a page that lands while it is open repaints it
+// in place instead of rebuilding the panel (which would lose the scroll and the
+// caret in the search box). Null while the store page is closed.
+let storePaint = null;
+
+// A different search, order or filter is a different list: drop what has been
+// fetched and start again from the first row.
+function resetStore() {
   const store = state.store;
-  if (store.loading || store.tried || !api.store) return;
-  store.tried = true;
+  store.epoch += 1;
+  store.items = [];
+  store.seen.clear();
+  store.more = true;
+  store.loading = false;
+  store.tried = false;
+}
+
+// One more screenful from Steam, appended to what is already here. The order is
+// Steam's (it is the order the view asked for), so a page can simply be added.
+async function loadStorePage() {
+  const store = state.store;
+  if (store.loading || !store.more || !api.storePage) return;
+  const epoch = store.epoch;
   store.loading = true;
+  if (storePaint) storePaint();
   try {
-    const data = await api.store();
-    if (data && Array.isArray(data.items)) {
-      store.items = data.items;
-      if (data.error) toast('Steam is not answering');
+    const page = await api.storePage({
+      start: store.items.length,
+      term: store.query.trim(),
+      sort: store.sort,
+      deals: store.discount > 0,
+      maxprice: store.budget ? store.budget / 100 : 0,
+    });
+    // A filter changed while this page was on its way: it belongs to a list that
+    // is no longer on screen.
+    if (epoch !== store.epoch) return;
+    const items = page && Array.isArray(page.items) ? page.items : [];
+    const batch = items.filter((item) => item && item.appid && !store.seen.has(item.appid));
+    // Two of the orders on offer have no answer in Steam's search, so each page
+    // is put in that order as it arrives: the list keeps its place and every
+    // screenful still leads with what its name promises.
+    if (store.sort === 'popular') {
+      batch.sort(
+        (a, b) =>
+          (b.review ? b.review.count : -1) - (a.review ? a.review.count : -1),
+      );
+    } else if (store.sort === 'discount') {
+      batch.sort((a, b) => b.discount - a.discount || a.final - b.final);
     }
+    for (const item of batch) {
+      store.seen.add(item.appid);
+      store.items.push(item);
+    }
+    store.more = !!page && page.more === true && items.length > 0;
+    store.tried = true;
+    if (page && page.error) toast('Steam is not answering');
   } catch {
+    if (epoch === store.epoch) store.tried = true;
     toast('Steam is not answering');
   } finally {
-    store.loading = false;
-    if (state.detail === 'store') renderDetail();
+    if (epoch === store.epoch) {
+      store.loading = false;
+      if (storePaint) storePaint();
+    }
   }
 }
 
+// Steam answered the search itself, so the rows are already the matches; the
+// chips are the part that is filtered here, as pages arrive.
 function storeRows() {
   const store = state.store;
-  const query = store.query.trim().toLowerCase();
-  const rows = store.items.filter((item) => {
+  return store.items.filter((item) => {
     if (item.discount < store.discount) return false;
     // A budget is a question about a price, and a row Steam did not quote one for
     // cannot answer it — so it steps out rather than pretending to be free.
     if (store.budget && (!item.priced || item.final > store.budget)) return false;
-    if (query && !item.name.toLowerCase().includes(query)) return false;
     return true;
   });
-  const sorters = {
-    reviews: (a, b) =>
-      (b.review ? b.review.percent : -1) - (a.review ? a.review.percent : -1) ||
-      (b.review ? b.review.count : 0) - (a.review ? a.review.count : 0),
-    popular: (a, b) =>
-      (b.review ? b.review.count : -1) - (a.review ? a.review.count : -1),
-    discount: (a, b) => b.discount - a.discount || a.final - b.final,
-    price: (a, b) => a.final - b.final,
-    pricey: (a, b) => b.final - a.final,
-    name: (a, b) => a.name.localeCompare(b.name),
-  };
-  return rows.sort(sorters[store.sort] || sorters.discount);
 }
 
 function storeRow(item) {
@@ -1292,65 +1385,149 @@ function renderDetailStore(body) {
   };
   for (const value of STORE_DISCOUNTS) {
     chipButton(value ? `−${value}% or more` : 'All', store.discount === value, () => {
+      if (store.discount === value) return;
       store.discount = value;
+      resetStore();
       renderDetail();
     });
   }
   for (const value of STORE_BUDGETS) {
     chipButton(value ? `Under ${money(value, currency)}` : 'Any price', store.budget === value, () => {
+      if (store.budget === value) return;
       store.budget = value;
+      resetStore();
       renderDetail();
     });
   }
-  chipButton(store.loading ? 'Asking Steam…' : 'Refresh', false, () => {
-    store.tried = false;
-    store.items = [];
+  chipButton('Refresh', false, () => {
+    resetStore();
     renderDetail();
   });
   wrap.appendChild(chips);
 
+  // What stands in when there are no rows to draw (loading, closed, nothing
+  // matches). The list itself is only the scroll box; its contents are a top
+  // spacer, the few rows around the viewport, and a bottom spacer.
+  const notice = document.createElement('div');
+  notice.className = 'store-notice';
+
   const list = document.createElement('div');
   list.className = 'store-list';
-  wrap.appendChild(list);
+  const spaceTop = document.createElement('div');
+  spaceTop.className = 'store-space';
+  const grid = document.createElement('div');
+  grid.className = 'store-grid';
+  const spaceBottom = document.createElement('div');
+  spaceBottom.className = 'store-space';
+  const footer = document.createElement('div');
+  footer.className = 'store-more';
+  list.append(spaceTop, grid, spaceBottom, footer);
+
+  wrap.append(notice, list);
+  body.appendChild(wrap);
+
+  // Two columns, 58 px rows and a 7 px gap, so one row of the virtual list is one
+  // step of the scroll. Only the rows around the viewport exist in the document:
+  // two above and two below mean a fast wheel never shows a hole, and the spacers
+  // keep the scrollbar honest about the length of the whole list.
+  const STEP = 58 + 7;
+  const MARGIN = 2;
+  let paintedFrom = -1;
+  let paintedTo = -1;
+  let paintedCount = -1;
 
   const paint = () => {
-    list.replaceChildren();
-    if (store.loading && !store.items.length) {
-      list.appendChild(emptyBlock('Asking Steam…', 'Prices, discounts and what is on sale today.'));
-      return;
-    }
+    const meta = $('#detailMeta');
+    if (meta) meta.textContent = store.items.length ? `${store.items.length} on the list` : '';
+
+    const rows = storeRows();
+    notice.replaceChildren();
     if (!store.items.length) {
-      list.appendChild(
+      const asking = store.loading || !store.tried;
+      notice.appendChild(
         emptyBlock(
-          'The store is closed',
-          api.store
-            ? 'Steam did not answer. Press Refresh in a moment.'
+          asking ? 'Asking Steam…' : 'The store is closed',
+          api.storePage
+            ? 'Prices, discounts and what is on sale today.'
             : 'Start the app from Notch.exe to reach the store.',
         ),
       );
-      return;
+    } else if (!rows.length) {
+      notice.appendChild(emptyBlock('Nothing matches', 'Loosen a filter or clear the search.'));
     }
-    const rows = storeRows();
-    if (!rows.length) {
-      list.appendChild(emptyBlock('Nothing matches', 'Loosen a filter or clear the search.'));
-      return;
-    }
-    for (const item of rows) list.appendChild(storeRow(item));
-  };
-  paint();
+    list.hidden = !rows.length;
+    if (!rows.length) return;
 
+    const total = Math.ceil(rows.length / 2);
+    const viewH = list.clientHeight || 320;
+    const first = Math.max(0, Math.min(total - 1, Math.floor(list.scrollTop / STEP) - MARGIN));
+    const last = Math.min(
+      total - 1,
+      Math.max(first, Math.ceil((list.scrollTop + viewH) / STEP) + MARGIN),
+    );
+
+    spaceTop.style.height = `${first * STEP}px`;
+    spaceBottom.style.height = `${(total - 1 - last) * STEP}px`;
+    // The same rows are redrawn only when the window actually moved or the list
+    // grew: a short scroll inside the margin keeps the pictures it already has.
+    if (first !== paintedFrom || last !== paintedTo || rows.length !== paintedCount) {
+      paintedFrom = first;
+      paintedTo = last;
+      paintedCount = rows.length;
+      grid.replaceChildren();
+      for (let index = first * 2; index < Math.min(rows.length, (last + 1) * 2); index += 1) {
+        grid.appendChild(storeRow(rows[index]));
+      }
+    }
+    footer.textContent = store.loading ? 'Asking Steam…' : store.more ? '' : 'That is every match';
+
+    // A chip can leave the list shorter than the viewport while Steam still has
+    // more rows behind it: keep asking until it fills, but not forever.
+    if (store.more && !store.loading && store.items.length < 600) {
+      if (list.scrollHeight <= list.clientHeight + 400) loadStorePage();
+    }
+  };
+
+  storePaint = paint;
+  paint();
+  if (!store.items.length && !store.loading && !store.tried) loadStorePage();
+
+  // The list never reaches its end before the next page is there: four hundred
+  // pixels from the bottom is the point to ask for it.
+  let scrollFrame = 0;
+  list.addEventListener(
+    'scroll',
+    () => {
+      if (scrollFrame) return;
+      scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = 0;
+        paint();
+        if (list.scrollTop + list.clientHeight >= list.scrollHeight - 400) loadStorePage();
+      });
+    },
+    { passive: true },
+  );
+
+  // Typing filters what is on screen at once and asks Steam for the real matches
+  // a moment later, without rebuilding the view, so the caret stays put.
+  let queryTimer = 0;
   input.addEventListener('input', () => {
     store.query = input.value;
-    paint();
+    clearTimeout(queryTimer);
+    queryTimer = setTimeout(() => {
+      resetStore();
+      list.scrollTop = 0;
+      paint();
+      loadStorePage();
+    }, 320);
   });
   sort.addEventListener('change', () => {
     store.sort = sort.value;
+    resetStore();
+    list.scrollTop = 0;
     paint();
+    loadStorePage();
   });
-
-  body.appendChild(wrap);
-  const meta = $('#detailMeta');
-  if (meta) meta.textContent = store.items.length ? `${store.items.length} on the list` : '';
 }
 
 function renderDetailFocus(body) {
@@ -1926,6 +2103,11 @@ function createDemoBridge() {
     setLogin: async () => false,
     rescan: async () => games,
     addGame: async () => games,
+    removeGame: async (id) => {
+      const at = games.findIndex((game) => game.id === id);
+      if (at >= 0) games.splice(at, 1);
+      return games;
+    },
     pickWallpaper: async () => ({ canceled: true }),
     launch: async (id) => {
       const game = games.find((item) => item.id === id);

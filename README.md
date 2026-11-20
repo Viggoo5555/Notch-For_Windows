@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.23.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.23/Notch-Setup-1.2.23.exe)**
+**[Notch-Setup-1.2.24.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.24/Notch-Setup-1.2.24.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -66,13 +66,17 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   put it where you want it — the order is kept between restarts.
 - **Library and store** — the library scans Steam, Epic and your own shortcuts, shows
   the cover art, and launches a game with a click; add a shortcut by hand if a
-  launcher keeps it hidden. The bag icon beside those buttons opens **Store** inside
+  launcher keeps it hidden, and a hovered card has a small cross that takes a game
+  out of the library for good (a rescan will not bring it back). The bag icon beside
+  those buttons opens **Store** inside
   the panel: the top of Steam's whole catalogue, best reviewed first, with what players
   said about each game on the row ("Overwhelmingly Positive · 99%"), today's discounts,
   its own search, discount chips (−25 / −50 / −75 %), price ceilings and sorting by
   review score, number of reviews, discount, price or name — all happening in this
-  window. Steam's search answers a hundred games at a time, so the list is four
-  hundred deep instead of the thirty on its front page. SteamDB has no public API and
+  window.   Steam's search answers a hundred games at a time and the list asks for the next
+  hundred as you reach the bottom, so it scrolls forever; each row carries the
+  game's own header art, and only the handful of rows around the pointer is ever
+  drawn, so a list thousands long stays as light as a list of ten. SteamDB has no public API and
   its terms forbid scraping it, so the numbers come from Steam's own storefront, which
   is where SteamDB reads them too; a row opens the game's page when you want to buy.
 - **Jarvis works Notch itself** — the assistant owns the app it lives in, not just
@@ -358,6 +362,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.24** — a store you can fall down, with the games' own art, and a library
+you can prune. Every row in the store carries the game's header picture now: the
+panel's content policy was quietly refusing Steam's image host, so the rows were
+text only. The list no longer stops at a fixed four hundred — it asks Steam's own
+search for the next hundred as you reach the bottom, and only the rows around the
+viewport are in the document, two above and two below, with spacers keeping the
+scrollbar honest about the whole length. Search, the discount and price chips and
+the six orders restart the list against Steam instead of filtering one fixed
+fetch. In the library, hovering a game shows a small cross in its corner: it takes
+the game out of the library, a rescan leaves it out, and nothing on disk is
+deleted. Releases carry the installer only.
 
 **v1.2.23** — the bar is the library's glass in every state. When the strip of
 desktop behind the bar cannot be read — a locked screen, a display that is asleep,
