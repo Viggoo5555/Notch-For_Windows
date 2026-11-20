@@ -1427,7 +1427,14 @@ function planRung(hardware) {
   if (vram >= 12) return 3;
   if (vram >= 6) return 2;
   if (vram >= 4) return 1;
-  if (hardware.cores >= 8 && hardware.ramGb >= 16) return 1;
+  // No dedicated graphics: the processor and the RAM carry every model, so
+  // they decide the rung. 24 GB of RAM holds an 8B reasoner beside Windows and
+  // the rest of the trio; 16 GB is enough for the 3B/7B pair; below that the
+  // small rung is the one that stays usable instead of swapping.
+  const { cores, ramGb } = hardware;
+  if (ramGb >= 24 && cores >= 8) return 2;
+  if (ramGb >= 16 && cores >= 6) return 1;
+  if (ramGb >= 12 && cores >= 4) return 1;
   return 0;
 }
 
@@ -1488,7 +1495,11 @@ function recommendPlan(hardware = detectHardware()) {
     note:
       `Three brains for ${capacity}: ${fast.label} answers straight away, ` +
       `${think.label} thinks the harder questions through, and ${code.label} is the code specialist. ` +
-      `${formatTotalGb(totalGb)} in total.`,
+      `${formatTotalGb(totalGb)} in total.` +
+      // Without a card they run on the processor: honest about what that means.
+      (hardware.gpuMemoryGb > 0
+        ? ''
+        : ' They run on the processor, so the small one is instant and the other two take a few seconds a sentence.'),
   };
 }
 
@@ -2003,6 +2014,238 @@ async function runNotchAction(raw) {
   return '';
 }
 
+// ------------------------------------------------------------ files on disk
+
+// Where a file the user did not place goes: the Desktop, because that is where
+// a person looks for the thing they just asked for.
+function desktopPath() {
+  try {
+    const desktop = app.getPath('desktop');
+    if (desktop && fs.existsSync(desktop)) return desktop;
+  } catch {
+    /* no desktop on this system */
+  }
+  try {
+    return app.getPath('home');
+  } catch {
+    return process.cwd();
+  }
+}
+
+const PLACE_FOLDERS = [
+  [/^(?:the\s+|my\s+|min\s+|mit\s+)?(?:desktop|skrivebord)\b/i, () => desktopPath()],
+  [/^(?:the\s+|my\s+)?(?:documents?|dokumenter)\b/i, () => app.getPath('documents')],
+  [/^(?:the\s+|my\s+)?downloads?\b/i, () => app.getPath('downloads')],
+  [/^(?:the\s+|my\s+)?(?:pictures?|billeder)\b/i, () => app.getPath('pictures')],
+  [/^(?:the\s+|my\s+)?(?:videos?|videoer)\b/i, () => app.getPath('videos')],
+  [/^(?:home|hjem|profile|brugerprofil)\b/i, () => app.getPath('home')],
+];
+
+function placeFolder(place) {
+  for (const [pattern, get] of PLACE_FOLDERS) {
+    if (!pattern.test(place)) continue;
+    try {
+      return get() || '';
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+// "notes.txt on the desktop", "projects/hello.py in documents" — the place at
+// the end of the order becomes the folder the name is relative to.
+const PLACE_WORDS =
+  '(desktop|skrivebord|documents?|dokumenter|downloads?|pictures?|billeder|videos?|videoer|home|hjem)';
+
+function splitPlace(raw) {
+  const text = String(raw || '').trim();
+  const match = text.match(
+    new RegExp(`^(.*?)\\s+(?:in|into|on|inside|i|på|inde i)\\s+(?:the\\s+|my\\s+|min\\s+|mit\\s+)?${PLACE_WORDS}\\s*$`, 'i'),
+  );
+  if (match) return { name: match[1].trim(), base: placeFolder(match[2]) };
+  return { name: text, base: '' };
+}
+
+// A name is a name, not a route out of the folder: a subfolder is welcome
+// (projects/app.py), `..` and the characters Windows cannot store are not.
+function resolveTarget(raw, fallbackName = '') {
+  let { name, base } = splitPlace(raw);
+  name = name
+    .replace(/^[\s"'`“”]+|[\s"'`“”]+$/g, '')
+    .replace(/[.!?]+$/, '')
+    .trim();
+  if (!name && fallbackName) name = fallbackName;
+  if (!name) return '';
+  const network = name.startsWith('\\\\');
+  const drive = name.match(/^([a-zA-Z]):[\\/]/);
+  const rooted = !network && !drive && name.startsWith('/');
+  let rest = name;
+  if (drive) rest = name.slice(drive[0].length);
+  else if (network) rest = name.slice(2);
+  else if (rooted) rest = name.slice(1);
+  const parts = rest.split(/[\\/]+/).map((part) => part.trim());
+  // A step up the tree would put the file anywhere on the disk, so it is not a
+  // name. `.` and `..` are the only segments refused outright.
+  if (!parts.length || parts.some((part) => /^\.+$/.test(part))) return '';
+  const clean = parts
+    .map((part) => part.replace(/[<>:"|?*\u0000-\u001f]/g, '').replace(/[. ]+$/g, '').trim())
+    .filter(Boolean);
+  if (!clean.length) return '';
+  // An absolute path stays absolute, and is joined with its own Windows rules so
+  // the answer does not depend on the system the code is running on.
+  if (drive) return path.win32.join(`${drive[1]}:\\`, ...clean);
+  if (network) return path.win32.join('\\\\', ...clean);
+  if (rooted) return path.posix.join('/', ...clean);
+  return path.join(base || desktopPath(), ...clean);
+}
+
+function displayPath(target) {
+  try {
+    const relative = path.relative(app.getPath('home'), target);
+    if (relative && !relative.startsWith('..')) return relative;
+  } catch {
+    /* fall back to the full path */
+  }
+  return target;
+}
+
+function saveFileAt(raw, content, fallbackName = '') {
+  const target = resolveTarget(raw, fallbackName);
+  if (!target) return { ok: false, reason: 'no-name' };
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, String(content ?? ''), 'utf8');
+    return { ok: true, path: target };
+  } catch (error) {
+    return { ok: false, reason: 'write', message: String((error && error.message) || error) };
+  }
+}
+
+function makeFolderAt(raw) {
+  const target = resolveTarget(raw);
+  if (!target) return { ok: false, reason: 'no-name' };
+  try {
+    fs.mkdirSync(target, { recursive: true });
+    return { ok: true, path: target };
+  } catch (error) {
+    return { ok: false, reason: 'write', message: String((error && error.message) || error) };
+  }
+}
+
+// The code from a reply: the first fenced block when there is one, the whole
+// answer otherwise. Tags the model wrote for the machine never reach the file.
+function splitReplyCode(reply) {
+  const text = String(reply || '');
+  const fence = text.match(/```([\w+#.\-]*)[^\S\n]*\n([\s\S]*?)```/);
+  if (fence) {
+    return { language: String(fence[1] || '').toLowerCase(), code: `${fence[2].replace(/\s+$/, '')}\n` };
+  }
+  const bare = text.replace(/\[\[[^\]]*\]\]/g, '').trim();
+  return { language: '', code: bare ? `${bare}\n` : '' };
+}
+
+const CODE_EXTENSIONS = {
+  python: 'py',
+  py: 'py',
+  javascript: 'js',
+  js: 'js',
+  node: 'js',
+  typescript: 'ts',
+  ts: 'ts',
+  html: 'html',
+  css: 'css',
+  json: 'json',
+  sql: 'sql',
+  bash: 'sh',
+  sh: 'sh',
+  shell: 'sh',
+  powershell: 'ps1',
+  ps1: 'ps1',
+  csharp: 'cs',
+  'c#': 'cs',
+  cs: 'cs',
+  cpp: 'cpp',
+  'c++': 'cpp',
+  c: 'c',
+  java: 'java',
+  go: 'go',
+  golang: 'go',
+  rust: 'rs',
+  rs: 'rs',
+  jsx: 'jsx',
+  tsx: 'tsx',
+  markdown: 'md',
+  md: 'md',
+};
+
+const CODE_STOPWORDS = new Set([
+  'write', 'create', 'make', 'build', 'generate', 'code', 'script', 'program', 'file', 'app',
+  'application', 'a', 'an', 'the', 'me', 'please', 'that', 'which', 'for', 'to', 'in', 'with',
+  'using', 'simple', 'small', 'basic', 'some', 'my', 'new', 'can', 'you', 'could', 'would',
+  'lav', 'skriv', 'byg', 'en', 'et', 'der', 'som', 'til', 'med', 'og', 'jeg', 'gerne', 'python',
+  'javascript', 'typescript', 'html', 'css', 'json', 'sql', 'bash', 'powershell', 'java', 'rust',
+  'go', 'react', 'component', 'website', 'game', 'bot', 'scraper', 'api', 'function', 'class',
+]);
+
+function codeFileName(request, language) {
+  const words = String(request || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/gi, ' ')
+    .split(/\s+/)
+    .filter((word) => word && word.length > 1 && !CODE_STOPWORDS.has(word))
+    .slice(0, 4);
+  const base = words.join('-').slice(0, 40) || 'notch-script';
+  return `${base}.${CODE_EXTENSIONS[language] || 'txt'}`;
+}
+
+// "write me a python script that sorts a list" is a request for a file, so the
+// code that comes back is saved instead of only being shown.
+function isCodeRequest(text) {
+  const value = String(text || '');
+  if (/^\s*(?:what|how|why|hvad|hvordan|hvorfor)\b/i.test(value)) return false;
+  return (
+    /\b(?:write|create|make|build|generate|lav|skriv|byg|programmer)\b/i.test(value) &&
+    /\b(?:script|program|code|app|function|class|python|javascript|typescript|html|css|json|sql|bash|powershell|c#|c\+\+|java|rust|golang|bot|scraper|api|website|game)\b/i.test(value)
+  );
+}
+
+// Spoken orders about files need no model, so they never reach one: a folder is
+// a folder whether or not Ollama is awake.
+function directFileOrder(order) {
+  const text = cleanOrder(order);
+  if (!text) return null;
+  answerDanish = settingsInDanish() || looksDanish(text);
+  const folder = text.match(
+    /^(?:create|make|new|add|opret|lav|ny)\s+(?:a\s+|an\s+|en\s+|et\s+)?(?:folder|directory|mappe)\s*(?:called|named|der\s+hedder|som\s+hedder|ved\s+navn)?\s*(.+?)[.!?]*$/i,
+  );
+  if (folder) {
+    const result = makeFolderAt(folder[1]);
+    if (!result.ok) return { handled: true, say: sayBoth('That folder could not be made.', 'Den mappe kunne ikke oprettes.') };
+    return {
+      handled: true,
+      say: sayBoth(`Made the folder ${displayPath(result.path)}.`, `Oprettede mappen ${displayPath(result.path)}.`),
+    };
+  }
+  const file = text.match(
+    /^(?:create|make|new|write|save|opret|lav|skriv|gem)\s+(?:a\s+|an\s+|en\s+|et\s+)?(?:file|fil)\s*(?:called|named|der\s+hedder|som\s+hedder|ved\s+navn)?\s*(.+?)[.!?]*$/i,
+  );
+  if (file) {
+    const [rawName, ...rest] = file[1].split(/\s+(?:with|containing|that\s+says|and\s+says|med|indeholdende|der\s+siger)\s+/i);
+    const body = rest.join(' ');
+    // A name is a few words, not a paragraph: anything longer is a request for
+    // the model to write the file, and it gets the chance to.
+    if (rawName.trim().split(/\s+/).length > 5) return null;
+    const result = saveFileAt(rawName, body ? `${body.trim()}\n` : '');
+    if (!result.ok) return { handled: true, say: sayBoth('That file could not be written.', 'Den fil kunne ikke skrives.') };
+    return {
+      handled: true,
+      say: sayBoth(`Made ${displayPath(result.path)}.`, `Oprettede ${displayPath(result.path)}.`),
+    };
+  }
+  return null;
+}
+
 // Anything the short commands do not name by hand is still reachable: an order
 // that starts with "run" is handed to cmd as it was spoken, which is what makes
 // "do anything on my PC" true instead of a list of fifteen apps.
@@ -2145,11 +2388,35 @@ async function runAction(text) {
   return { handled: false };
 }
 
-async function performAssistantAction(rawText) {
+async function performAssistantAction(rawText, replyText = '') {
   const text = cleanOrder(rawText);
   if (!text) return { handled: false };
   answerDanish = settingsInDanish() || looksDanish(text);
   let missed = '';
+
+  // The model ends a code reply with [[write: my_script.py]], and asks for a
+  // folder with [[mkdir: my folder]]; the code it wants saved is the reply it
+  // just wrote, so both are done here where that reply is still in hand.
+  const saveOrder = text.match(/^save\s+(.+?)[.!?]*$/i);
+  if (saveOrder) {
+    const { language, code } = splitReplyCode(replyText);
+    const result = saveFileAt(saveOrder[1], code, language ? codeFileName(saveOrder[1], language) : '');
+    if (!result.ok) return { handled: true, say: sayBoth('That file could not be written.', 'Den fil kunne ikke skrives.') };
+    return {
+      handled: true,
+      say: sayBoth(`Saved ${displayPath(result.path)}.`, `Gemt ${displayPath(result.path)}.`),
+    };
+  }
+
+  const folderOrder = text.match(/^(?:folder|mkdir|make folder|new folder)\s+(.+?)[.!?]*$/i);
+  if (folderOrder) {
+    const result = makeFolderAt(folderOrder[1]);
+    if (!result.ok) return { handled: true, say: sayBoth('That folder could not be made.', 'Den mappe kunne ikke oprettes.') };
+    return {
+      handled: true,
+      say: sayBoth(`Made the folder ${displayPath(result.path)}.`, `Oprettede mappen ${displayPath(result.path)}.`),
+    };
+  }
 
   // "open brave and google the weather" is two orders in one breath, and a
   // person speaks them that way, so they are taken one at a time.
@@ -2972,6 +3239,17 @@ ipcMain.handle('assistant:start', async () => {
 ipcMain.handle('assistant:chat', async (event, payload) => {
   const model = String(payload?.model || assistantSettings().model || '').trim();
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+  const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+  const lastUserText = lastUser ? String(lastUser.content || '') : '';
+  // A file or folder order is a disk call rather than a conversation: it is
+  // done here and answered straight away, so it works even before a model has
+  // been downloaded.
+  const direct = directFileOrder(lastUserText);
+  if (direct) {
+    sendTo(event.sender, 'assistant:delta', direct.say);
+    sendTo(event.sender, 'assistant:done', { text: direct.say, model: 'local' });
+    return { ok: true };
+  }
   if (!model) {
     sendTo(event.sender, 'assistant:error', {
       code: 'no-model',
@@ -3027,6 +3305,18 @@ ipcMain.handle('assistant:chat', async (event, payload) => {
         sendTo(event.sender, 'assistant:delta', text);
       }
     });
+    // A code request ends with the code in a file. The model may name one with
+    // [[write: ...]] — the window saves that — and when it did not, the fenced
+    // block is saved here under a name taken from the question.
+    if (full && isCodeRequest(lastUserText) && !/\[\[\s*(?:write|save)\s*:/i.test(full)) {
+      const { language, code } = splitReplyCode(full);
+      const saved = /```/.test(full) && code.trim() ? saveFileAt(codeFileName(lastUserText, language), code) : null;
+      if (saved && saved.ok) {
+        const line = `\n\n${sayBoth(`Saved it as ${displayPath(saved.path)}.`, `Gemt som ${displayPath(saved.path)}.`)}`;
+        full += line;
+        sendTo(event.sender, 'assistant:delta', line);
+      }
+    }
     sendTo(event.sender, 'assistant:done', { text: full, model });
     return { ok: true };
   } catch (error) {
@@ -3130,7 +3420,7 @@ ipcMain.handle('assistant:settings', (_event, patch) => {
   return settings;
 });
 
-ipcMain.handle('assistant:act', (_event, text) => performAssistantAction(text));
+ipcMain.handle('assistant:act', (_event, text, content) => performAssistantAction(text, content));
 
 ipcMain.handle('assistant:hardware', () => {
   const hardware = detectHardware();

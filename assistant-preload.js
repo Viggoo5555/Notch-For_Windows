@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   onInstall: (callback) => ipcRenderer.on('assistant:install', (_event, data) => callback(data)),
   chat: (payload) => ipcRenderer.invoke('assistant:chat', payload),
   warm: () => ipcRenderer.invoke('assistant:warm'),
-  act: (text) => ipcRenderer.invoke('assistant:act', text),
+  act: (text, content) => ipcRenderer.invoke('assistant:act', text, content),
   hardware: () => ipcRenderer.invoke('assistant:hardware'),
   stop: () => ipcRenderer.send('assistant:stop'),
   pull: (name) => ipcRenderer.invoke('assistant:pull', name),

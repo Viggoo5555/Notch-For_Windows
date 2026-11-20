@@ -127,6 +127,7 @@ function systemPrompt() {
     'You can also work Notch, the app you live in, and you should never claim otherwise: any order that is about Notch itself goes in the same brackets with the word notch first —',
     '[[notch: open the library]], [[notch: make it mint]], [[notch: frosted glass]], [[notch: taskbar off]], [[notch: show the performance overlay]], [[notch: focus for 25 minutes]], [[notch: launch Hades II]], [[notch: rescan the library]], [[notch: start with Windows]].',
     'What Notch answers to: opening the panel, the library, the store, the focus timer, the clipboard or the settings; the accent colour (blue, lilac, mint, pink, amber); the surface (liquid, frosted, black); tint, blur, grain, pill glow, animation speed and easing, hover delay, pill width, attached or island shape; the glass source (live desktop or wallpaper); the taskbar, its auto-hide and its style; the focus timer (start, pause, reset, any number of minutes); the game library (rescan it, count it, launch a game by name); the store, which draws Steam\'s catalogue inside the panel, best reviewed first, with its own filters and sorting; starting with Windows; and quitting the app.',
+    'Files are yours to make as well: when the user asks for code, a script, a program or a file, give the whole code in one fenced block and end the reply with [[write: name.py]]. It is saved to the Desktop, and a path may name a folder ([[write: projects/app.py]]) or an absolute path the user gave. [[mkdir: my folder]] makes an empty folder.',
     'The window carries the command out and removes the brackets from the reply, so say what you are doing in one short line and put the command after it.',
     'Use one of those forms per reply, and never when the user merely asked a question — "what is liquid glass" is a question, "make it liquid glass" is an order.',
   );
@@ -145,15 +146,23 @@ function refreshSystemPrompt() {
 // The model writes its orders as [[open: X]] so that any local model can drive
 // the machine without tool-calling support. They are taken out before the reply
 // is shown or spoken.
-const ACTION_TAG = /\[\[\s*(open|search|play|launch|start|run|notch)\s*:\s*([^\]]+?)\s*\]\]/gi;
+const ACTION_TAG = /\[\[\s*(open|search|play|launch|start|run|notch|write|mkdir)\s*:\s*([^\]]+?)\s*\]\]/gi;
 
 function extractActions(text) {
   const actions = [];
   const clean = String(text || '').replace(ACTION_TAG, (_match, verb, target) => {
     const said = verb.toLowerCase();
     // Notch's own orders keep their word: it is what tells main this is about the
-    // app rather than about whatever app the user named.
-    const order = said === 'launch' || said === 'start' ? 'open' : said;
+    // app rather than about whatever app the user named. The file tags become
+    // the orders that put something on disk.
+    const order =
+      said === 'launch' || said === 'start'
+        ? 'open'
+        : said === 'write'
+          ? 'save'
+          : said === 'mkdir'
+            ? 'folder'
+            : said;
     actions.push(`${order} ${target.trim()}`);
     return '';
   });
@@ -906,8 +915,17 @@ function finishStream(text, aborted) {
   if (!clean.trim() && card) card.remove();
   else body.textContent = clean;
 
-  // Anything the model asked for happens now, after it has answered.
-  for (const action of actions) api.act(action).catch(() => {});
+  // Anything the model asked for happens now, after it has answered. The reply
+  // travels with the order, so a [[write: ...]] saves the code that came with
+  // it, and whatever main says back (the path it wrote) is worth a toast.
+  for (const action of actions) {
+    api
+      .act(action, clean)
+      .then((result) => {
+        if (result && result.handled && result.say) toast(result.say, 5000);
+      })
+      .catch(() => {});
+  }
 
   if (clean.trim()) {
     state.history.push({ role: 'assistant', content: clean });

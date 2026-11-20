@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.17.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.17/Notch-Setup-1.2.17.exe)**
+**[Notch-Setup-1.2.18.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.18/Notch-Setup-1.2.18.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -356,6 +356,20 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.18** — files and code, and a trio that fits an integrated GPU. Jarvis makes
+things now instead of only describing them: "create a folder called Projects on the
+desktop" and "create a file called notes.txt with …" are carried out on disk before
+a model is even asked, and when you ask it to write a script, a program or code it
+answers with the whole code in one block and saves it beside you — on the Desktop,
+or in the folder the path names — then says where it wrote it. The model can ask for
+the same with `[[write: projects/app.py]]`, which makes the folder too, and
+`[[mkdir: name]]` for an empty folder; nothing is written outside the folder or path
+the order names, and `..` is refused. The three-model plan is also sized for a
+machine with no dedicated card: the processor and RAM choose the rung, so 32 GB gets
+the 3B / DeepSeek R1 8B / Coder 7B set, 16 GB gets 3B / R1 7B / Coder 3B, and 8 GB
+with four cores gets the 1.5B trio — and the panel says plainly that those run on
+the processor. Releases carry the installer only.
 
 **v1.2.17** — three brains instead of one. The machine is read once and Jarvis
 picks three models that fit it together: a small one that answers in about a
