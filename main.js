@@ -931,7 +931,8 @@ function notchScreenRect() {
   // at, so the rect has to outlive the animation instead of snapping to the pill
   // the moment the cursor leaves and the expansion flag drops.
   const wide = isExpanded || pointerInside || Date.now() < collapsesUntil;
-  const width = wide ? PANEL_W : Math.max(56, Math.min(200, prefs.settings.pillWidth || PILL_W));
+  const pill = Math.max(Number(prefs.settings.pillWidth) || PILL_W, pillContentW);
+  const width = wide ? PANEL_W : Math.max(56, Math.min(320, pill));
   const gap = prefs.settings.notchStyle === 'island' ? NOTCH_GAP : 0;
   const height = wide ? PANEL_H - gap : Math.max(20, Math.min(40, prefs.settings.pillHeight || PILL_H));
   // The pill can be dragged off centre, and the rect has to go with it — never
@@ -5075,6 +5076,17 @@ ipcMain.on('notch:expanded', (_event, expanded) => {
     setTimeout(syncDesktopSampling, 700);
   }
   syncDesktopSampling();
+});
+
+// The width setting is a floor, not a ceiling: the folded pill is composed from
+// whatever pieces are switched on, and the renderer measures what they need. The
+// hover rect has to be as wide as the pill it is guarding, or the pieces that
+// made it grow would be the ones that cannot open it.
+let pillContentW = 0;
+ipcMain.on('notch:pill-width', (_event, value) => {
+  const next = Math.round(Number(value) || 0);
+  if (next === pillContentW) return;
+  pillContentW = Math.max(0, Math.min(320, next));
 });
 
 // The close is an animation, not an instant. The renderer knows how long its

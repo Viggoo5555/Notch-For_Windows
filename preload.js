@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('notchAPI', {
   bootstrap: () => ipcRenderer.invoke('notch:bootstrap'),
   setExpanded: (value) => ipcRenderer.send('notch:expanded', !!value),
   setCollapsing: (ms) => ipcRenderer.send('notch:collapsing', ms),
+  // How wide the folded pill actually came out, so the hover rect can follow it.
+  pillWidth: (px) => ipcRenderer.send('notch:pill-width', px),
   setPinned: (value) => ipcRenderer.send('notch:pinned', !!value),
   focus: () => ipcRenderer.send('notch:focus'),
   quit: () => ipcRenderer.send('notch:quit'),

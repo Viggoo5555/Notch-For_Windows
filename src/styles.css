@@ -699,12 +699,22 @@ html.demo .glass-backdrop {
   flex: 0 0 auto;
 }
 
-.pill-sep,
-.pill-date,
-.pill-gap,
-.battery,
+/* The folded pill is composed by the editor, not by this stylesheet: a piece
+   that is switched off is taken out of the DOM, so nothing here hides it a
+   second time. The timer's reading is the one exception — the ring says it. */
 #focusMiniTime {
   display: none;
+}
+
+/* The marks the layout puts between pieces: a dim dot between the two readings,
+   and a breath before the battery. */
+.pill-sep {
+  color: rgba(233, 237, 245, 0.4);
+  font-size: 11px;
+}
+
+.pill-gap {
+  width: 2px;
 }
 
 .focus-mini {
@@ -753,6 +763,7 @@ html.demo .glass-backdrop {
 }
 
 .battery {
+  display: flex;
   align-items: center;
   gap: 5px;
   color: var(--muted);

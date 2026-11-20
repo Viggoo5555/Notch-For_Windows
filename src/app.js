@@ -202,6 +202,8 @@ function updateBattery() {
 
   $('#battTextPill').textContent = label;
   $('#battText').textContent = label;
+  // "100%" is wider than "7%": the pill follows whatever it is holding.
+  measurePillWidth();
 
   const width = level == null ? 6 : Math.max(1.4, (15.8 * level) / 100);
   $('#battFillPill').style.width = `${width}px`;
@@ -947,6 +949,25 @@ function applyPillLayout() {
     const separator = pillSeparator(key, order[index + 1]);
     if (separator) collapsed.appendChild(separator);
   });
+  measurePillWidth();
+}
+
+// The pill is as wide as its pieces need. The width setting is a floor rather
+// than a ceiling: a piece that was switched on must not be pushed out of the
+// clip that shows it, so the pill — and the hover rect behind it — grows.
+let pillMeasuredWidth = 0;
+function measurePillWidth() {
+  const collapsed = $('#collapsed');
+  if (!collapsed) return;
+  const kids = [...collapsed.children];
+  const inner = kids.reduce((sum, el) => sum + el.getBoundingClientRect().width, 0);
+  // The row's own gap and the padding either side of it.
+  const natural = Math.ceil(inner + Math.max(0, kids.length - 1) * 6 + 20);
+  const wanted = Math.max(Number(state.settings.pillWidth) || 96, natural);
+  if (wanted === pillMeasuredWidth) return;
+  pillMeasuredWidth = wanted;
+  document.documentElement.style.setProperty('--pill-w', `${wanted}px`);
+  if (api && api.pillWidth) api.pillWidth(wanted);
 }
 
 // The preview is drawn from copies, not the live pill: the sheet is open, so the
@@ -1056,15 +1077,23 @@ function renderPillEditor(body) {
   const preview = document.createElement('div');
   preview.className = 'pill-preview';
   preview.title = 'Drag to move the pill';
+  // The preview is never narrower than the pill itself will be: the real one
+  // grows to its pieces, so the picture of it has to as well.
+  const sizePreviewWidth = (el, width) => {
+    el.style.width = `${width}px`;
+    const natural = Math.ceil(el.scrollWidth);
+    if (natural > width) el.style.width = `${natural}px`;
+  };
+
   const shown = pillVisible();
   shown.forEach((key, index) => {
     preview.appendChild(pillMock(key));
     const separator = pillSeparator(key, shown[index + 1]);
     if (separator) preview.appendChild(separator);
   });
-  preview.style.width = `${s.pillWidth}px`;
   preview.style.height = `${s.pillHeight}px`;
   stage.appendChild(preview);
+  sizePreviewWidth(preview, s.pillWidth);
   const hint = document.createElement('span');
   hint.className = 'pill-stage-hint';
   hint.textContent = 'drag to move';
@@ -1118,7 +1147,7 @@ function renderPillEditor(body) {
     input.addEventListener('input', () => {
       value.textContent = `${input.value}${suffix}`;
       updateSetting(key, Number(input.value));
-      preview.style.width = `${state.settings.pillWidth}px`;
+      sizePreviewWidth(preview, state.settings.pillWidth);
       preview.style.height = `${state.settings.pillHeight}px`;
     });
     wrap.append(input, value);

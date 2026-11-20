@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.32.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.32/Notch-Setup-1.2.32.exe)**
+**[Notch-Setup-1.2.33.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.33/Notch-Setup-1.2.33.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.33** — the pill keeps every piece you switch on. Its layout comes from
+the editor, but the stylesheet still hid three of the pieces outright — **Date**,
+**Battery** and the marks between them were `display: none` whatever the switches
+said, so turning them on changed the saved order and nothing on screen (the
+editor's preview hid them too, for the same reason). The layout is the only thing
+that decides now. The pill is also no longer narrower than its pieces: the width
+setting is a *floor*, not a ceiling, so switching Date on widens the pill — and
+the hover rect behind it — to hold it, instead of pushing it out of the clip. The
+preview in the editor grows the same way.
 
 **v1.2.32** — the camera asks first. Pressing it (or Ctrl+Alt+S) no longer
 photographs the whole screen: the shell steps aside, the display dims behind a
