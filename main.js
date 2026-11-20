@@ -4360,6 +4360,178 @@ function applyLogin() {
   }
 }
 
+// ------------------------------------------------------------------ screenshot
+
+// One capture is held at a time. The panel asks, the desktop is photographed with
+// the shell taken out of the frame, and the PNG stays on disk so the three things
+// offered under the preview — save it, read it, name the typeface — all work from
+// the same pixels.
+let shot = null; // { file, width, height }
+
+async function captureScreenshot() {
+  if (!win || win.isDestroyed()) return { ok: false, error: 'Nothing to capture' };
+  if (gameMode) return { ok: false, error: 'A game has the screen' };
+  const display = screen.getPrimaryDisplay();
+  const scale = display.scaleFactor || 1;
+  // The shot should not contain the shell. Hiding the windows would take the
+  // pointer off the pill mid-click and close the panel, so they are made fully
+  // transparent for the frame instead and put back straight after.
+  const faded = shellSurfaces().filter((surface) => surface.isVisible());
+  const fadedOpacity = new Map();
+  for (const surface of faded) {
+    try {
+      const was = typeof surface.getOpacity === 'function' ? surface.getOpacity() : 1;
+      fadedOpacity.set(surface, Number.isFinite(was) ? was : 1);
+      surface.setOpacity(0);
+    } catch {
+      /* already gone */
+    }
+  }
+  let grab = null;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    grab = await requestScreenShot(
+      {
+        x: Math.round(display.bounds.x * scale),
+        y: Math.round(display.bounds.y * scale),
+        width: Math.round(display.bounds.width * scale),
+        height: Math.round(display.bounds.height * scale),
+      },
+      6000,
+    );
+  } finally {
+    for (const surface of faded) {
+      if (surface.isDestroyed()) continue;
+      try {
+        surface.setOpacity(fadedOpacity.get(surface) ?? 1);
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+  if (!grab || !grab.data) return { ok: false, error: 'The screen could not be read' };
+  const png = Buffer.from(grab.data, 'base64');
+  const image = nativeImage.createFromBuffer(png);
+  if (image.isEmpty()) return { ok: false, error: 'The screen came back empty' };
+  const size = image.getSize();
+  const file = path.join(app.getPath('temp'), `notch-shot-${Date.now()}.png`);
+  try {
+    fs.writeFileSync(file, png);
+  } catch {
+    return { ok: false, error: 'Could not keep the picture' };
+  }
+  shot = { file, width: size.width, height: size.height };
+  // A preview the panel can paint at its own width; the file keeps every pixel
+  // for the reader and for saving.
+  const preview = image.resize({ width: Math.min(1024, size.width), quality: 'good' }).toDataURL();
+  return { ok: true, width: size.width, height: size.height, preview };
+}
+
+function shotFolder() {
+  return path.join(app.getPath('pictures'), 'Notch', 'Screenshots');
+}
+
+function saveScreenshot() {
+  if (!shot) return { ok: false, error: 'Nothing to save' };
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  const name =
+    `Notch ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
+    `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}.png`;
+  const folder = shotFolder();
+  const target = path.join(folder, name);
+  try {
+    fs.mkdirSync(folder, { recursive: true });
+    fs.copyFileSync(shot.file, target);
+  } catch {
+    return { ok: false, error: 'Could not write to Pictures' };
+  }
+  return { ok: true, path: target };
+}
+
+// Reading the picture is PowerShell's job: Windows ships an OCR engine that needs
+// no download, and the same helper compares installed typefaces against the
+// largest line in the shot. It runs in its own process, so a bad image cannot take
+// the keyboard hook down with it.
+function runShotTool(mode, timeout) {
+  return new Promise((resolve) => {
+    if (!shot) {
+      resolve({ ok: false, error: 'Nothing to read' });
+      return;
+    }
+    execFile(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        path.join(__dirname, 'shot-tools.ps1'),
+        '-Image',
+        shot.file,
+        '-Mode',
+        mode,
+      ],
+      { windowsHide: true, timeout, maxBuffer: 8 * 1024 * 1024 },
+      (error, stdout) => {
+        const raw = String(stdout || '');
+        const at = raw.indexOf('{');
+        let answer = null;
+        try {
+          answer = at >= 0 ? JSON.parse(raw.slice(at)) : null;
+        } catch {
+          answer = null;
+        }
+        if (!answer || answer.ok === false) {
+          resolve({
+            ok: false,
+            error:
+              (answer && answer.error) ||
+              (error && error.killed ? 'It took too long' : 'The reader did not answer'),
+          });
+          return;
+        }
+        resolve(answer);
+      },
+    );
+  });
+}
+
+async function readShotText() {
+  const answer = await runShotTool('text', 30000);
+  if (!answer.ok) return answer;
+  const text = String(answer.text || '');
+  if (text) {
+    try {
+      clipboard.writeText(text);
+    } catch {
+      /* the clipboard is busy elsewhere */
+    }
+  }
+  return { ok: true, text };
+}
+
+async function guessShotFont() {
+  return runShotTool('font', 60000);
+}
+
+// The shortcut goes through the panel, so the shot opens where its actions are.
+async function takeScreenshot() {
+  const result = await captureScreenshot();
+  if (!result.ok) return result;
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('notch:shot', result);
+    showNotchPanel('shot');
+  }
+  return result;
+}
+
+ipcMain.handle('notch:shot-capture', () => captureScreenshot());
+ipcMain.handle('notch:shot-save', () => saveScreenshot());
+ipcMain.handle('notch:shot-text', () => readShotText());
+ipcMain.handle('notch:shot-font', () => guessShotFont());
+
 // -------------------------------------------------------------------- updates
 
 // Notch updates itself from its own releases. The check is one small request to
@@ -7225,6 +7397,7 @@ if (!app.requestSingleInstanceLock()) {
     });
     globalShortcut.register('Control+Alt+J', () => toggleJarvis());
     globalShortcut.register('Control+Alt+Q', () => app.quit());
+    globalShortcut.register('Control+Alt+S', () => takeScreenshot());
 
     setInterval(readBattery, 15 * 60 * 1000);
     // The update check runs by itself: shortly after the panel is up, and every

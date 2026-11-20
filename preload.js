@@ -47,6 +47,12 @@ contextBridge.exposeInMainWorld('notchAPI', {
   onSettings: (callback) => ipcRenderer.on('notch:settings', (_event, data) => callback(data)),
   onView: (callback) => ipcRenderer.on('notch:view', (_event, kind) => callback(kind)),
   onGames: (callback) => ipcRenderer.on('notch:games', (_event, list) => callback(list)),
+  // Screenshots: one capture, then the three things offered under the preview.
+  captureShot: () => ipcRenderer.invoke('notch:shot-capture'),
+  saveShot: () => ipcRenderer.invoke('notch:shot-save'),
+  shotText: () => ipcRenderer.invoke('notch:shot-text'),
+  shotFont: () => ipcRenderer.invoke('notch:shot-font'),
+  onShot: (callback) => ipcRenderer.on('notch:shot', (_event, data) => callback(data)),
   // Updates: one check against the releases, then a download the panel watches.
   checkUpdate: () => ipcRenderer.invoke('notch:update-check'),
   installUpdate: () => ipcRenderer.invoke('notch:update-install'),

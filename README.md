@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.27.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.27/Notch-Setup-1.2.27.exe)**
+**[Notch-Setup-1.2.28.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.28/Notch-Setup-1.2.28.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,19 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.28** — a camera in the notch. Press it (or Ctrl+Alt+S) and the screen is
+photographed with the shell left out of the frame: the windows go fully
+transparent for the moment of the grab instead of hiding, so the panel does not
+lose the pointer and close under itself. The picture opens as a preview with its
+size in the corner, and three things sit under it. **Save** writes it to
+`Pictures\Notch\Screenshots` as `Notch 2026-11-20 15-04-12.png`. **Text** reads it
+with the OCR engine Windows already ships, shows what it found and puts it on the
+clipboard. **Font** takes the biggest line of that text, draws it in every
+installed typeface and ranks them by how much of the ink lands in the same place —
+a best guess with a percentage, not a certificate. The reading runs in its own
+PowerShell process (`shot-tools.ps1`), so a picture that will not open cannot take
+the keyboard hook down with it.
 
 **v1.2.27** — the System card keeps counting through a game. Game mode kept the
 card on screen and kept sending it CPU, memory and disk, but the process list

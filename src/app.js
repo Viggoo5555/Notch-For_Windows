@@ -49,6 +49,8 @@ const state = {
     budget: 0,
     sort: 'reviews',
   },
+  // The last capture: a preview the panel paints, and the size it came at.
+  shot: null,
   // What the updater last heard from the releases page.
   update: {
     current: '',
@@ -1101,6 +1103,7 @@ const DETAIL_TITLES = {
   focus: 'Focus',
   system: 'System',
   clip: 'Clipboard',
+  shot: 'Screenshot',
 };
 
 function svgNode(name, attrs = {}) {
@@ -1147,6 +1150,9 @@ function renderDetail() {
     renderDetailStore(body);
   } else if (kind === 'focus') {
     renderDetailFocus(body);
+  } else if (kind === 'shot') {
+    if (state.shot) meta.textContent = `${state.shot.width} × ${state.shot.height}`;
+    renderDetailShot(body);
   } else if (kind === 'system') {
     meta.textContent = uptimeText(state.stats.uptime);
     renderDetailSystemView(body);
@@ -1738,6 +1744,149 @@ function renderDetailClips(body) {
   body.appendChild(list);
 }
 
+// A screenshot is one capture plus the three things it can be turned into: a file
+// in Pictures, the text on the clipboard, and a guess at the typeface.
+function shotAction(label, icon) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'shot-action';
+  button.append(icon);
+  const text = document.createElement('span');
+  text.className = 'shot-action-label';
+  text.textContent = label;
+  button.appendChild(text);
+  return button;
+}
+
+function shotIcon(paths, circles = []) {
+  const svg = svgNode('svg', { viewBox: '0 0 16 16', 'aria-hidden': 'true' });
+  for (const d of paths) svg.appendChild(svgNode('path', { d }));
+  for (const circle of circles) svg.appendChild(svgNode('circle', circle));
+  return svg;
+}
+
+function renderDetailShot(body) {
+  const shot = state.shot;
+  if (!shot) {
+    const empty = document.createElement('p');
+    empty.className = 'detail-sub';
+    empty.textContent = 'Press the camera to take one.';
+    body.appendChild(empty);
+    return;
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'detail-shot';
+
+  const frame = document.createElement('div');
+  frame.className = 'shot-frame';
+  const image = document.createElement('img');
+  image.className = 'shot-image';
+  image.alt = 'Screenshot';
+  image.src = shot.preview;
+  frame.appendChild(image);
+  const size = document.createElement('span');
+  size.className = 'shot-size';
+  size.textContent = `${shot.width} × ${shot.height}`;
+  frame.appendChild(size);
+  wrap.appendChild(frame);
+
+  const result = document.createElement('div');
+  result.className = 'shot-result';
+  const note = (message) => {
+    const line = document.createElement('p');
+    line.className = 'detail-sub shot-note';
+    line.textContent = message;
+    return line;
+  };
+
+  const save = shotAction('Save', shotIcon(['M3 5.4h2.2l.9-1.6h4.8l.9 1.6H13v6.4H3z']));
+  save.title = 'Save to Pictures\\Notch\\Screenshots';
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    const answer = await api.saveShot();
+    if (answer && answer.ok) {
+      save.classList.add('done');
+      save.querySelector('.shot-action-label').textContent = 'Saved';
+      toast('Saved to Pictures\\Notch\\Screenshots');
+    } else {
+      save.disabled = false;
+      toast((answer && answer.error) || 'Could not save');
+    }
+  });
+
+  const read = shotAction(
+    'Text',
+    shotIcon(['M2.8 4.6h10.4', 'M5.6 4.6v7.2', 'M10.4 4.6v7.2', 'M4 11.8h3.2', 'M8.8 11.8H12']),
+  );
+  read.title = 'Read the text and copy it';
+  read.addEventListener('click', async () => {
+    read.disabled = true;
+    result.replaceChildren(note('Reading the picture…'));
+    const answer = await api.shotText();
+    read.disabled = false;
+    if (!answer || !answer.ok) {
+      result.replaceChildren(note((answer && answer.error) || 'No text found'));
+      return;
+    }
+    const text = String(answer.text || '').trim();
+    if (!text) {
+      result.replaceChildren(note('No text in this picture'));
+      return;
+    }
+    const block = document.createElement('pre');
+    block.className = 'shot-text';
+    block.textContent = text;
+    result.replaceChildren(note(`Copied to the clipboard · ${text.length} characters`), block);
+    toast('Text copied');
+  });
+
+  const font = shotAction('Font', shotIcon(['M3.2 12.6 6.9 3.8l3.7 8.8', 'M4.8 9.4h4.4']));
+  font.title = 'Guess the typeface';
+  font.addEventListener('click', async () => {
+    font.disabled = true;
+    result.replaceChildren(note('Comparing the lettering…'));
+    const answer = await api.shotFont();
+    font.disabled = false;
+    if (!answer || !answer.ok) {
+      result.replaceChildren(note((answer && answer.error) || 'Could not read the lettering'));
+      return;
+    }
+    const fonts = Array.isArray(answer.fonts) ? answer.fonts : [];
+    if (!fonts.length) {
+      result.replaceChildren(note('No lettering to compare in this picture'));
+      return;
+    }
+    const list = document.createElement('div');
+    list.className = 'shot-fonts';
+    fonts.slice(0, 4).forEach((entry, index) => {
+      const row = document.createElement('div');
+      row.className = index === 0 ? 'shot-font best' : 'shot-font';
+      const name = document.createElement('span');
+      name.className = 'shot-font-name';
+      name.textContent = String(entry.name || '?');
+      name.title = name.textContent;
+      const track = document.createElement('span');
+      track.className = 'shot-font-bar';
+      const fill = document.createElement('i');
+      fill.style.width = `${Math.max(4, Math.min(100, Math.round((entry.score || 0) * 100)))}%`;
+      track.appendChild(fill);
+      const value = document.createElement('span');
+      value.className = 'shot-font-score';
+      value.textContent = `${Math.round((entry.score || 0) * 100)}%`;
+      row.append(name, track, value);
+      list.appendChild(row);
+    });
+    result.replaceChildren(note('Best guesses, from the biggest line of text'), list);
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'shot-actions';
+  actions.append(save, read, font);
+  wrap.append(actions, result);
+  body.appendChild(wrap);
+}
+
 // --------------------------------------------------------------------- shell
 
 function openNotch() {
@@ -1855,6 +2004,23 @@ function bindEvents() {
     notch.addEventListener('mouseenter', requestOpen);
     notch.addEventListener('mouseleave', scheduleClose);
   }
+
+  $('#shotBtn').addEventListener('click', async () => {
+    if (!api.captureShot) {
+      toast('Screenshots need the desktop app');
+      return;
+    }
+    const button = $('#shotBtn');
+    button.disabled = true;
+    const answer = await api.captureShot();
+    button.disabled = false;
+    if (!answer || !answer.ok) {
+      toast((answer && answer.error) || 'Could not take the picture');
+      return;
+    }
+    state.shot = answer;
+    openDetail('shot');
+  });
 
   $('#pinBtn').addEventListener('click', () => setPinned(!state.pinned));
   $('#menuBtn').addEventListener('click', (event) => {
@@ -2041,6 +2207,13 @@ function bindEvents() {
     api.onPointer((where) => {
       if (where === 'enter') requestOpen();
       else scheduleClose();
+    });
+  }
+  if (api.onShot) {
+    api.onShot((data) => {
+      if (!data || !data.ok) return;
+      state.shot = data;
+      if (state.detail === 'shot') renderDetail();
     });
   }
 }
