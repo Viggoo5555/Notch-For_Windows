@@ -134,8 +134,31 @@ function iconOrLetters(node, item) {
   node.appendChild(label);
 }
 
+// The Start button is the launcher's list of everything installed, and it sits
+// where Windows keeps its Start: immediately left of the pins.
+function startButton() {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'tb-item tb-start';
+  button.title = 'All apps';
+  button.setAttribute('aria-label', 'All apps');
+  button.innerHTML =
+    '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3.2" y="3.2" width="5.9" height="5.9" rx="1.5"/><rect x="10.9" y="3.2" width="5.9" height="5.9" rx="1.5"/><rect x="3.2" y="10.9" width="5.9" height="5.9" rx="1.5"/><rect x="10.9" y="10.9" width="5.9" height="5.9" rx="1.5"/></svg>';
+  button.addEventListener('click', () => {
+    if (api) api.start();
+  });
+  return button;
+}
+
 function buildApps() {
   appsEl.replaceChildren();
+  appsEl.appendChild(startButton());
+  if (apps.length) {
+    const separator = document.createElement('span');
+    separator.className = 'tb-sep';
+    separator.setAttribute('aria-hidden', 'true');
+    appsEl.appendChild(separator);
+  }
   // Windows numbers the taskbar 1..0 for Win+<key>; show the same numbers.
   let slot = 0;
   for (const app of apps) {
@@ -231,6 +254,27 @@ function useTrayIcon(img, src) {
     });
 }
 
+// With no notification-area helper there are no icons to lift off the Windows
+// tray, so the three things a tray is reached for stand in and open their own
+// Windows pages.
+const FALLBACK_TRAY = [
+  {
+    kind: 'network',
+    name: 'Network',
+    svg: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.6 7.2a10.6 10.6 0 0 1 14.8 0M5.4 10a6.6 6.6 0 0 1 9.2 0M8.2 12.8a2.9 2.9 0 0 1 3.6 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="15.4" r="1.15" fill="currentColor"/></svg>',
+  },
+  {
+    kind: 'sound',
+    name: 'Sound',
+    svg: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.6 8h2.6L9.8 5v10L6.2 12H3.6z" fill="currentColor"/><path d="M12.4 7.6a3.4 3.4 0 0 1 0 4.8M14.5 5.5a6.3 6.3 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  },
+  {
+    kind: 'settings',
+    name: 'Settings',
+    svg: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.1 2.7"/></svg>',
+  },
+];
+
 function buildTray() {
   trayEl.replaceChildren();
   for (const item of tray) {
@@ -254,6 +298,20 @@ function buildTray() {
       if (api) api.trayClick(item.i);
     });
     trayEl.appendChild(button);
+  }
+  if (!tray.length) {
+    for (const item of FALLBACK_TRAY) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'tb-tray-item tb-tray-builtin';
+      button.title = item.name;
+      button.setAttribute('aria-label', item.name);
+      button.innerHTML = item.svg;
+      button.addEventListener('click', () => {
+        if (api) api.system(item.kind);
+      });
+      trayEl.appendChild(button);
+    }
   }
 }
 

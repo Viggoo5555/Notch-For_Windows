@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.18.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.18/Notch-Setup-1.2.18.exe)**
+**[Notch-Setup-1.2.19.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.19/Notch-Setup-1.2.19.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -356,6 +356,19 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.19** — a taskbar that works like the one it replaces, and no ghost mouse in
+the glass. The bar now starts with the pins Windows does — the browser, Terminal,
+File Explorer, Notepad and Settings, taken out of the Start menu with their real
+icons — and a pin and the window it opens are one button instead of two, matched by
+the executable behind the shortcut. A Start button left of the pins opens the
+launcher's list of everything installed, so any app on the machine is reachable from
+the bar. The right end keeps the notification area, battery and clock, and when the
+tray helper cannot read the real icons it falls back to Network, Sound and Settings
+buttons that open their Windows pages. The glass also stopped keeping a ghost of the
+pointer: Windows draws the mouse into the screen capture, so the patch it covered is
+healed with the colour around it before the frame reaches the glass. Releases carry
+the installer only.
 
 **v1.2.18** — files and code, and a trio that fits an integrated GPU. Jarvis makes
 things now instead of only describing them: "create a folder called Projects on the

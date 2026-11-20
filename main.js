@@ -430,6 +430,79 @@ function protectSurfaces() {
   return fresh;
 }
 
+// Windows' screen capture draws the pointer into the frame, so the glass keeps a
+// ghost of a mouse that was never there. The patch the pointer covered is healed
+// with the colour around it: at half resolution the ghost is barely twenty
+// pixels, and the glass blurs the smudge away.
+function healCursor(image, display) {
+  try {
+    if (!image || image.isEmpty() || !display) return image;
+    const point = screen.getCursorScreenPoint();
+    const at = screen.getDisplayNearestPoint(point);
+    if (!at || at.id !== display.id) return image;
+    const size = image.getSize();
+    const scaleX = size.width / display.size.width;
+    const scaleY = size.height / display.size.height;
+    if (!(scaleX > 0.01) || !(scaleY > 0.01)) return image;
+    const cx = Math.round((point.x - display.bounds.x) * scaleX);
+    const cy = Math.round((point.y - display.bounds.y) * scaleY);
+    if (cx < 0 || cy < 0 || cx >= size.width || cy >= size.height) return image;
+    const radius = Math.max(8, Math.round(24 * scaleX));
+    const left = Math.max(0, cx - radius);
+    const top = Math.max(0, cy - radius);
+    const right = Math.min(size.width - 1, cx + radius);
+    const bottom = Math.min(size.height - 1, cy + radius);
+    if (right - left < 4 || bottom - top < 4) return image;
+    const bitmap = image.toBitmap();
+    // The colour around the patch: a ring just outside it, which the pointer
+    // itself cannot be covering.
+    const ring = Math.max(2, Math.round(3 * scaleX));
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let count = 0;
+    const sample = (sx, sy) => {
+      if (sx < 0 || sy < 0 || sx >= size.width || sy >= size.height) return;
+      const pixel = (sy * size.width + sx) * 4;
+      b += bitmap[pixel];
+      g += bitmap[pixel + 1];
+      r += bitmap[pixel + 2];
+      count += 1;
+    };
+    for (let sx = left; sx <= right; sx += 2) {
+      sample(sx, top - ring);
+      sample(sx, bottom + ring);
+    }
+    for (let sy = top; sy <= bottom; sy += 2) {
+      sample(left - ring, sy);
+      sample(right + ring, sy);
+    }
+    if (!count) return image;
+    r /= count;
+    g /= count;
+    b /= count;
+    const midX = (left + right) / 2;
+    const midY = (top + bottom) / 2;
+    const reach = Math.max(1, (right - left) / 2, (bottom - top) / 2);
+    for (let sy = top; sy <= bottom; sy += 1) {
+      for (let sx = left; sx <= right; sx += 1) {
+        const distance = Math.hypot(sx - midX, sy - midY) / reach;
+        if (distance > 1) continue;
+        // Solid under the pointer, feathered out to the ring it sits in.
+        const alpha = Math.min(1, (1 - distance) * 2);
+        const pixel = (sy * size.width + sx) * 4;
+        bitmap[pixel] = Math.round(bitmap[pixel] + (b - bitmap[pixel]) * alpha);
+        bitmap[pixel + 1] = Math.round(bitmap[pixel + 1] + (g - bitmap[pixel + 1]) * alpha);
+        bitmap[pixel + 2] = Math.round(bitmap[pixel + 2] + (r - bitmap[pixel + 2]) * alpha);
+      }
+    }
+    const healed = nativeImage.createFromBitmap(bitmap, { width: size.width, height: size.height });
+    return healed.isEmpty() ? image : healed;
+  } catch {
+    return image;
+  }
+}
+
 async function captureDesktop() {
   if (!win || win.isDestroyed() || desktopBusy || !usesLiveBackdrop()) return;
   desktopBusy = true;
@@ -455,7 +528,7 @@ async function captureDesktop() {
       source = pick(await grab());
     }
     if (!source || source.thumbnail.isEmpty()) return;
-    desktopFrame = { image: source.thumbnail, display };
+    desktopFrame = { image: healCursor(source.thumbnail, display), display };
     const url = backdropDataUrl();
     if (url && win && !win.isDestroyed()) win.webContents.send('notch:backdrop', url);
 
@@ -3645,6 +3718,16 @@ async function iconForTarget(target) {
   return icon;
 }
 
+// The executable a shortcut points at, empty for anything else. A pin carries it
+// so the bar can tell that the pin and the window it opened are the same app.
+async function shortcutExecutable(target) {
+  const file = String(target || '');
+  if (!/\.lnk$/i.test(file)) return '';
+  const infos = await readShortcutInfo([file]);
+  const info = infos.get(file);
+  return info ? String(info.target || '') : '';
+}
+
 function launchTarget(target) {
   const value = String(target || '');
   if (!value) return { ok: false };
@@ -3669,6 +3752,9 @@ function pinnedEntries() {
     name: pin.name || 'App',
     target: pin.target || pin.id,
     icon: pin.icon || null,
+    // The executable a shortcut points at, so a pin and the window it opens are
+    // one button instead of two.
+    exe: pin.exe || '',
   }));
 }
 
@@ -3677,6 +3763,59 @@ function broadcastPinned() {
     launcherWin.webContents.send('launcher:pinned', pinnedEntries());
   }
   refreshTaskbar();
+}
+
+// A bar with nothing pinned is only whatever happens to be open. The first run
+// takes the handful of apps Windows starts with, out of the Start menu itself,
+// so every pin is a real shortcut with its real icon.
+let pinSeedRunning = false;
+async function seedPinnedApps() {
+  if (pinSeedRunning || prefs.pinsSeeded) return;
+  if (Array.isArray(prefs.pinned) && prefs.pinned.length) {
+    prefs.pinsSeeded = true;
+    savePrefs();
+    return;
+  }
+  pinSeedRunning = true;
+  try {
+    const rows = await buildAppIndex();
+    const one = async (pattern) => {
+      const row = rows.find((entry) => pattern.test(entry.name));
+      if (!row) return null;
+      return { id: row.id, name: row.name, target: row.target, icon: await iconForTarget(row.target) };
+    };
+    const picks = [];
+    const browser = await one(/^(microsoft edge|google chrome|firefox|brave)$/i);
+    if (browser) picks.push(browser);
+    for (const pattern of [
+      /^(windows )?terminal$/i,
+      /^file explorer$/i,
+      /^notepad$/i,
+      /^settings$/i,
+      /^paint$/i,
+    ]) {
+      if (picks.length >= 5) break;
+      const pin = await one(pattern);
+      if (pin && !picks.some((entry) => entry.name.toLowerCase() === pin.name.toLowerCase())) picks.push(pin);
+    }
+    // The executable behind each shortcut, so the pin merges with its own
+    // window on the bar instead of standing beside it.
+    const infos = await readShortcutInfo(picks.map((pin) => pin.target));
+    for (const pin of picks) {
+      const info = infos.get(pin.target);
+      if (info && info.target) pin.exe = info.target;
+    }
+    if (picks.length) {
+      prefs.pinned = picks.slice(0, 5);
+      broadcastPinned();
+    }
+    prefs.pinsSeeded = true;
+    savePrefs();
+  } catch {
+    /* no Start menu to read: the bar starts with no pins */
+  } finally {
+    pinSeedRunning = false;
+  }
 }
 
 function launcherBounds() {
@@ -4045,6 +4184,7 @@ ipcMain.handle('launcher:pin', async (_event, entry) => {
       name: String(entry?.name || 'App').slice(0, 60),
       target: String(entry?.target || id),
       icon: await iconForTarget(entry?.target || id),
+      exe: await shortcutExecutable(entry?.target || id),
     });
   }
   prefs.pinned = pins;
@@ -5864,10 +6004,38 @@ function groupTaskbarApps(items, pins) {
             .toLowerCase() === base,
       );
     }
-    if (!match) {
+    if (!match && pin.exe) {
+      const pinExe = String(pin.exe)
+        .split(/[\\/]/)
+        .pop()
+        .replace(/\.exe$/i, '')
+        .toLowerCase();
       match = groups.find(
-        (group) => !used.has(group) && group.name.toLowerCase() === String(pin.name || '').toLowerCase(),
+        (group) =>
+          !used.has(group) &&
+          String(group.exe)
+            .split(/[\\/]/)
+            .pop()
+            .replace(/\.exe$/i, '')
+            .toLowerCase() === pinExe,
       );
+    }
+    if (!match) {
+      // Shortcut names and process names rarely agree ("File Explorer" against
+      // "Explorer", "Settings" against "Systemsettings"), so the last try is one
+      // name inside the other.
+      const pinName = String(pin.name || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      if (pinName) {
+        match = groups.find((group) => {
+          if (used.has(group)) return false;
+          const groupName = String(group.name || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '');
+          return !!groupName && (groupName === pinName || groupName.includes(pinName) || pinName.includes(groupName));
+        });
+      }
     }
     if (match) {
       used.add(match);
@@ -5911,13 +6079,11 @@ function sendTaskbarUpdate() {
     win.webContents.send('taskbar:update', payload);
     applyTaskbarBounds(zone, win);
   }
-  // The apps island goes away when there is nothing on it; the tray island of the
-  // islands shape stays, because the clock lives there — and the attached bar is
-  // one window holding both, so it must stay for the same reason.
-  if (!taskbarApps.length) {
-    hideFlyout();
-    if (taskbarMode().shape === 'islands' && taskbarWin.isVisible()) taskbarWin.hide();
-  } else if (!taskbarWin.isVisible()) {
+  // The apps island stays even with nothing on it now: the Start button lives
+  // there, and a Start menu that comes and goes is not a taskbar. The tray
+  // island keeps the clock, and the attached bar holds both.
+  if (!taskbarApps.length) hideFlyout();
+  if (!taskbarWin.isVisible()) {
     taskbarWin.showInactive();
     sendTaskbarBackdrop();
   }
@@ -6015,6 +6181,7 @@ function createTaskbar() {
     taskbarTrayWin = null;
   }
   startTaskbarPolling();
+  seedPinnedApps();
 }
 
 function destroyTaskbar() {
@@ -6122,6 +6289,23 @@ function syncTaskbarPeek() {
   }
   for (const { zone, win } of taskbarZones()) applyTaskbarBounds(zone, win);
 }
+
+// The button left of the pins is the Start menu's job: the launcher already is
+// the list of everything installed, so it is what opens.
+ipcMain.on('taskbar:start', () => showLauncher());
+
+// The right end of the bar without the notification-area helper: the three
+// things a tray is reached for open their Windows pages directly.
+const TASKBAR_SYSTEM_URIS = {
+  network: 'ms-availablenetworks:',
+  sound: 'ms-settings:sound',
+  settings: 'ms-settings:',
+};
+
+ipcMain.on('taskbar:system', (_event, kind) => {
+  const uri = TASKBAR_SYSTEM_URIS[String(kind || '')];
+  if (uri) shell.openExternal(uri);
+});
 
 ipcMain.on('taskbar:ready', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
