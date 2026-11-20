@@ -693,6 +693,12 @@ function setGameMode(on) {
     clearInterval(widgetStatsTimer);
     widgetStatsTimer = setInterval(sendWidgetStats, gameStatsInterval());
   }
+  // The process list is kept alive through a game for the same reason, on its own
+  // slower beat.
+  if (widgetProcTimer) {
+    clearInterval(widgetProcTimer);
+    widgetProcTimer = setInterval(sampleProcesses, procInterval());
+  }
   try {
     syncTaskbarPeek();
   } catch {
@@ -6753,10 +6759,18 @@ function syncProcSampling() {
   else stopProcSampling();
 }
 
+// 3 s normally; 6 s while a game runs. The card is one of the surfaces a game
+// deliberately keeps, so the list under it has to keep being filled — at half the
+// wake-ups, but filled. Drawn from nothing it shows zeros, which is what a game's
+// own row used to read.
+function procInterval() {
+  return gameMode ? 6000 : 3000;
+}
+
 function startProcSampling() {
   if (widgetProcTimer) return;
   sampleProcesses();
-  widgetProcTimer = setInterval(sampleProcesses, 3000);
+  widgetProcTimer = setInterval(sampleProcesses, procInterval());
 }
 
 function stopProcSampling() {
@@ -6769,7 +6783,7 @@ function stopProcSampling() {
 // Task Manager–style breakdown: PowerShell lists the busiest processes, and the
 // CPU column is the delta of their accumulated CPU seconds between samples.
 function sampleProcesses() {
-  if (gameMode || procBusy || !wantsProcesses()) return;
+  if (procBusy || !wantsProcesses()) return;
   procBusy = true;
   const script =
     'Get-Process | Where-Object { $_.WorkingSet64 -gt 20000000 } | Sort-Object CPU -Descending | Select-Object -First 12 Name,Id,CPU,WorkingSet64 | ConvertTo-Json -Compress';

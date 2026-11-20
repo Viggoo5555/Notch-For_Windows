@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.26.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.26/Notch-Setup-1.2.26.exe)**
+**[Notch-Setup-1.2.27.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.27/Notch-Setup-1.2.27.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.27** — the System card keeps counting through a game. Game mode kept the
+card on screen and kept sending it CPU, memory and disk, but the process list
+underneath it is built by a sampler that returned immediately whenever a game was
+running — so the card whose whole point is watching the game showed every row at
+zero. The sampler now runs through a game at half its usual rate (6 s rather than
+3 s), and its timer is re-armed when game mode starts or ends. Detection of
+windowed fullscreen is fixed too: the geometry now measures the display the
+foreground window is actually on instead of the primary one, so a borderless game
+on a second monitor counts, and the "maximised app, not a game" rule only applies
+to windows wearing a title bar and a resizable frame — a borderless window filling
+its screen is a game whether or not it carries the maximized flag.
 
 **v1.2.26** — the panel stays hoverable while it closes. Its hover rect dropped
 back to the pill on a fixed 380 ms timer, whatever the close was doing — at an

@@ -83,6 +83,10 @@ public class JarvisWinHook
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
 
     [DllImport("user32.dll")]
     private static extern int GetWindowLong(IntPtr hWnd, int index);
@@ -94,6 +98,15 @@ public class JarvisWinHook
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
     }
 
     // Is something taking the whole screen right now? Windows knows when a game
@@ -110,20 +123,49 @@ public class JarvisWinHook
         if (foreground == IntPtr.Zero) return "0";
         RECT rect;
         if (!GetWindowRect(foreground, out rect)) return "0";
-        int screenWidth = GetSystemMetrics(0);
-        int screenHeight = GetSystemMetrics(1);
-        if (screenWidth <= 0 || screenHeight <= 0) return "0";
-        int width = rect.Right - rect.Left;
-        int height = rect.Bottom - rect.Top;
-        // A maximised window stops short of the taskbar; a game does not.
-        bool covers = width >= screenWidth - 2 && height >= screenHeight - 2;
+
+        // The display this window sits on, not the primary one: a borderless game
+        // on a second monitor covers its own screen, and the primary's size says
+        // nothing about that one's.
+        int left = 0, top = 0, width = 0, height = 0;
+        IntPtr monitor = MonitorFromWindow(foreground, 2); // MONITOR_DEFAULTTONEAREST
+        if (monitor != IntPtr.Zero)
+        {
+            MONITORINFO info = new MONITORINFO();
+            info.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
+            if (GetMonitorInfo(monitor, ref info))
+            {
+                left = info.rcMonitor.Left;
+                top = info.rcMonitor.Top;
+                width = info.rcMonitor.Right - info.rcMonitor.Left;
+                height = info.rcMonitor.Bottom - info.rcMonitor.Top;
+            }
+        }
+        if (width <= 0 || height <= 0)
+        {
+            width = GetSystemMetrics(0);
+            height = GetSystemMetrics(1);
+        }
+        if (width <= 0 || height <= 0) return "0";
+
+        // Edge to edge on that display: a maximised window stops short of the
+        // taskbar, a game does not.
+        bool covers =
+            rect.Left <= left + 2 && rect.Top <= top + 2 &&
+            rect.Right >= left + width - 2 && rect.Bottom >= top + height - 2;
         if (!covers) return "0";
 
-        // A window that covers the screen because the taskbar is hidden is a
-        // maximised app, not a fullscreen one, and the pill belongs over it.
+        // A title bar and a resizable frame are what an ordinary window wears, and
+        // one that fills its display while wearing them is a maximised app — the
+        // pill belongs over that. A game in a borderless window has neither,
+        // maximised flag or not, and owns the display.
         const int GWL_STYLE = -16;
         const int WS_MAXIMIZE = 0x01000000;
-        if ((GetWindowLong(foreground, GWL_STYLE) & WS_MAXIMIZE) != 0) return "0";
+        const int WS_CAPTION = 0x00C00000;
+        const int WS_THICKFRAME = 0x00040000;
+        int style = GetWindowLong(foreground, GWL_STYLE);
+        bool framed = (style & WS_CAPTION) != 0 || (style & WS_THICKFRAME) != 0;
+        if (framed && (style & WS_MAXIMIZE) != 0) return "0";
 
         uint pid;
         GetWindowThreadProcessId(foreground, out pid);
