@@ -2335,11 +2335,15 @@ function bindEvents() {
     button.disabled = true;
     const answer = await api.captureShot();
     button.disabled = false;
+    if (answer && answer.cancelled) return;
     if (!answer || !answer.ok) {
       toast((answer && answer.error) || 'Could not take the picture');
       return;
     }
     state.shot = answer;
+    // Choosing a region takes the pointer off the panel, so it may have folded
+    // while the drag was out there: the picture opens it again.
+    openNotch();
     openDetail('shot');
   });
 

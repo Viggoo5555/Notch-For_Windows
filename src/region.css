@@ -1,0 +1,97 @@
+/* The picker: a veil over the desktop, a rectangle to drag out of it, and the
+   size of that rectangle. Nothing here is a glass surface of the shell: it is a
+   tool over the screen, so it stays flat and gets out of the way. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+  background: transparent;
+  color: #e9edf5;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+}
+
+.veil {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 8, 12, 0.36);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* The dimming lives in the selection's own shadow, so the chosen rectangle is
+   the one clear part of the screen. */
+.sel {
+  position: fixed;
+  border: 1px solid rgba(255, 255, 255, 0.94);
+  border-radius: 3px;
+  box-shadow: 0 0 0 100vmax rgba(6, 8, 12, 0.36);
+}
+
+.tag {
+  position: fixed;
+  padding: 3px 9px;
+  border-radius: 8px;
+  background: rgba(11, 13, 19, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(233, 237, 245, 0.94);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Crosshairs: where the pointer is, so an edge can be found before the drag. */
+.line {
+  position: fixed;
+  background: rgba(126, 186, 255, 0.42);
+  pointer-events: none;
+}
+
+.line-x {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+.line-y {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.hint {
+  position: fixed;
+  top: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 15px;
+  border-radius: 999px;
+  background: rgba(11, 13, 19, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(233, 237, 245, 0.9);
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+  transition: opacity 140ms ease;
+}
+
+.hint i {
+  font-style: normal;
+  opacity: 0.5;
+  margin: 0 3px;
+}
+
+.hint.gone {
+  opacity: 0;
+}

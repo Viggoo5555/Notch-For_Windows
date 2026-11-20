@@ -4453,13 +4453,11 @@ async function captureWithChromium(display) {
   }
 }
 
-async function captureScreenshot() {
-  if (!win || win.isDestroyed()) return { ok: false, error: 'Nothing to capture' };
-  if (gameMode) return { ok: false, error: 'A game has the screen' };
-  const display = screen.getPrimaryDisplay();
-  // The shot should not contain the shell. Hiding the windows would take the
-  // pointer off the pill mid-click and close the panel, so they are made fully
-  // transparent for the frame instead and put back straight after.
+// The shot should not contain the shell. Hiding the windows would take the
+// pointer off the pill mid-click and close the panel, so they are made fully
+// transparent for the frame instead and put back straight after. The picker
+// needs them gone for as long as it is up, so this is a function of its own.
+function fadeShell() {
   const faded = shellSurfaces().filter((surface) => surface.isVisible());
   const fadedOpacity = new Map();
   for (const surface of faded) {
@@ -4471,11 +4469,7 @@ async function captureScreenshot() {
       /* already gone */
     }
   }
-  let grab = null;
-  try {
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    grab = await captureScreen(display);
-  } finally {
+  return () => {
     for (const surface of faded) {
       if (surface.isDestroyed()) continue;
       try {
@@ -4484,17 +4478,55 @@ async function captureScreenshot() {
         /* already gone */
       }
     }
+  };
+}
+
+// A display-sized frame is photographed whole and cut afterwards, so the region
+// keeps the pixels the full screen would have had whichever capture answered.
+// The scale comes from the picture itself, which is what makes a physical grab
+// and a DIP grab crop correctly with the same arithmetic.
+function cropToRect(image, rect, display) {
+  const full = image.getSize();
+  const scale = display.bounds.width > 0 ? full.width / display.bounds.width : 1;
+  const box = {
+    x: Math.round((rect.x - display.bounds.x) * scale),
+    y: Math.round((rect.y - display.bounds.y) * scale),
+    width: Math.round(rect.width * scale),
+    height: Math.round(rect.height * scale),
+  };
+  box.x = Math.max(0, Math.min(box.x, full.width - 1));
+  box.y = Math.max(0, Math.min(box.y, full.height - 1));
+  box.width = Math.max(1, Math.min(box.width, full.width - box.x));
+  box.height = Math.max(1, Math.min(box.height, full.height - box.y));
+  if (box.width < 4 || box.height < 4) return null;
+  return image.crop(box);
+}
+
+async function captureScreenshot(rect = null, options = {}) {
+  if (!win || win.isDestroyed()) return { ok: false, error: 'Nothing to capture' };
+  if (gameMode) return { ok: false, error: 'A game has the screen' };
+  const display = screen.getPrimaryDisplay();
+  const restore = options.faded ? () => {} : fadeShell();
+  let grab = null;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    grab = await captureScreen(display);
+  } finally {
+    restore();
   }
   if (!grab || !grab.data) {
     return { ok: false, error: 'The screen could not be read — Windows refused the capture' };
   }
   const png = Buffer.from(grab.data, 'base64');
-  const image = nativeImage.createFromBuffer(png);
-  if (image.isEmpty()) return { ok: false, error: 'The screen came back empty' };
+  const whole = nativeImage.createFromBuffer(png);
+  if (whole.isEmpty()) return { ok: false, error: 'The screen came back empty' };
+  const image = rect ? cropToRect(whole, rect, display) : whole;
+  if (!image || image.isEmpty()) return { ok: false, error: 'That part of the screen came back empty' };
   const size = image.getSize();
+  const data = image === whole ? png : image.toPNG();
   const file = path.join(app.getPath('temp'), `notch-shot-${Date.now()}.png`);
   try {
-    fs.writeFileSync(file, png);
+    fs.writeFileSync(file, data);
   } catch {
     return { ok: false, error: 'Could not keep the picture' };
   }
@@ -4504,6 +4536,126 @@ async function captureScreenshot() {
   const preview = image.resize({ width: Math.min(1024, size.width), quality: 'good' }).toDataURL();
   return { ok: true, width: size.width, height: size.height, preview };
 }
+
+// ------------------------------------------------------------------ picker
+
+let regionWin = null;
+let regionResolve = null;
+
+function closeRegion(rect) {
+  const resolve = regionResolve;
+  regionResolve = null;
+  if (regionWin && !regionWin.isDestroyed()) regionWin.destroy();
+  regionWin = null;
+  if (resolve) resolve(rect || null);
+}
+
+// A sheet of glass over the whole display with nothing on it but a dimmed veil
+// and a drag: the screen underneath is left exactly as it is, so what is chosen
+// is what is there. Returns the chosen rectangle in screen coordinates, or null.
+function pickRegion() {
+  closeRegion(null);
+  return new Promise((resolve) => {
+    const display = screen.getPrimaryDisplay();
+    regionResolve = resolve;
+    const overlay = new BrowserWindow({
+      x: display.bounds.x,
+      y: display.bounds.y,
+      width: display.bounds.width,
+      height: display.bounds.height,
+      frame: false,
+      transparent: true,
+      backgroundColor: '#00000000',
+      hasShadow: false,
+      thickFrame: false,
+      roundedCorners: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      show: false,
+      title: 'Notch screenshot',
+      webPreferences: {
+        preload: path.join(__dirname, 'region-preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false,
+        spellcheck: false,
+        backgroundThrottling: false,
+      },
+    });
+    regionWin = overlay;
+    overlay.setMenu(null);
+    overlay.setAlwaysOnTop(true, 'screen-saver');
+    overlay.setSkipTaskbar(true);
+    overlay.loadFile(path.join(__dirname, 'src', 'region.html'));
+    overlay.once('ready-to-show', () => {
+      if (overlay.isDestroyed()) return;
+      overlay.setBounds(display.bounds, false);
+      overlay.show();
+      overlay.focus();
+    });
+    // Esc closes it even if the page never got the keystroke.
+    overlay.webContents.on('before-input-event', (_event, input) => {
+      if (input.type === 'keyDown' && input.key === 'Escape') closeRegion(null);
+    });
+    overlay.on('closed', () => {
+      if (regionWin === overlay) regionWin = null;
+      const pending = regionResolve;
+      regionResolve = null;
+      if (pending) pending(null);
+    });
+  });
+}
+
+// The picker is the first half of a shot: the shell steps out for it, and the
+// frame taken afterwards is cut to the rectangle it hands back.
+async function regionShot() {
+  if (!win || win.isDestroyed()) return { ok: false, error: 'Nothing to capture' };
+  if (gameMode) return { ok: false, error: 'A game has the screen' };
+  const restore = fadeShell();
+  let rect = null;
+  try {
+    rect = await pickRegion();
+  } catch {
+    rect = null;
+  }
+  if (!rect) {
+    restore();
+    return { ok: false, cancelled: true, error: '' };
+  }
+  try {
+    // The overlay has to be off the screen before the frame is taken.
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    return await captureScreenshot(rect, { faded: true });
+  } finally {
+    restore();
+  }
+}
+
+ipcMain.on('region:pick', (_event, payload) => {
+  const box = payload || {};
+  const rect = {
+    x: Math.round(Number(box.x) || 0),
+    y: Math.round(Number(box.y) || 0),
+    width: Math.round(Number(box.width) || 0),
+    height: Math.round(Number(box.height) || 0),
+  };
+  if (rect.width < 4 || rect.height < 4) {
+    closeRegion(null);
+    return;
+  }
+  // The overlay covers the primary display, so its window coordinates are screen
+  // coordinates less the corner it starts at.
+  const origin =
+    regionWin && !regionWin.isDestroyed() ? regionWin.getBounds() : screen.getPrimaryDisplay().bounds;
+  closeRegion({ x: origin.x + rect.x, y: origin.y + rect.y, width: rect.width, height: rect.height });
+});
+
+ipcMain.on('region:cancel', () => closeRegion(null));
 
 function shotFolder() {
   return path.join(app.getPath('pictures'), 'Notch', 'Screenshots');
@@ -4596,7 +4748,7 @@ async function guessShotFont() {
 
 // The shortcut goes through the panel, so the shot opens where its actions are.
 async function takeScreenshot() {
-  const result = await captureScreenshot();
+  const result = await regionShot();
   if (!result.ok) return result;
   if (win && !win.isDestroyed()) {
     win.webContents.send('notch:shot', result);
@@ -4605,7 +4757,7 @@ async function takeScreenshot() {
   return result;
 }
 
-ipcMain.handle('notch:shot-capture', () => captureScreenshot());
+ipcMain.handle('notch:shot-capture', () => regionShot());
 ipcMain.handle('notch:shot-save', () => saveScreenshot());
 ipcMain.handle('notch:shot-text', () => readShotText());
 ipcMain.handle('notch:shot-font', () => guessShotFont());

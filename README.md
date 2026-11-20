@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.31.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.31/Notch-Setup-1.2.31.exe)**
+**[Notch-Setup-1.2.32.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.32/Notch-Setup-1.2.32.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,17 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.32** — the camera asks first. Pressing it (or Ctrl+Alt+S) no longer
+photographs the whole screen: the shell steps aside, the display dims behind a
+crosshair, and a drag picks the part to take — the size follows the corner while
+you drag, everything outside the rectangle stays dark, and only what is inside
+comes back. Esc or a right-click calls it off, and a drag under eight pixels is
+treated as a stray click rather than a photograph of nothing. The frame is still
+taken whole and cut to the rectangle afterwards, so both capture paths behave
+exactly as before and the cut is scaled from the picture itself: on a display at
+150%, a 640×360 drag saves 960×540 of real pixels. **Save**, **Text** and
+**Font** work on the cut picture just as they did on the full screen.
 
 **v1.2.31** — the bar gives the bottom edge back. The taskbar's window is a
 strip along the bottom of the screen, exactly where Windows keeps its own, and
