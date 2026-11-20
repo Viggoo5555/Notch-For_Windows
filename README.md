@@ -357,6 +357,17 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 
 ## Release
 
+**v1.2.16** — no-restriction models, and the Windows key again. The model manager
+now lists abliterated and uncensored builds beside the ordinary ones —
+`huihui_ai/qwen2.5-abliterate` at 1.5B, 3B, 7B, 14B and 32B, and Dolphin 3 8B — and
+names the one that fits this machine next to the suggested brain: abliteration only
+takes the refusal habit out, so the uncensored twin of the recommended size runs at
+the same speed in the same memory. The Windows key is no longer a one-shot either: a
+keyboard helper that dies, or never finishes starting, is brought back with a growing
+wait instead of being given up on, an exception inside it now hands the key back to
+Windows rather than ending the process, and the Start sheet no longer closes itself
+when Windows hands the foreground over a beat late. Releases carry the installer only.
+
 **v1.2.15** — the installer only, and a faster, larger Jarvis. The graphics card is
 now measured by the driver's own registry figure instead of the 32-bit one Windows
 reports, so an 8 GB card is seen as 8 GB and gets the 7B brain, whisper-small on the

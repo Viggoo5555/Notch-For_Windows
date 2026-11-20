@@ -766,7 +766,22 @@ public class JarvisWinHook
         SendInput(3, inputs, Marshal.SizeOf(typeof(INPUT)));
     }
 
+    // An exception on this thread ends the process, and the Windows key, the taskbar
+    // slots and the tray go with it until the app itself is restarted. Handing the
+    // key to Windows is the cheaper failure, so the decision is guarded.
     private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        try
+        {
+            return HookDecision(nCode, wParam, lParam);
+        }
+        catch
+        {
+            return CallNextHookEx(_hook, nCode, wParam, lParam);
+        }
+    }
+
+    private static IntPtr HookDecision(int nCode, IntPtr wParam, IntPtr lParam)
     {
         if (nCode >= 0)
         {

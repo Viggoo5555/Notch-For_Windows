@@ -1103,6 +1103,45 @@ const OLLAMA_PRESETS = [
   { name: 'llama3.1:8b', label: 'Llama 3.1 8B', size: '4.9 GB', note: 'General chat' },
   { name: 'qwen2.5:14b', label: 'Qwen 2.5 14B', size: '9.0 GB', note: 'Smarter, some CPU offload' },
   { name: 'qwen2.5:32b', label: 'Qwen 2.5 32B', size: '20 GB', note: 'Needs the 32 GB of RAM' },
+  // Abliterated and uncensored builds: the same weights with the refusal habit
+  // trained out, so an order is carried out instead of argued with. The names are
+  // the tags ollama.com publishes, so the pull finds exactly what it asks for.
+  {
+    name: 'huihui_ai/qwen2.5-abliterate:1.5b',
+    label: 'Qwen 2.5 1.5B abliterated',
+    size: '986 MB',
+    note: 'No refusals',
+    free: true,
+  },
+  {
+    name: 'huihui_ai/qwen2.5-abliterate:3b',
+    label: 'Qwen 2.5 3B abliterated',
+    size: '1.9 GB',
+    note: 'No refusals',
+    free: true,
+  },
+  {
+    name: 'huihui_ai/qwen2.5-abliterate:7b',
+    label: 'Qwen 2.5 7B abliterated',
+    size: '4.7 GB',
+    note: 'No refusals',
+    free: true,
+  },
+  {
+    name: 'huihui_ai/qwen2.5-abliterate:14b',
+    label: 'Qwen 2.5 14B abliterated',
+    size: '9.0 GB',
+    note: 'No refusals',
+    free: true,
+  },
+  {
+    name: 'huihui_ai/qwen2.5-abliterate:32b',
+    label: 'Qwen 2.5 32B abliterated',
+    size: '20 GB',
+    note: 'No refusals',
+    free: true,
+  },
+  { name: 'dolphin3:8b', label: 'Dolphin 3 8B', size: '4.9 GB', note: 'Uncensored chat', free: true },
 ];
 
 let jarvisWin = null;
@@ -1337,6 +1376,20 @@ function recommendModel(hardware = detectHardware()) {
   return {
           name: 'qwen2.5:1.5b',
     reason: `${cores} CPU threads, ${ramGb} GB of RAM and integrated graphics: a 1.5B model is the one that stays instant here. Bigger models would answer in minutes.`,
+  };
+}
+
+// The uncensored twin of the recommended brain: the abliterated build of the same
+// size class. Abliteration only removes the refusal direction, so it costs nothing
+// in speed or memory — whatever tier the machine landed in, the same size fits.
+function recommendFreeModel(hardware = detectHardware()) {
+  const brain = recommendModel(hardware);
+  const size = String(brain.name.split(':')[1] || '7b').replace(/[^0-9.]/g, '');
+  const name = `huihui_ai/qwen2.5-abliterate:${size}b`;
+  const capacity = hardware.gpuMemoryGb > 0 ? `${hardware.gpuMemoryGb} GB of video memory` : `${hardware.ramGb} GB of RAM`;
+  return {
+    name,
+    reason: `Its uncensored twin is the same ${size}B model with the refusals taken out, so ${capacity} carries it exactly as well and it does what it is told.`,
   };
 }
 
@@ -2760,6 +2813,7 @@ ipcMain.handle('assistant:boot', async () => {
   if (!status.running) startOllama();
   const hardware = detectHardware();
   const recommended = recommendModel(hardware);
+  const free = recommendFreeModel(hardware);
   const settings = assistantSettings();
   // A card that can read the studio voice starts on it: it is the voice that
   // sounds recorded, and the light one is the fallback, not the point. Picking
@@ -2773,9 +2827,11 @@ ipcMain.handle('assistant:boot', async () => {
     presets: OLLAMA_PRESETS.map((preset) => ({
       ...preset,
       recommended: preset.name === recommended.name,
+      recommendedFree: preset.name === free.name,
     })),
     hardware,
     recommended,
+    free,
     stt: recommendStt(hardware),
     neural: { available: neuralVoiceAvailable(), voices: NEURAL_VOICES.map(({ id, label, note }) => ({ id, label, note })) },
     studio: {
@@ -3003,6 +3059,11 @@ let appIndex = null;
 let appIndexBuilding = null;
 let hookProc = null;
 let hookFailures = 0;
+let hookReady = false;
+let hookRetryTimer = null;
+// When the sheet was put up. A blur in the first moment after that is Windows
+// finishing its foreground handover, not the user clicking somewhere else.
+let launcherShownAt = 0;
 const appIconCache = new Map();
 const iconSourceCache = new Map();
 
@@ -3271,6 +3332,10 @@ function createLauncher() {
   launcherWin.loadFile(path.join(__dirname, 'src', 'launcher.html'));
   launcherWin.webContents.on('did-finish-load', sendLauncherState);
   launcherWin.on('blur', () => {
+    // The sheet used to vanish the instant it appeared when Windows handed the
+    // foreground back late, which reads as the Windows key doing nothing at all.
+    // Only a blur once the sheet has settled is the user clicking elsewhere.
+    if (Date.now() - launcherShownAt < 350) return;
     if (launcherWin && launcherWin.isVisible()) hideLauncher();
   });
   launcherWin.on('close', (event) => {
@@ -3331,6 +3396,7 @@ function showLauncher() {
   revealTaskbar();
   window.setBounds(launcherBounds());
   window.show();
+  launcherShownAt = Date.now();
   window.moveTop();
   // The sheet has to be taking keys the instant it is up, so the show path does no
   // work that could hold the keyboard up: the glass image is the one encoded after
@@ -3407,6 +3473,9 @@ function toggleLauncher() {
 // One tiny PowerShell host watches the Windows key: a lone tap is swallowed so
 // the built-in Start never opens, chords pass through untouched.
 function stopWinHook() {
+  if (hookRetryTimer) clearTimeout(hookRetryTimer);
+  hookRetryTimer = null;
+  hookReady = false;
   if (!hookProc) return;
   const proc = hookProc;
   hookProc = null;
@@ -3417,9 +3486,21 @@ function stopWinHook() {
   }
 }
 
+// A helper that dies is restarted, not given up on: the Windows key is the only
+// way into the launcher, and a machine left running for a week should still answer
+// it. The wait grows so a PowerShell that keeps failing cannot spin, and a `ready`
+// line from a healthy one resets the ladder.
+function scheduleWinHookRetry() {
+  if (hookRetryTimer || !prefs.settings.windowsKey || !isWin) return;
+  const wait = Math.min(60000, 1500 * (hookFailures + 1));
+  hookRetryTimer = setTimeout(() => {
+    hookRetryTimer = null;
+    startWinHook();
+  }, wait);
+}
+
 function startWinHook() {
   if (hookProc || !prefs.settings.windowsKey || !isWin) return;
-  if (hookFailures >= 3) return;
   let proc = null;
   try {
     proc = spawn(
@@ -3439,7 +3520,11 @@ function startWinHook() {
     return;
   }
   hookProc = proc;
+  hookReady = false;
   if (proc.stdin) proc.stdin.on('error', () => {});
+  // Compiled PowerShell takes a moment to start; one that never reports `ready`
+  // never installed the hook, so it is replaced instead of leaving the key dead.
+  let watchdog = null;
   let buffer = '';
   proc.stdout.on('data', (chunk) => {
     buffer += String(chunk);
@@ -3493,21 +3578,38 @@ function startWinHook() {
         windowListBuffer = [];
       } else if (text === 'win') toggleLauncher();
       else if (text.startsWith('slot ')) activateTaskbarSlot(Number(text.slice(5)));
-      else if (text === 'ready') hookFailures = 0;
-      else if (text.startsWith('fail')) {
-        hookFailures = 3;
+      else if (text === 'ready') {
+        hookFailures = 0;
+        hookReady = true;
+        if (watchdog) clearTimeout(watchdog);
+        watchdog = null;
+      } else if (text.startsWith('fail')) {
+        hookFailures += 1;
         stopWinHook();
+        scheduleWinHookRetry();
       }
       line = buffer.indexOf('\n');
     }
   });
+  watchdog = setTimeout(() => {
+    if (hookProc !== proc || hookReady) return;
+    hookFailures += 1;
+    hookProc = null;
+    try {
+      proc.kill();
+    } catch {
+      /* already gone */
+    }
+    scheduleWinHookRetry();
+  }, 8000);
   proc.on('exit', () => {
     if (hookProc !== proc) return; // stopped on purpose
     hookProc = null;
+    hookReady = false;
     hookFailures += 1;
-    if (prefs.settings.windowsKey && hookFailures < 3) {
-      setTimeout(startWinHook, 2500);
-    }
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = null;
+    scheduleWinHookRetry();
   });
 }
 
@@ -4997,7 +5099,12 @@ function requestTrayList(timeout = 2500) {
       if (request.done) return;
       request.done = true;
       clearTimeout(timer);
-      if (trayRequest === request) trayRequest = null;
+      if (trayRequest === request) {
+        trayRequest = null;
+        // A list that timed out leaves its buffer behind, and every line after it —
+        // the Windows key included — would be read as a row of a list that is gone.
+        trayListBuffer = null;
+      }
       resolve(value);
     }
     request.finish = finish;

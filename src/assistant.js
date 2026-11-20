@@ -71,6 +71,7 @@ const state = {
   sttPlan: null,
   status: { running: false, version: '', models: [] },
   presets: [],
+  free: null,
   voices: [],
   history: [],
   busy: false,
@@ -1012,14 +1013,25 @@ function renderPresets() {
     card.type = 'button';
     const isInstalled = installed.has(preset.name);
     const isRecommended = !!preset.recommended;
-    card.className = `preset${isInstalled ? ' installed' : ''}${isRecommended ? ' rec' : ''}`;
+    const isFreePick = !!preset.recommendedFree;
+    card.className = `preset${isInstalled ? ' installed' : ''}${isRecommended || isFreePick ? ' rec' : ''}${
+      preset.free ? ' free' : ''
+    }`;
     card.innerHTML = '';
     const label = document.createElement('span');
     label.className = 'label';
     label.textContent = preset.label;
     const note = document.createElement('span');
     note.className = 'note';
-    note.textContent = isInstalled ? 'Installed' : isRecommended ? 'Best for this PC' : preset.note;
+    // Two cards are highlighted: the brain that suits this machine, and the
+    // uncensored twin of the same size, which it runs exactly as well.
+    note.textContent = isInstalled
+      ? 'Installed'
+      : isRecommended
+        ? 'Best for this PC'
+        : isFreePick
+          ? 'Fits this PC · no refusals'
+          : preset.note;
     const size = document.createElement('span');
     size.className = 'size';
     size.textContent = preset.size;
@@ -1042,8 +1054,12 @@ function showHardware() {
   if (!hw) return;
   const bits = [`${hw.cores} CPU threads`, `${hw.ramGb} GB RAM`, hw.integrated ? `${hw.gpu} (integrated)` : `${hw.gpu} (${hw.vramGb} GB)`];
   const recName = rec ? (state.presets.find((p) => p.name === rec.name) || {}).label || rec.name : '';
+  const free = state.free;
+  const freeName = free ? (state.presets.find((p) => p.name === free.name) || {}).label || free.name : '';
   els.hwLine.textContent = rec
-    ? `${bits.join(' · ')}. ${rec.reason} Suggested: ${recName}.`
+    ? `${bits.join(' · ')}. ${rec.reason} Suggested: ${recName}.${
+        free ? ` No-restriction pick: ${freeName} — same size, so the same speed.` : ''
+      }`
     : `${bits.join(' · ')}.`;
   if (els.voiceLine) {
     const studio = state.studio;
@@ -2089,6 +2105,7 @@ window.__jarvis.gameMode = applyGameMode;
   state.presets = data.presets || [];
   state.hardware = data.hardware || null;
   state.recommended = data.recommended || null;
+  state.free = data.free || null;
   state.neural = data.neural || { available: false, voices: [] };
   state.studio = data.studio || state.studio;
   state.sttPlan = data.stt || null;
