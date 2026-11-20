@@ -134,6 +134,101 @@ function iconOrLetters(node, item) {
   node.appendChild(label);
 }
 
+// ------------------------------------------------------------------- pins
+// A pin is made and broken where Windows makes it, on a right-click. The pins
+// are held in the order the bar draws them, so dragging one drops it into that
+// array and the bar keeps the new order from then on.
+
+const drag = { id: '', mark: null };
+
+function pinnedOrder() {
+  return apps.filter((app) => app.pin).map((app) => app.pin.id);
+}
+
+function clearDropMarks() {
+  if (!drag.mark) return;
+  drag.mark.classList.remove('tb-drop-before', 'tb-drop-after');
+  drag.mark = null;
+}
+
+// Move one pin in front of another; an empty place means the end of the row.
+// A pin dropped on itself stays where it is.
+function movePin(id, before) {
+  if (!id || id === before) return;
+  const order = pinnedOrder();
+  const from = order.indexOf(id);
+  if (from < 0) return;
+  order.splice(from, 1);
+  const at = before ? order.indexOf(before) : -1;
+  if (at < 0) order.push(id);
+  else order.splice(at, 0, id);
+  if (api) api.reorder({ order });
+}
+
+function wirePinControls(button, app) {
+  button.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    if (api) api.context(app.key);
+  });
+  if (!app.pin) return;
+  // Only a pin can be dragged: an open app sits where its group put it until it
+  // is pinned, and moving it would move nothing that outlives the window.
+  button.draggable = true;
+  button.addEventListener('dragstart', (event) => {
+    drag.id = app.pin.id;
+    button.classList.add('tb-dragging');
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', app.key);
+    }
+  });
+  button.addEventListener('dragend', () => {
+    drag.id = '';
+    button.classList.remove('tb-dragging');
+    clearDropMarks();
+  });
+  button.addEventListener('dragover', (event) => {
+    if (!drag.id || drag.id === app.pin.id) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    // The half of the button the pointer is over decides which side of it the
+    // pin lands on, as it does on Windows.
+    const box = button.getBoundingClientRect();
+    const after = event.clientX > box.left + box.width / 2;
+    if (drag.mark !== button) {
+      clearDropMarks();
+      drag.mark = button;
+    }
+    button.classList.toggle('tb-drop-before', !after);
+    button.classList.toggle('tb-drop-after', after);
+  });
+  button.addEventListener('drop', (event) => {
+    if (!drag.id) return;
+    event.preventDefault();
+    const id = drag.id;
+    const after = button.classList.contains('tb-drop-after');
+    drag.id = '';
+    clearDropMarks();
+    const order = pinnedOrder();
+    const at = order.indexOf(app.pin.id);
+    movePin(id, after ? order[at + 1] || '' : app.pin.id);
+  });
+}
+
+// Dropping past the last button, on the bar itself, puts the pin at the end.
+appsEl.addEventListener('dragover', (event) => {
+  if (!drag.id) return;
+  event.preventDefault();
+});
+appsEl.addEventListener('drop', (event) => {
+  if (!drag.id) return;
+  event.preventDefault();
+  const id = drag.id;
+  drag.id = '';
+  clearDropMarks();
+  movePin(id, '');
+});
+
 // The Start button is the launcher's list of everything installed, and it sits
 // where Windows keeps its Start: immediately left of the pins.
 function startButton() {
@@ -174,6 +269,7 @@ function buildApps() {
     button.title = open ? `${app.name} — ${app.windows.length} window${app.windows.length > 1 ? 's' : ''}` : app.name;
     button.setAttribute('aria-label', app.name || 'App');
     iconOrLetters(button, app);
+    wirePinControls(button, app);
     button.addEventListener('click', () => {
       if (api) api.group(app.key);
     });

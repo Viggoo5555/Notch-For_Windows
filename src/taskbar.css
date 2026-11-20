@@ -194,6 +194,32 @@ body {
   transform: translateY(-1px);
 }
 
+/* Dragging a pin: the button fades and a light line shows where it will land. */
+.tb-item.tb-dragging {
+  opacity: 0.45;
+}
+
+.tb-item.tb-drop-before::before,
+.tb-item.tb-drop-after::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 2px;
+  background: rgba(132, 194, 255, 0.95);
+  box-shadow: 0 0 6px rgba(90, 168, 255, 0.65);
+  pointer-events: none;
+}
+
+.tb-item.tb-drop-before::before {
+  left: -3px;
+}
+
+.tb-item.tb-drop-after::before {
+  right: -3px;
+}
+
 .tb-item:active {
   transform: scale(0.94);
 }

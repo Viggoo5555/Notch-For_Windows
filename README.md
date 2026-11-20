@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.20.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.20/Notch-Setup-1.2.20.exe)**
+**[Notch-Setup-1.2.21.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.21/Notch-Setup-1.2.21.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -62,6 +62,8 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   bottom edge: the apps stay centred on the screen while the notification tray,   the battery and the clock hold the right edge, the way a taskbar should, and a click on
   a tray icon is passed to that icon. A chevron leads the tray, as on Windows: it opens
   the notification icons the shell keeps hidden, every one of them clickable there.
+  Right-click a button to pin it to the bar or take it off again, and drag a pin to
+  put it where you want it — the order is kept between restarts.
 - **Library and store** — the library scans Steam, Epic and your own shortcuts, shows
   the cover art, and launches a game with a click; add a shortcut by hand if a
   launcher keeps it hidden. The bag icon beside those buttons opens **Store** inside
@@ -356,6 +358,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.21** — the bar is yours to arrange. Right-click any button and the bar offers
+the one thing Windows' own menu leads with: pin a running app to the taskbar, or
+unpin one that is already there — the pin takes the executable behind the window, so
+it stays a single button with the app it opens instead of standing beside it. Drag a
+pin and it follows the pointer: a light line shows the side it will land on, and the
+new order is written down at once, so the bar comes back the way you left it after a
+restart. Dragging only moves pins, never the windows that happen to be open, and the
+chevron that opens Windows' hidden notification icons is still at the head of the
+tray. Releases carry the installer only.
 
 **v1.2.20** — the hidden icons, one click away. A chevron now leads the tray, where
 Windows keeps it: it opens the panel of notification icons the shell holds back —

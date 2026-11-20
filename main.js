@@ -3765,6 +3765,64 @@ function broadcastPinned() {
   refreshTaskbar();
 }
 
+// The pin array is both what the bar shows and the order it shows it in, so
+// pinning, unpinning and dragging all end here.
+async function addPinnedApp(entry) {
+  const id = String(entry?.id || entry?.target || '').trim();
+  if (!id) return false;
+  const pins = Array.isArray(prefs.pinned) ? prefs.pinned.slice() : [];
+  if (pins.some((pin) => pin.id === id) || pins.length >= 12) return false;
+  const target = String(entry?.target || id);
+  pins.push({
+    id,
+    name: String(entry?.name || 'App').slice(0, 60),
+    target,
+    icon: entry?.icon || (await iconForTarget(target)),
+    // The executable a shortcut points at, so a pin and the window it opens are
+    // one button instead of two.
+    exe: entry?.exe || (await shortcutExecutable(target)),
+  });
+  prefs.pinned = pins;
+  savePrefs();
+  broadcastPinned();
+  return true;
+}
+
+function removePinnedApp(id) {
+  const key = String(id || '');
+  if (!key) return false;
+  const pins = Array.isArray(prefs.pinned) ? prefs.pinned : [];
+  const next = pins.filter((pin) => pin.id !== key);
+  if (next.length === pins.length) return false;
+  prefs.pinned = next;
+  savePrefs();
+  broadcastPinned();
+  return true;
+}
+
+// A drag ends with the bar's pins in the order they were left in: the ids it
+// names are put in that order and any pin it did not know about keeps the end.
+function reorderPinnedApps(ids) {
+  const order = Array.isArray(ids) ? ids.map(String) : [];
+  if (!order.length) return false;
+  const pins = Array.isArray(prefs.pinned) ? prefs.pinned.slice() : [];
+  const byId = new Map(pins.map((pin) => [pin.id, pin]));
+  const next = [];
+  for (const id of order) {
+    const pin = byId.get(id);
+    if (!pin) continue;
+    byId.delete(id);
+    next.push(pin);
+  }
+  for (const pin of pins) if (byId.has(pin.id)) next.push(pin);
+  const same = next.length === pins.length && next.every((pin, index) => pin === pins[index]);
+  if (same) return false;
+  prefs.pinned = next;
+  savePrefs();
+  broadcastPinned();
+  return true;
+}
+
 // A bar with nothing pinned is only whatever happens to be open. The first run
 // takes the handful of apps Windows starts with, out of the Start menu itself,
 // so every pin is a real shortcut with its real icon.
@@ -4175,21 +4233,9 @@ ipcMain.handle('launcher:launch', (_event, target) => {
 ipcMain.handle('launcher:pin', async (_event, entry) => {
   const id = String(entry?.id || entry?.target || '').trim();
   if (!id) return pinnedEntries();
-  const pins = Array.isArray(prefs.pinned) ? prefs.pinned.slice() : [];
-  const index = pins.findIndex((pin) => pin.id === id);
-  if (index >= 0) pins.splice(index, 1);
-  else if (pins.length < 12) {
-    pins.push({
-      id,
-      name: String(entry?.name || 'App').slice(0, 60),
-      target: String(entry?.target || id),
-      icon: await iconForTarget(entry?.target || id),
-      exe: await shortcutExecutable(entry?.target || id),
-    });
-  }
-  prefs.pinned = pins;
-  savePrefs();
-  broadcastPinned();
+  const pins = Array.isArray(prefs.pinned) ? prefs.pinned : [];
+  if (pins.some((pin) => pin.id === id)) removePinnedApp(id);
+  else await addPinnedApp(entry);
   return pinnedEntries();
 });
 
@@ -6355,6 +6401,43 @@ ipcMain.on('taskbar:tray', (_event, index) => {
   } catch {
     /* the helper is gone */
   }
+});
+
+// Right-click on a button is where a pin is made or broken, the way Windows'
+// own bar offers it. A pin takes the executable it was pinned from, so it stays
+// one button with the window it opens instead of a second one beside it.
+ipcMain.on('taskbar:context', (event, payload) => {
+  const app = findTaskbarApp(payload && payload.key);
+  if (!app) return;
+  const template = [];
+  if (app.pin) {
+    template.push({
+      label: 'Unpin from taskbar',
+      click: () => removePinnedApp(app.pin.id),
+    });
+  } else if (app.exe) {
+    template.push({
+      label: 'Pin to taskbar',
+      click: () =>
+        addPinnedApp({
+          id: app.exe,
+          name: app.name,
+          target: app.exe,
+          icon: app.icon || null,
+          exe: app.exe,
+        }),
+    });
+  }
+  if (!template.length) return;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  Menu.buildFromTemplate(template).popup({
+    window: win && !win.isDestroyed() ? win : undefined,
+  });
+});
+
+// Dragging a pinned button ends with the pins in the order it left them in.
+ipcMain.on('taskbar:reorder', (_event, payload) => {
+  reorderPinnedApps(payload && payload.order);
 });
 
 // The chevron opens Windows' own panel of hidden notification icons: the shell
