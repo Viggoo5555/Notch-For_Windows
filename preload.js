@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('notchAPI', {
   setCollapsing: (ms) => ipcRenderer.send('notch:collapsing', ms),
   // How wide the folded pill actually came out, so the hover rect can follow it.
   pillWidth: (px) => ipcRenderer.send('notch:pill-width', px),
+  // Whether the Windows-key helper is up, for the Settings row.
+  winHook: () => ipcRenderer.invoke('notch:winhook'),
   setPinned: (value) => ipcRenderer.send('notch:pinned', !!value),
   focus: () => ipcRenderer.send('notch:focus'),
   quit: () => ipcRenderer.send('notch:quit'),

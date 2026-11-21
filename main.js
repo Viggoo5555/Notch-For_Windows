@@ -4208,32 +4208,77 @@ function scheduleWinHookRetry() {
   }, wait);
 }
 
+// Where the helper is started from matters as much as the helper itself.
+// -ExecutionPolicy only sets the policy for this one process; a policy handed
+// down by Group Policy outranks it, so on managed and school machines the file is
+// refused and the Windows key never answers. The same text read into a script
+// block is not a script file, so the policy does not apply to it — and stdin
+// stays free for the helper's commands. A start that never reports `ready`
+// switches to that way in from then on.
+let hookNeedsBlock = false;
+
+function powershellExe() {
+  try {
+    const local = path.join(
+      process.env.SystemRoot || 'C:\\Windows',
+      'System32',
+      'WindowsPowerShell',
+      'v1.0',
+      'powershell.exe',
+    );
+    if (fs.existsSync(local)) return local;
+  } catch {
+    /* fall back to the PATH */
+  }
+  return 'powershell';
+}
+
+function winHookArgs(script) {
+  if (!hookNeedsBlock) {
+    return ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script];
+  }
+  const quoted = script.replace(/'/g, "''");
+  return [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    `& ([scriptblock]::Create((Get-Content -Raw -Encoding UTF8 -LiteralPath '${quoted}')))`,
+  ];
+}
+
 function startWinHook() {
   if (hookProc || !prefs.settings.windowsKey || !isWin) return;
+  const script = path.join(__dirname, 'winhook.ps1');
   let proc = null;
   try {
-    proc = spawn(
-      'powershell',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        path.join(__dirname, 'winhook.ps1'),
-      ],
-      { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] },
-    );
+    proc = spawn(powershellExe(), winHookArgs(script), {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
   } catch {
     hookFailures += 1;
+    hookNeedsBlock = true;
+    scheduleWinHookRetry();
     return;
   }
   hookProc = proc;
   hookReady = false;
-  if (proc.stdin) proc.stdin.on('error', () => {});
   // Compiled PowerShell takes a moment to start; one that never reports `ready`
   // never installed the hook, so it is replaced instead of leaving the key dead.
   let watchdog = null;
+  // A helper that cannot be started at all reports it here. Left unhandled, that
+  // error event would take the whole app down with it.
+  proc.on('error', () => {
+    if (hookProc !== proc) return;
+    hookProc = null;
+    hookReady = false;
+    hookFailures += 1;
+    hookNeedsBlock = true;
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = null;
+    scheduleWinHookRetry();
+  });
+  if (proc.stdin) proc.stdin.on('error', () => {});
   let buffer = '';
   proc.stdout.on('data', (chunk) => {
     buffer += String(chunk);
@@ -4300,6 +4345,10 @@ function startWinHook() {
       line = buffer.indexOf('\n');
     }
   });
+  // PowerShell compiles the helper's C# on the way up, and a cold start on a slow
+  // disk can take ten seconds or more. The hook only says `ready` once it is
+  // installed, so a short watchdog killed helpers that were merely slow — and on
+  // those machines the Windows key never worked at all.
   watchdog = setTimeout(() => {
     if (hookProc !== proc || hookReady) return;
     hookFailures += 1;
@@ -4310,12 +4359,15 @@ function startWinHook() {
       /* already gone */
     }
     scheduleWinHookRetry();
-  }, 8000);
+  }, 30000);
   proc.on('exit', () => {
     if (hookProc !== proc) return; // stopped on purpose
     hookProc = null;
     hookReady = false;
     hookFailures += 1;
+    // It went away without reporting `ready`, so how it was started is the first
+    // thing to change: the next attempt runs the file as a script block.
+    hookNeedsBlock = true;
     if (watchdog) clearTimeout(watchdog);
     watchdog = null;
     scheduleWinHookRetry();
@@ -4326,6 +4378,19 @@ function syncWinHook() {
   if (prefs.settings.windowsKey) startWinHook();
   else stopWinHook();
 }
+
+// What the Settings row says: a hook that is running, one on its way up, or one
+// this machine will not let start — the difference between a key that is off and
+// a key that is being refused.
+function winHookStatus() {
+  if (!isWin) return 'not on this system';
+  if (!prefs.settings.windowsKey) return 'off';
+  if (hookReady) return 'running';
+  if (hookProc) return 'starting';
+  return hookFailures > 1 ? 'not starting' : 'starting';
+}
+
+ipcMain.handle('notch:winhook', () => winHookStatus());
 
 ipcMain.handle('launcher:boot', async () => ({
   index: await buildAppIndex(),

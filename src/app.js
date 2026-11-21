@@ -63,6 +63,8 @@ const state = {
     percent: 0,
     error: '',
   },
+  // What the Windows-key helper last reported: running, starting, or refused.
+  winHook: 'starting',
   settings: {
     accent: '#7c9cff',
     material: 'liquid',
@@ -774,6 +776,7 @@ const SETTINGS_SCHEMA = [
   { key: 'taskbarAutoHide', label: 'Auto-hide', type: 'toggle' },
   { group: 'Start menu' },
   { key: 'windowsKey', label: 'Windows key opens it', type: 'toggle' },
+  { key: 'winHook', label: 'Key hook', type: 'status', text: () => state.winHook },
   { group: 'Update' },
   { key: 'version', label: 'Version', type: 'status', text: () => state.update.current || 'unknown' },
   { key: 'update', label: 'Updates', type: 'update' },
@@ -865,6 +868,17 @@ function openSettings() {
   settingsPage = 'main';
   $('#settingsSheet').hidden = false;
   renderSettings();
+  // Ask as the sheet opens whether the key helper is actually up: a key that is
+  // being refused on this machine is then visible instead of silently dead.
+  if (api.winHook) {
+    Promise.resolve(api.winHook())
+      .then((status) => {
+        if (!status) return;
+        state.winHook = status;
+        if (state.settingsOpen) renderSettings();
+      })
+      .catch(() => {});
+  }
 }
 
 function closeSettings() {

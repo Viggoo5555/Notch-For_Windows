@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.35.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.35/Notch-Setup-1.2.35.exe)**
+**[Notch-Setup-1.2.36.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.36/Notch-Setup-1.2.36.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,21 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.36** — the Windows key gets the search sheet back on machines that were
+refusing it. The key is watched by a small PowerShell helper, and the way it was
+started had two ways to leave the key dead without saying so. A script-file start
+is refused outright when the execution policy comes from Group Policy — common on
+managed and school machines — because `-ExecutionPolicy Bypass` cannot outrank
+it; and a helper that needed more than eight seconds to compile its C# was killed
+by its own watchdog on the way up, then again on every retry, so it never once
+reported itself ready. The helper now falls back to running the same text as a
+script block, which an execution policy does not block, its start-up window is
+thirty seconds, and a spawn that fails reports it and retries instead of going
+quiet (or crashing the app with an unhandled error). It also looks for PowerShell
+at its own path before trusting `PATH`. Settings shows a new **Key hook** row —
+*running*, *starting* or *not starting* — so a machine that will not let the key
+be watched says so instead of doing nothing.
 
 **v1.2.35** — the notch stays on the middle, and its blues come up blue. Two
 things could leave it looking wrong until it was touched. A resolution or scale
