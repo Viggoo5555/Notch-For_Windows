@@ -908,15 +908,65 @@ function stopLiveData() {
 // --------------------------------------------------------------------- window
 
 function targetBounds() {
-  const area = screen.getPrimaryDisplay().workArea;
+  const display = screen.getPrimaryDisplay();
+  // Centre on the screen, not on the work area: a taskbar docked on the left or
+  // right shrinks the work area, and centring inside that parks the notch a
+  // little to the right of the screen's middle. The top edge is the same either
+  // way, so only the height is taken from the work area.
+  const area = display.workArea;
+  const full = display.bounds;
   const width = PANEL_W + 32;
   const height = PANEL_H + 34;
   return {
-    x: Math.round(area.x + (area.width - width) / 2),
+    x: Math.round(full.x + (full.width - width) / 2),
     y: area.y,
     width,
     height,
   };
+}
+
+// Windows moves a topmost, non-movable window on its own when the display's
+// resolution or scale changes, and the metrics event arrives before Chromium has
+// settled on the new scale — re-centring inside the event can land on the old
+// geometry and leave the notch leaning to one side. Centring again a beat later
+// is what puts it back on the middle; the same holds when the app starts before
+// the desktop has its final layout (a login start, a monitor still waking).
+function recenterNotch(delay = 0) {
+  const place = () => {
+    if (!win || win.isDestroyed()) return;
+    const next = targetBounds();
+    const now = win.getBounds();
+    if (
+      now.x === next.x &&
+      now.y === next.y &&
+      now.width === next.width &&
+      now.height === next.height
+    ) {
+      return;
+    }
+    win.setBounds(next, false);
+    pinPillOnTop();
+    // The frame Windows kept while it moved the window belongs to the old spot.
+    repaintShell();
+  };
+  if (delay > 0) setTimeout(place, delay);
+  else place();
+}
+
+// A transparent, always-on-top window can present the frame it last rasterised:
+// a colour change in the middle of the sheet (the accent) and content that was
+// drawn while the panel was folded away can both come back stale, until a hover
+// or a click happens to repaint them. Asking for the whole frame again is what
+// makes the blues blue the first time they are on screen.
+function repaintShell(delay = 0) {
+  const paint = () => {
+    if (!win || win.isDestroyed()) return;
+    if (win.webContents && typeof win.webContents.invalidate === 'function') {
+      win.webContents.invalidate();
+    }
+  };
+  if (delay > 0) setTimeout(paint, delay);
+  else paint();
 }
 
 // The window is always panel-sized; only the clip changes. Clicks outside the
@@ -1028,6 +1078,11 @@ function pinPillOnTop() {
 function revealWindow() {
   if (gameMode || revealed || !win || win.isDestroyed()) return;
   revealed = true;
+  // Placed while it was hidden, possibly before the desktop had its final
+  // geometry: put it on the middle before it is seen, and once more after the
+  // desktop has settled.
+  recenterNotch(0);
+  recenterNotch(1200);
   win.showInactive();
   pinPillOnTop();
   if (!pointerTimer) armPointerPoll();
@@ -1086,9 +1141,13 @@ function createWindow() {
     revealed = false;
   });
 
-  screen.on('display-metrics-changed', () => {
-    if (win && !win.isDestroyed()) win.setBounds(targetBounds(), false);
-  });
+  const reassertPosition = () => {
+    recenterNotch(0);
+    recenterNotch(700);
+  };
+  screen.on('display-metrics-changed', reassertPosition);
+  screen.on('display-added', reassertPosition);
+  screen.on('display-removed', reassertPosition);
 }
 
 // ------------------------------------------------------------------- tray icon
@@ -1895,10 +1954,20 @@ function wantsOff(text) {
 // it one beat later, once the panel has actually painted.
 function showNotchPanel(kind) {
   if (!win || win.isDestroyed() || gameMode) return false;
+  // Unfold from the middle of the screen even if the window was nudged since it
+  // was last placed, then paint the unfold instead of leaving it to a stale frame.
+  recenterNotch(0);
   win.webContents.send('notch:open');
+  repaintShell(60);
   setTimeout(
     () => {
-      if (win && !win.isDestroyed()) win.webContents.send('notch:view', kind || 'panel');
+      if (!win || win.isDestroyed()) return;
+      win.webContents.send('notch:view', kind || 'panel');
+      // The page inside is built after the panel has moved: the frame that first
+      // shows it is asked for once it exists, and again after the sheet has
+      // finished sliding in.
+      repaintShell(40);
+      repaintShell(420);
     },
     kind ? 320 : 0,
   );
@@ -5185,6 +5254,10 @@ function applySettingsPatch(patch) {
   sendWidgetSurface();
   syncWinHook();
   if (win && !win.isDestroyed()) win.webContents.send('notch:settings', prefs.settings);
+  // The renderer applies the patch when the message arrives; ask for the frame
+  // once it has, so a new accent is drawn instead of the one the cached frame
+  // already holds.
+  repaintShell(180);
   return prefs.settings;
 }
 

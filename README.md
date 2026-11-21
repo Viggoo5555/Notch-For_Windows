@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.34.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.34/Notch-Setup-1.2.34.exe)**
+**[Notch-Setup-1.2.35.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.35/Notch-Setup-1.2.35.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -362,6 +362,20 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.35** — the notch stays on the middle, and its blues come up blue. Two
+things could leave it looking wrong until it was touched. A resolution or scale
+change makes Windows move a topmost, non-movable window by itself, and the
+metrics event fires before Chromium has the new scale — so the one correction
+landed on the old geometry and the notch could sit off to the right. It is now
+centred on the screen itself, not on the work area a side-docked taskbar shrinks,
+and centred again once the desktop has settled: on every display change, at
+startup, and whenever the panel opens. The other is the frame: an accent change,
+or a page built while the panel was folded away, can come back as the cached
+picture, which is why the controls in Settings stayed grey until a hover
+repainted them. The window is now asked to paint its whole frame when the panel
+opens and once the new settings are in, so the accent is drawn the first time it
+is on screen.
 
 **v1.2.34** — the picture opens on its own actions again. Choosing a region takes
 the pointer off the panel, so the panel folds away while you drag — and the shot
