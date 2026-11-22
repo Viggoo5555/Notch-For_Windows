@@ -33,6 +33,11 @@ public class JarvisWinHook
     private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
+    // What Alt+Tab uses. Unlike SetForegroundWindow it is not refused for a
+    // process that did not take the last input, and, unlike the thread attach
+    // below, it never waits on another thread's message queue.
+    [DllImport("user32.dll")]
+    private static extern void SwitchToThisWindow(IntPtr hWnd, bool altTab);
     [DllImport("user32.dll")]
     private static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")]
@@ -268,20 +273,48 @@ public class JarvisWinHook
     // still up for the tray, the window list and the taskbar.
     public static bool WatchWin = true;
 
-    // The launcher is opened from this process's key event, not the app's, so
-    // Windows refuses the app's SetForegroundWindow and typing lands in whatever
-    // was in front. Attaching to the foreground thread first makes it stick.
+    // Raising a window, cheapest move first. A press on the bar is meant to be
+    // felt at once, and the thread attach below is synchronous with the window in
+    // front: a foreground app that is busy does not answer it until it pumps, so
+    // a press that relied on it could sit there for a second. The plain calls go
+    // first and the attach is only the fallback for the cases Windows refuses —
+    // the launcher is opened from this process's key event, not the app's, so
+    // Windows refuses the app's SetForegroundWindow and typing would land in
+    // whatever was in front.
     private static void FocusWindow(IntPtr hWnd)
     {
         if (hWnd == IntPtr.Zero || !IsWindow(hWnd)) return;
+        if (GetForegroundWindow() == hWnd) return;
+        BringWindowToTop(hWnd);
+        SetForegroundWindow(hWnd);
+        if (GetForegroundWindow() == hWnd) return;
+        SwitchToThisWindow(hWnd, true);
+        if (GetForegroundWindow() == hWnd) return;
         IntPtr foreground = GetForegroundWindow();
         uint pid;
         uint foregroundThread = foreground == IntPtr.Zero ? 0 : GetWindowThreadProcessId(foreground, out pid);
         uint mine = GetCurrentThreadId();
         bool attached = foregroundThread != 0 && foregroundThread != mine && AttachThreadInput(mine, foregroundThread, true);
-        BringWindowToTop(hWnd);
-        SetForegroundWindow(hWnd);
-        if (attached) AttachThreadInput(mine, foregroundThread, false);
+        try
+        {
+            BringWindowToTop(hWnd);
+            SetForegroundWindow(hWnd);
+        }
+        finally
+        {
+            if (attached) AttachThreadInput(mine, foregroundThread, false);
+        }
+    }
+
+    // A window comes up the way the real taskbar brings it up: a minimised one is
+    // restored to its old size, and one that is simply behind is only asked to
+    // show itself. SW_RESTORE does both, and its second half is why pressing a
+    // maximised app's button used to put the app back to a smaller window.
+    private static void Raise(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero || !IsWindow(hWnd)) return;
+        ShowWindow(hWnd, IsIconic(hWnd) ? 9 : 5); // SW_RESTORE / SW_SHOW
+        FocusWindow(hWnd);
     }
 
     private static string ExeFor(uint pid)
@@ -820,8 +853,7 @@ public class JarvisWinHook
             ShowWindow(hWnd, 6); // SW_MINIMIZE
             return;
         }
-        ShowWindow(hWnd, 9); // SW_RESTORE
-        FocusWindow(hWnd);
+        Raise(hWnd);
     }
 
     // Notch's bar replaces the taskbar, so the real one can be taken out of the
@@ -866,8 +898,7 @@ public class JarvisWinHook
             foreach (IntPtr hwnd in windows)
             {
                 if (hwnd == foreground || !IsWindow(hwnd) || IsIconic(hwnd)) continue;
-                ShowWindow(hwnd, 9); // SW_RESTORE
-                FocusWindow(hwnd);
+                Raise(hwnd);
                 return;
             }
             foreach (IntPtr hwnd in windows)
@@ -882,16 +913,156 @@ public class JarvisWinHook
         foreach (IntPtr hwnd in windows)
         {
             if (!IsWindow(hwnd) || !IsIconic(hwnd)) continue;
-            ShowWindow(hwnd, 9);
-            FocusWindow(hwnd);
+            Raise(hwnd);
             return;
         }
         foreach (IntPtr hwnd in windows)
         {
             if (!IsWindow(hwnd)) continue;
-            ShowWindow(hwnd, 9);
-            FocusWindow(hwnd);
+            Raise(hwnd);
             return;
+        }
+    }
+
+    // Reading stdin is one thread, and everything slow used to run on it: the
+    // notification area's UI Automation walk, the window list, the executable and
+    // window icon reads, the GPU counter read, a screenshot. A press queued behind
+    // any of them, which is why pressing an app on the bar opened it only after a
+    // pause. Those commands now go to a worker of their own and the reading thread
+    // does nothing but what the user just asked for. Two workers, because the
+    // tray's automation and the lookups do not depend on each other, and a tray
+    // press must not wait for a window list either. Order is kept inside a queue.
+    private sealed class WorkQueue
+    {
+        private readonly Queue<string> _items = new Queue<string>();
+        private readonly object _gate = new object();
+        private readonly string _name;
+
+        public WorkQueue(string name)
+        {
+            _name = name;
+        }
+
+        public void Add(string line)
+        {
+            lock (_gate)
+            {
+                _items.Enqueue(line);
+                System.Threading.Monitor.Pulse(_gate);
+            }
+        }
+
+        public void Start()
+        {
+            System.Threading.Thread thread = new System.Threading.Thread(Run);
+            thread.IsBackground = true;
+            thread.Priority = System.Threading.ThreadPriority.BelowNormal;
+            thread.Name = _name;
+            thread.Start();
+        }
+
+        private void Run()
+        {
+            while (true)
+            {
+                string line;
+                lock (_gate)
+                {
+                    while (_items.Count == 0) System.Threading.Monitor.Wait(_gate);
+                    line = _items.Dequeue();
+                }
+                // One command that throws is not the end of the queue.
+                try { SlowCommand(line); }
+                catch { }
+            }
+        }
+    }
+
+    private static readonly WorkQueue _trayWork = new WorkQueue("notch-tray");
+    private static readonly WorkQueue _lookupWork = new WorkQueue("notch-lookup");
+
+    // True when the line was handed to a worker: the reading thread is then free
+    // for the next command, which is the one the user is waiting on.
+    private static bool QueueSlow(string text)
+    {
+        if (text == "tray" || text == "trayoverflow" || text.StartsWith("trayclick "))
+        {
+            _trayWork.Add(text);
+            return true;
+        }
+        if (text == "windows" || text == "game" || text == "gpu" ||
+            text.StartsWith("icons ") || text.StartsWith("exeicon ") ||
+            text.StartsWith("hostexe ") || text.StartsWith("shot "))
+        {
+            _lookupWork.Add(text);
+            return true;
+        }
+        return false;
+    }
+
+    private static void SlowCommand(string text)
+    {
+        if (text == "windows")
+        {
+            ListWindows();
+        }
+        else if (text == "tray")
+        {
+            ListTray();
+        }
+        else if (text.StartsWith("trayclick "))
+        {
+            int index;
+            if (int.TryParse(text.Substring(10), out index)) ClickTray(index);
+        }
+        else if (text == "trayoverflow")
+        {
+            OpenOverflow();
+        }
+        else if (text.StartsWith("icons "))
+        {
+            long iconHandle;
+            if (long.TryParse(text.Substring(6), out iconHandle))
+            {
+                Console.WriteLine("ICO\t" + WindowIcon(iconHandle));
+                Console.Out.Flush();
+            }
+        }
+        else if (text.StartsWith("exeicon "))
+        {
+            Console.WriteLine("ICO\t" + ExeIcon(text.Substring(8).Trim().Trim('"')));
+            Console.Out.Flush();
+        }
+        else if (text.StartsWith("hostexe "))
+        {
+            long hostHandle;
+            if (long.TryParse(text.Substring(8), out hostHandle))
+            {
+                Console.WriteLine("EXE\t" + HostExe(hostHandle));
+                Console.Out.Flush();
+            }
+        }
+        else if (text.StartsWith("shot "))
+        {
+            string[] parts = text.Split(' ');
+            int x, y, w, h;
+            if (parts.Length == 5 &&
+                int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y) &&
+                int.TryParse(parts[3], out w) && int.TryParse(parts[4], out h) &&
+                w > 0 && h > 0 && w <= 4096 && h <= 4096 && (long)w * h <= 9000000)
+            {
+                Shot(x, y, w, h);
+            }
+        }
+        else if (text == "game")
+        {
+            Console.WriteLine("GAME\t" + GameState());
+            Console.Out.Flush();
+        }
+        else if (text == "gpu")
+        {
+            Console.WriteLine("GPU\t" + GpuLoad());
+            Console.Out.Flush();
         }
     }
 
@@ -904,6 +1075,9 @@ public class JarvisWinHook
             while ((line = Console.In.ReadLine()) != null)
             {
                 string text = line.Trim();
+                // Whatever can take a while goes to a worker, before anything else
+                // is tried: this thread is the one a press has to share.
+                if (QueueSlow(text)) continue;
                 if (text.StartsWith("focus "))
                 {
                     long value;
@@ -913,68 +1087,6 @@ public class JarvisWinHook
                 {
                     long value;
                     if (long.TryParse(text.Substring(7), out value)) ToggleWindow((IntPtr)value);
-                }
-                else if (text == "windows")
-                {
-                    ListWindows();
-                }
-                else if (text == "tray")
-                {
-                    ListTray();
-                }
-                else if (text.StartsWith("trayclick "))
-                {
-                    int index;
-                    if (int.TryParse(text.Substring(10), out index)) ClickTray(index);
-                }
-                else if (text == "trayoverflow")
-                {
-                    OpenOverflow();
-                }
-                else if (text.StartsWith("icons "))
-                {
-                    long iconHandle;
-                    if (long.TryParse(text.Substring(6), out iconHandle))
-                    {
-                        Console.WriteLine("ICO\t" + WindowIcon(iconHandle));
-                        Console.Out.Flush();
-                    }
-                }
-                else if (text.StartsWith("exeicon "))
-                {
-                    Console.WriteLine("ICO\t" + ExeIcon(text.Substring(8).Trim().Trim('"')));
-                    Console.Out.Flush();
-                }
-                else if (text.StartsWith("hostexe "))
-                {
-                    long hostHandle;
-                    if (long.TryParse(text.Substring(8), out hostHandle))
-                    {
-                        Console.WriteLine("EXE\t" + HostExe(hostHandle));
-                        Console.Out.Flush();
-                    }
-                }
-                else if (text.StartsWith("shot "))
-                {
-                    string[] parts = text.Split(' ');
-                    int x, y, w, h;
-                    if (parts.Length == 5 &&
-                        int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y) &&
-                        int.TryParse(parts[3], out w) && int.TryParse(parts[4], out h) &&
-                        w > 0 && h > 0 && w <= 4096 && h <= 4096 && (long)w * h <= 9000000)
-                    {
-                        Shot(x, y, w, h);
-                    }
-                }
-                else if (text == "game")
-                {
-                    Console.WriteLine("GAME\t" + GameState());
-                    Console.Out.Flush();
-                }
-                else if (text == "gpu")
-                {
-                    Console.WriteLine("GPU\t" + GpuLoad());
-                    Console.Out.Flush();
                 }
                 // Silent on purpose: the app's reader treats every tabbed line
                 // as a row of a list it is collecting, and this is not one.
@@ -999,8 +1111,7 @@ public class JarvisWinHook
                     long value;
                     if (long.TryParse(text.Substring(9), out value))
                     {
-                        ShowWindow((IntPtr)value, 9); // SW_RESTORE
-                        FocusWindow((IntPtr)value);
+                        Raise((IntPtr)value);
                     }
                     Console.WriteLine("pressed activate");
                     Console.Out.Flush();
@@ -1033,6 +1144,10 @@ public class JarvisWinHook
 
     public static int Run()
     {
+        // Presses get the reading thread to themselves: everything slow has a
+        // worker of its own waiting for it.
+        _trayWork.Start();
+        _lookupWork.Start();
         System.Threading.Thread reader = new System.Threading.Thread(ReadCommands);
         reader.IsBackground = true;
         reader.Start();

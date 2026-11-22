@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.52.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.52/Notch-Setup-1.2.52.exe)**
+**[Notch-Setup-1.2.53.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.53/Notch-Setup-1.2.53.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -373,6 +373,22 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.53** — a press on the bar is answered at once. The helper reads its commands
+on one thread, and the slow ones sat in front of a press: the notification area's
+UI Automation walk (every six seconds, and a hung tray provider can hold it for
+seconds), the window list (every 2.5 s), the window and executable icon reads, the
+GPU counter and the screenshots. So the app you pressed came up only after they
+finished, which is the pause that felt like a slow press. Presses — `group`,
+`activate`, `toggle`, the Windows key and its own shortcuts — are now handled the
+moment the line is read, and that slow work runs on two workers of its own: one
+for the tray, one for the lookups. Raising a window also stopped paying for the
+thread attach Windows sometimes needs: the plain calls and `SwitchToThisWindow` go
+first and the attach is only the fallback, so a foreground app that is busy no
+longer holds a press up. A window that is already visible is shown rather than
+restored, so pressing a maximised app's button no longer puts it back to its old
+size. The hook log now records how long each press took — `pressed group in N ms`
+— so the number itself says whether the bar or the helper is the slow half.
 
 **v1.2.52** — Wi-Fi, the volume and brightness icons now answer a press. The tray
 click was still being taken by Notch's own bar: the 40 ms mouse poll put the bar

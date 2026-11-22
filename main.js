@@ -4650,7 +4650,10 @@ function startWinHook() {
       else if (text.startsWith('slot ')) activateTaskbarSlot(Number(text.slice(5)));
       else if (text.startsWith('pressed ')) {
         if (text.startsWith('pressed tray')) trayPressAwaiting = 0;
-        hookLogNote(text);
+        if (pressSentAt) {
+          hookLogNote(`${text} in ${Date.now() - pressSentAt} ms`);
+          pressSentAt = 0;
+        } else hookLogNote(text);
       }
       else if (text === 'windown' || text === 'winup' || text === 'chord') hookLogNote(text);
       else if (text === 'ready') {
@@ -8086,6 +8089,11 @@ ipcMain.on('taskbar:focus', (_event, handle) => focusTaskbarWindow(Number(handle
 // put away, an app behind comes forward, and a group moves through its windows
 // before any of them is minimised. The helper owns the foreground, so it is the
 // one that decides.
+// When the press was written to the helper. The helper answers `pressed group`
+// when the window is up, so the gap between the two is the number that says
+// whether the bar or the helper made the press feel slow.
+let pressSentAt = 0;
+
 function pressTaskbarWindows(handles) {
   const list = (Array.isArray(handles) ? handles : [])
     .map((value) => Number(value) || 0)
@@ -8093,6 +8101,7 @@ function pressTaskbarWindows(handles) {
   if (!list.length) return;
   if (hookProc && hookReady && hookProc.stdin && !hookProc.stdin.destroyed) {
     try {
+      pressSentAt = Date.now();
       hookProc.stdin.write(`group ${list.join(' ')}\n`);
       return;
     } catch {
@@ -8111,6 +8120,7 @@ function activateTaskbarWindow(hwnd) {
   if (!Number.isFinite(hwnd) || hwnd <= 0) return;
   if (hookProc && hookReady && hookProc.stdin && !hookProc.stdin.destroyed) {
     try {
+      pressSentAt = Date.now();
       hookProc.stdin.write(`activate ${Math.trunc(hwnd)}\n`);
       return;
     } catch {
