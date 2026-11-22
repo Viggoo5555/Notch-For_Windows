@@ -2,9 +2,35 @@
 // the same frame — no round trip between keystroke and result.
 
 import { LiquidGlass } from './vendor/liquidglass.js';
+import { rankEntries } from './core/rank.mjs';
+import { calcValue } from './core/calc.mjs';
 
-const api = window.launcher;
+const bridge = window.launcher;
 const $ = (id) => document.getElementById(id);
+// In the app this page is loaded with a preload. The demo server has none, so a
+// bridge of its own keeps the sheet drawable there; a page opened without either
+// answers every call with nothing rather than painting apps that are not there.
+const served = location.protocol === 'http:' || location.protocol === 'https:';
+const quiet = () => Promise.resolve(null);
+const SILENT = {
+  boot: async () => null,
+  icons: async () => ({}),
+  launch: quiet,
+  reveal: quiet,
+  pin: quiet,
+  recent: async () => [],
+  copy: quiet,
+  open: quiet,
+  hide() {},
+  ready() {},
+  onShow() {},
+  onDismiss() {},
+  onMotion() {},
+  onMaterial() {},
+  onBackdrop() {},
+  onPinned() {},
+};
+const api = bridge || (served ? createDemoBridge() : SILENT);
 
 const els = {
   shell: $('shell'),
@@ -210,116 +236,16 @@ function applyMaterial(value) {
 
 // ----------------------------------------------------------------- searching
 
-function score(name, query) {
-  const value = name.toLowerCase();
-  if (value === query) return 0;
-  if (value.startsWith(query)) return 1;
-  if (value.split(/[\s\-_.()]+/).some((word) => word.startsWith(query))) return 2;
-  const inside = value.indexOf(query);
-  if (inside > 0) return 3 + Math.min(inside, 20) / 100;
-  let cursor = 0;
-  for (const letter of value) {
-    if (letter === query[cursor]) cursor += 1;
-    if (cursor === query.length) return 6;
-  }
-  return -1;
-}
-
-function filter(query) {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return state.index.slice(0, 80);
-  const hits = [];
-  for (const entry of state.index) {
-    const value = score(entry.name, needle);
-    if (value >= 0) hits.push({ entry, value });
-  }
-  hits.sort((a, b) => a.value - b.value || a.entry.name.localeCompare(b.entry.name));
-  return hits.slice(0, 40).map((hit) => hit.entry);
-}
-
-function filterFolders(query) {
-  const needle = String(query || '').trim().toLowerCase();
-  if (!needle) return [];
-  const hits = [];
-  for (const entry of state.folders) {
-    const value = score(entry.name, needle);
-    if (value >= 0) hits.push({ entry, value });
-  }
-  hits.sort((a, b) => a.value - b.value || a.entry.name.localeCompare(b.entry.name));
-  return hits.slice(0, 16).map((hit) => hit.entry);
-}
+// The ranking itself lives in src/core/rank.mjs, where it can be tested without
+// a window; these are the two lists it is asked about.
+const filter = (query) => rankEntries(state.index, query);
+const filterFolders = (query) =>
+  String(query || '').trim() ? rankEntries(state.folders, query, 16) : [];
 
 // -------------------------------------------------------------- not just apps
 // A search box is the one place a user expects everything: it finds apps, but a
 // sum in it should come back worked out and a web address should open. Nothing
 // new to learn or to find — it all happens where typing already happens.
-
-function calcValue(text) {
-  const source = String(text || '')
-    .replace(/[×✕]/g, '*')
-    .replace(/[÷]/g, '/')
-    .replace(/,/g, '.')
-    .replace(/\s+/g, '');
-  if (!source || !/[0-9]/.test(source)) return null;
-  if (!/^[0-9.+\-*/()%]+$/.test(source)) return null;
-  let at = 0;
-  const number = () => {
-    const match = /^(?:\d+(?:\.\d*)?|\.\d+)/.exec(source.slice(at));
-    if (!match) throw new Error('number');
-    at += match[0].length;
-    return Number(match[0]);
-  };
-  const factor = () => {
-    let sign = 1;
-    while (source[at] === '-' || source[at] === '+') {
-      if (source[at] === '-') sign = -sign;
-      at += 1;
-    }
-    let value;
-    if (source[at] === '(') {
-      at += 1;
-      value = sum();
-      if (source[at] !== ')') throw new Error('bracket');
-      at += 1;
-    } else {
-      value = number();
-    }
-    let percent = false;
-    while (source[at] === '%') {
-      at += 1;
-      percent = true;
-    }
-    return sign * (percent ? value / 100 : value);
-  };
-  const product = () => {
-    let value = factor();
-    while (source[at] === '*' || source[at] === '/') {
-      const op = source[at];
-      at += 1;
-      const right = factor();
-      value = op === '*' ? value * right : value / right;
-    }
-    return value;
-  };
-  const sum = () => {
-    let value = product();
-    while (source[at] === '+' || source[at] === '-') {
-      const op = source[at];
-      at += 1;
-      const right = product();
-      value = op === '+' ? value + right : value - right;
-    }
-    return value;
-  };
-  try {
-    const value = sum();
-    if (at !== source.length || !Number.isFinite(value)) return null;
-    // Long decimals are noise in a launcher, not information.
-    return String(Math.round(value * 1e10) / 1e10);
-  } catch {
-    return null;
-  }
-}
 
 function quickRows(query) {
   const text = query.trim();
@@ -610,23 +536,44 @@ function requestIcons() {
 els.query.addEventListener('input', render);
 els.closeBtn.addEventListener('click', () => api.hide());
 
+const MOVE_KEYS = new Set(['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp']);
+
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
+    // Escape clears the search before it closes the sheet: a query is a place to
+    // come back from, and the key that typed it is the key that takes it away.
+    if (els.query.value) {
+      els.query.value = '';
+      render();
+      return;
+    }
     api.hide();
     return;
   }
-  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+  if (MOVE_KEYS.has(event.key)) {
     event.preventDefault();
-    const delta = event.key === 'ArrowDown' ? 1 : -1;
-    const next = Math.min(state.rows.length - 1, Math.max(0, state.active + delta));
-    setActive(next);
+    const last = state.rows.length - 1;
+    let next = state.active;
+    if (event.key === 'ArrowDown') next += 1;
+    else if (event.key === 'ArrowUp') next -= 1;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = last;
+    else if (event.key === 'PageDown') next += 5;
+    else next -= 5;
+    setActive(Math.min(last, Math.max(0, next)));
     return;
   }
   if (event.key === 'Enter') {
     event.preventDefault();
     const entry = state.rows[state.active];
-    if (entry) runRow(entry);
+    if (!entry) return;
+    // Ctrl+Enter shows the app's own folder in Explorer instead of opening it.
+    if ((event.ctrlKey || event.metaKey) && entry.target && api.reveal) {
+      api.reveal(entry.target);
+      return;
+    }
+    runRow(entry);
   }
 });
 
@@ -709,3 +656,63 @@ window.addEventListener('focus', () => els.query.focus());
 
 boot();
 api.ready();
+
+// -------------------------------------------------------------- demo bridge
+
+// What `npm run dev` shows: a sheet of real-looking apps with no preload behind
+// it. The icons are the initials the sheet already draws for an app it has no
+// picture of, so the demo is also the one place those can be looked at.
+function createDemoBridge() {
+  const app = (name, sub) => ({ id: `demo-${name}`, name, target: `demo:${name}`, sub: sub || 'App' });
+  const index = [
+    'Brave',
+    'Blender',
+    'Calculator',
+    'Claude',
+    'Discord',
+    'File Explorer',
+    'Freebuff',
+    'Notepad',
+    'OpenRGB',
+    'Paint',
+    'Settings',
+    'Spotify',
+    'Steam',
+    'Terminal',
+    'Visual Studio Code',
+  ].map((name) => app(name));
+  const pinned = [app('Brave'), app('Terminal'), app('File Explorer'), app('Settings')];
+  const recent = [app('Steam'), app('Discord'), app('Blender'), app('OpenRGB'), app('Freebuff'), app('Claude')];
+  const showHandlers = [];
+  return {
+    boot: async () => ({
+      index,
+      folders: [
+        { ...app('Projects', 'Folder in Documents'), kind: 'folder' },
+        { ...app('Screenshots', 'Folder in Pictures'), kind: 'folder' },
+      ],
+      pinned,
+      recent,
+      settings: { animations: 'system', material: 'liquid' },
+    }),
+    icons: async () => ({}),
+    launch: async () => ({ ok: true }),
+    reveal: async () => true,
+    pin: async () => pinned,
+    recent: async () => recent,
+    copy: async () => true,
+    open: async () => true,
+    hide() {},
+    ready() {},
+    onShow(callback) {
+      showHandlers.push(callback);
+      // Nothing sends a show in a browser, so the sheet lets itself in.
+      setTimeout(() => callback(), 80);
+    },
+    onDismiss() {},
+    onMotion() {},
+    onMaterial() {},
+    onBackdrop() {},
+    onPinned() {},
+  };
+}

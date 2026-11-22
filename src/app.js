@@ -489,7 +489,8 @@ async function launchGame(game) {
 }
 
 async function rescanLibraries(trigger) {
-  const button = trigger || $('#rescan');
+  // Always the row's own button: there is no other Rescan left on the page.
+  const button = trigger && trigger.classList ? trigger : null;
   if (button && button.classList.contains('spin')) return;
   if (button) button.classList.add('spin');
   try {
@@ -2485,6 +2486,16 @@ function bindEvents() {
   if (!api.onPointer) {
     notch.addEventListener('mouseenter', requestOpen);
     notch.addEventListener('mouseleave', scheduleClose);
+    // The collapsed panel is clipped to a narrow pill, so a pointer that comes in
+    // beside it never crosses the element. The browser demo answers to the whole
+    // top strip instead, which is what the app's own hit-test already does.
+    document.addEventListener(
+      'pointermove',
+      (event) => {
+        if (event.clientY <= 44 && !state.open) requestOpen();
+      },
+      { passive: true },
+    );
   }
 
   $('#shotBtn').addEventListener('click', async () => {
@@ -2616,11 +2627,19 @@ function bindEvents() {
     }
   });
 
-  api.onStats((stats) => {
+  // A listener is only wired when the other side has one. A preload and a page
+  // that disagree by a version used to end `boot` on a TypeError, and a panel
+  // that never painted a game looked like a library that had lost them.
+  const on = (name, handler) => {
+    if (typeof api[name] === 'function') api[name](handler);
+    else if (!isDemo) console.warn(`no bridge for ${name}`);
+  };
+
+  on('onStats', (stats) => {
     state.stats = stats;
     if (state.open) renderStats();
   });
-  api.onProcesses((data) => {
+  on('onProcesses', (data) => {
     state.processes = data;
     if (state.detail === 'system') renderProcesses();
   });
@@ -2634,12 +2653,12 @@ function bindEvents() {
       else toggleFocus();
     });
   }
-  api.onClips((clips) => {
+  on('onClips', (clips) => {
     state.clips = clips;
     if (state.open) renderClips();
     if (state.detail === 'clip') renderDetail();
   });
-  api.onTogglePin(() => {
+  on('onTogglePin', () => {
     // Keyboard/tray toggle: second press folds the notch away again.
     if (state.pinned) {
       setPinned(false);
@@ -2648,7 +2667,7 @@ function bindEvents() {
       setPinned(true);
     }
   });
-  api.onOpen(() => openNotch());
+  on('onOpen', () => openNotch());
   // Jarvis works the app from the main process: a page to open, a setting that
   // changed, a library that was rescanned. The panel follows all three.
   if (api.onSettings) {
@@ -2837,7 +2856,7 @@ function createDemoBridge() {
     for (const callback of watchers.stats) callback({ ...stats });
   }, 2000);
 
-  return {
+  const demo = {
     setSettings: async (patch) => patch,
     bootstrap: async () => ({
       accent: '#7c9cff',
@@ -2881,7 +2900,22 @@ function createDemoBridge() {
     onClips: (callback) => watchers.clips.push(callback),
     onTogglePin() {},
     onOpen() {},
+    // Deliberately absent, not a no-op: the browser demo opens on plain hover,
+    // because there is no window around the panel to hit-test.
+    onPointer: undefined,
   };
+
+  // Whatever the real preload has and this bridge has not been taught answers as
+  // a no-op. A preview is meant to show the app; a preview that stops halfway
+  // through boot because one listener is missing shows nothing at all.
+  return new Proxy(demo, {
+    get(target, key) {
+      if (key in target) return target[key];
+      if (typeof key === 'symbol') return undefined;
+      if (/^on[A-Z]/.test(key)) return () => {};
+      return () => undefined;
+    },
+  });
 }
 
 boot();

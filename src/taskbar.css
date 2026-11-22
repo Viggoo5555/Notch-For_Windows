@@ -513,3 +513,17 @@ body {
   font-variant-numeric: tabular-nums;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
+
+/* ------------------------------------------------------- keyboard and text */
+/* A ring for the keyboard, and only for the keyboard: the pointer never sees
+   it, so nothing about the surfaces changes under the mouse. */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent, #7c9cff) 72%, transparent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent, #7c9cff) 46%, transparent);
+  color: #fff;
+}

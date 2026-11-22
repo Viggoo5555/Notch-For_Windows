@@ -50,6 +50,19 @@ jobs:
           # this step's: the runner would otherwise fail the job on it.
           exit 0
 
+      # Cheap and offline: every preload bridge the pages call is answered, every
+      # channel a preload sends is heard, every element a page looks for is in it,
+      # and the launcher's ranking and calculator still give their answers. A
+      # release should not be the first place a dead button is found.
+      - name: Check the wiring and the logic
+        if: steps.check.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          node scripts/check.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - uses: actions/setup-node@v4
         if: steps.check.outputs.exists != 'true'
         with:

@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('launcher', {
   boot: () => ipcRenderer.invoke('launcher:boot'),
   icons: (targets) => ipcRenderer.invoke('launcher:icons', targets),
   launch: (target) => ipcRenderer.invoke('launcher:launch', target),
+  // Ctrl+Enter: the folder the app lives in, in Explorer.
+  reveal: (target) => ipcRenderer.invoke('launcher:reveal', target),
   pin: (entry) => ipcRenderer.invoke('launcher:pin', entry),
   recent: () => ipcRenderer.invoke('launcher:recent'),
   // Answers, not apps: a worked-out sum and a web address, from the same box.

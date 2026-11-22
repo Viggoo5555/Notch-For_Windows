@@ -3685,6 +3685,51 @@ let launcherShownAt = 0;
 const appIconCache = new Map();
 const iconSourceCache = new Map();
 
+// A picture of an app outlives the run that took it. Asking Windows for thirty
+// icons again on every start is the second between pressing Win and seeing the
+// list, and they are small PNG data URLs, so they are kept in one file beside the
+// preferences and read back before anything is asked of the shell.
+let appIconDisk = null;
+let appIconDiskTimer = null;
+
+function appIconPath() {
+  return path.join(path.dirname(prefsPath()), 'app-icons.json');
+}
+
+function loadAppIcons() {
+  if (appIconDisk) return appIconDisk;
+  appIconDisk = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(appIconPath(), 'utf8'));
+    if (parsed && typeof parsed === 'object') appIconDisk = parsed;
+  } catch {
+    /* first run, or a cache that was never written */
+  }
+  return appIconDisk;
+}
+
+function saveAppIcons() {
+  clearTimeout(appIconDiskTimer);
+  appIconDiskTimer = setTimeout(() => {
+    try {
+      const disk = loadAppIcons();
+      const keys = Object.keys(disk);
+      // Oldest first: a machine with hundreds of shortcuts should not grow a
+      // cache without a ceiling.
+      for (const key of keys.slice(0, Math.max(0, keys.length - 600))) delete disk[key];
+      fs.mkdirSync(path.dirname(appIconPath()), { recursive: true });
+      fs.writeFileSync(appIconPath(), JSON.stringify(disk));
+    } catch {
+      /* a cache that cannot be written is still a cache for this run */
+    }
+  }, 800);
+}
+
+function rememberAppIcon(key, icon) {
+  loadAppIcons()[key] = icon;
+  saveAppIcons();
+}
+
 function startMenuRoots() {
   const roots = [];
   const appData = process.env.APPDATA;
@@ -3905,6 +3950,9 @@ async function buildFolderIndex() {
           id: full,
           name: entry.name,
           target: full,
+          // The sheet draws folders under their own heading, without a pin: a
+          // folder is somewhere to look, not an app to put on the bar.
+          kind: 'folder',
           sub: `Folder in ${FOLDER_LABELS[name] || name}`,
         });
       }
@@ -3934,6 +3982,11 @@ async function iconForTarget(target) {
   const key = String(target || '');
   if (!key) return null;
   if (appIconCache.has(key)) return appIconCache.get(key);
+  const remembered = loadAppIcons()[key];
+  if (typeof remembered === 'string' && remembered.startsWith('data:image/')) {
+    appIconCache.set(key, remembered);
+    return remembered;
+  }
   let icon = null;
   const source = key.startsWith('uwp:') ? `shell:AppsFolder\\${key.slice(4)}` : key;
   const png = await requestShellIcon(source);
@@ -3958,6 +4011,7 @@ async function iconForTarget(target) {
   if (icon) {
     if (appIconCache.size > 500) appIconCache.clear();
     appIconCache.set(key, icon);
+    rememberAppIcon(key, icon);
   }
   return icon;
 }
@@ -4657,10 +4711,8 @@ function startWinHook() {
         gpuRequest = null;
         gpuBusy = false;
         pending(Number(text.slice(4)));
-      } else if (iconRequest && text.startsWith(iconRequest.prefix)) {
-        const pending = iconRequest;
-        iconRequest = null;
-        pending.resolve(text.slice(pending.prefix.length).trim());
+      } else if (consumeHookAsk(text)) {
+        // An answer to a question asked of the helper: already handed over.
       } else if (trayShotRequest && text.startsWith('IMG\t')) {
         const [, shotW, shotH, shotData] = text.split('\t');
         const pending = trayShotRequest;
@@ -4844,11 +4896,43 @@ ipcMain.handle('launcher:recent', () => recentEntries());
 
 ipcMain.handle('launcher:icons', async (_event, targets) => {
   const list = Array.isArray(targets) ? targets.slice(0, 24) : [];
+  // All at once: the helper answers in the order it was asked, and one icon at a
+  // time is a row of round trips before a list looks finished.
+  const found = await Promise.all(list.map((target) => iconForTarget(target)));
   const out = {};
-  for (const target of list) {
-    out[target] = await iconForTarget(target);
-  }
+  list.forEach((target, index) => {
+    out[target] = found[index];
+  });
   return out;
+});
+
+// Ctrl+Enter on a row: the folder the app itself lives in, not the one its
+// Start-menu shortcut does. A store app has no folder to show, so its shell
+// entry is opened instead.
+ipcMain.handle('launcher:reveal', async (_event, target) => {
+  const key = String(target || '');
+  if (!key) return false;
+  let file = key.startsWith('uwp:') ? '' : iconSourceCache.get(key) || key;
+  if (/\.lnk$/i.test(file)) {
+    const infos = await readShortcutInfo([file]);
+    const info = infos.get(file);
+    if (info && info.target) file = info.target;
+  }
+  try {
+    if (file && fs.existsSync(file)) {
+      shell.showItemInFolder(file);
+      hideLauncher();
+      return true;
+    }
+    if (key.startsWith('uwp:')) {
+      shell.openExternal(`shell:AppsFolder\\${key.slice(4)}`);
+      hideLauncher();
+      return true;
+    }
+  } catch {
+    /* nothing to show */
+  }
+  return false;
 });
 
 ipcMain.handle('launcher:launch', (_event, target) => {
@@ -4888,7 +4972,12 @@ ipcMain.handle('launcher:pin', async (_event, entry) => {
 
 ipcMain.on('launcher:hide', () => hideLauncher());
 
-ipcMain.on('taskbar:launch', (_event, target) => launchTarget(target));
+ipcMain.on('taskbar:launch', (_event, target) => {
+  const result = launchTarget(target);
+  // What the bar opened is what the launcher offers next, the same as a row
+  // opened from the launcher itself.
+  if (result && result.ok) rememberRecent(target);
+});
 
 function buildTray() {
   tray = new Tray(trayImage());
@@ -6462,7 +6551,8 @@ let trayRequest = null;
 let traySignature = '';
 let trayBattery = null;
 let trayShotRequest = null;
-let iconRequest = null;
+// Questions waiting on one line each from the helper, oldest first.
+const hookAsks = [];
 const hwndIconCache = new Map();
 // Icon pictures, kept by name. With the Windows bar hidden there are no pixels
 // left to lift an icon from, so a name seen once still knows what it looked like.
@@ -6677,38 +6767,50 @@ const SHELL_PROCESSES = new Set([
 // The icon a window draws for itself. Reading one out of the executable needs a
 // path, and packaged apps (the Store Notepad, Settings, anything UWP) refuse to
 // hand one out, which left those buttons showing initials.
-// One question at a time on the helper's stdin: its answers are a single line
-// each, and two requests in flight used to answer the wrong question.
-let hookAskChain = Promise.resolve();
-
+// The helper reads its commands in order and answers each with one line, so
+// several questions can be in flight at once as long as every answer goes to the
+// oldest question carrying its prefix. One at a time was one full round trip per
+// icon, which is most of the wait between pressing Win and seeing the list.
 function askHook(command, prefix, timeout = 1500) {
-  const run = () =>
-    new Promise((resolve) => {
-      const proc = hookProc;
-      if (!proc || proc.killed || !proc.stdin || proc.stdin.destroyed) {
-        resolve('');
-        return;
-      }
-      let done = false;
-      const finish = (value) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        if (iconRequest === request) iconRequest = null;
-        resolve(value);
-      };
-      const timer = setTimeout(() => finish(''), timeout);
-      const request = { resolve: finish, prefix };
-      iconRequest = request;
-      try {
-        proc.stdin.write(`${command}\n`);
-      } catch {
-        finish('');
-      }
-    });
-  const next = hookAskChain.then(run, run);
-  hookAskChain = next.catch(() => '');
-  return next;
+  return new Promise((resolve) => {
+    const proc = hookProc;
+    if (!proc || proc.killed || !proc.stdin || proc.stdin.destroyed) {
+      resolve('');
+      return;
+    }
+    let done = false;
+    const request = { prefix, resolve: null };
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      const at = hookAsks.indexOf(request);
+      if (at >= 0) hookAsks.splice(at, 1);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(''), timeout);
+    request.resolve = finish;
+    hookAsks.push(request);
+    try {
+      proc.stdin.write(`${command}\n`);
+    } catch {
+      finish('');
+    }
+  });
+}
+
+// The first waiting question whose prefix this line carries is the one it
+// answers. Answers arrive in the order the helper read the questions, so this is
+// also the order they left in.
+function consumeHookAsk(text) {
+  for (let index = 0; index < hookAsks.length; index += 1) {
+    const pending = hookAsks[index];
+    if (!text.startsWith(pending.prefix)) continue;
+    hookAsks.splice(index, 1);
+    pending.resolve(text.slice(pending.prefix.length).trim());
+    return true;
+  }
+  return false;
 }
 
 function requestWindowIcon(hwnd, timeout = 1500) {
@@ -7300,8 +7402,12 @@ function taskbarPress(payload) {
     hookLogNote(`press ${key || '?'}: no window and no target`);
     return;
   }
-  if (launchPinnedTarget(target, exe)) hookLogNote(`press ${key || '?'}: launched ${target}`);
-  else hookLogNote(`press ${key || '?'}: could not launch ${target}`);
+  if (launchPinnedTarget(target, exe)) {
+    rememberRecent(target);
+    hookLogNote(`press ${key || '?'}: launched ${target}`);
+  } else {
+    hookLogNote(`press ${key || '?'}: could not launch ${target}`);
+  }
 }
 
 // A pin is a shortcut, and a shortcut is what Windows opens: its own target is
@@ -8964,6 +9070,17 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     loadPrefs();
+    // One broken promise used to be silence, and one thrown line a shell that
+    // vanished with the taskbar on it. Both are a line in the hook log now, and
+    // the windows stay.
+    process.on('unhandledRejection', (reason) => {
+      const text = String((reason && reason.message) || reason || 'unknown').slice(0, 300);
+      hookLogNote(`unhandled rejection: ${text}`);
+    });
+    process.on('uncaughtException', (error) => {
+      const text = String((error && error.stack) || error || 'unknown').slice(0, 400);
+      hookLogNote(`uncaught: ${text}`);
+    });
     syncKeepAwake();
     // Built while the desktop is not being captured, then simply shown on a drag.
     setTimeout(warmWidgetWindows, 6000);

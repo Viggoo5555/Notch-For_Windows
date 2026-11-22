@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.59.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.59/Notch-Setup-1.2.59.exe)**
+**[Notch-Setup-1.2.60.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.60/Notch-Setup-1.2.60.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -266,8 +266,14 @@ To check the interface without starting Electron — every window is a normal HT
 page — run the small static server and open <http://localhost:4173>:
 
 ```bash
-npm run dev            # PORT=4173 by default
+npm run dev            # PORT=4173 by default, HOST=0.0.0.0 to serve it wider
 ```
+
+The same pages are checked without starting Windows: `npm run check` reads every
+preload, every IPC channel and every element id the pages ask for, and fails on a
+bridge method that is not there; `npm test` holds the launcher's ranking and its
+calculator to their rules. Both run in CI before a build, so a release cannot
+carry a dead button.
 
 ## Shortcuts
 
@@ -279,7 +285,10 @@ npm run dev            # PORT=4173 by default
 | `Ctrl+Alt+N` | pin the notch panel open |
 | `Ctrl+Alt+J` | open / close Jarvis |
 | `Ctrl+Alt+Q` | quit |
-| `↑` `↓` `↵` `Esc` | move, open, close inside the launcher |
+| `↑` `↓` `Home` `End` `PgUp` `PgDn` | move through the launcher |
+| `↵` | open the highlighted row |
+| `Ctrl+↵` | show that app's own folder in Explorer |
+| `Esc` | clear the search, then close the launcher |
 
 The Windows key keeps its normal job for chords: `Win+E` and `Win+R` still reach
 Explorer and Run, because the hook only swallows a tap on its own and any digit
@@ -325,7 +334,11 @@ src/assistant-stt.worker.js  Whisper in a worker, on WebGPU or WASM
 src/assistant-tts.worker.js  the studio voice in a worker, on WebGPU or WASM
 src/voicehud.html          the ring visualiser drawn while Jarvis listens
 src/glass.js               liquid-glass presets for every surface
+src/core/rank.mjs          the launcher's search ranking, on its own
+src/core/calc.mjs          the launcher's calculator, on its own
 src/vendor/                ybouane/liquidglass build, used as-is
+scripts/check.js           wiring check: bridges, channels, element ids, glass imports
+test/                      the ranking and the calculator, under node:test
 ```
 
 Four details are worth knowing because they explain the odd bits:
@@ -386,6 +399,26 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.60** — the launcher got faster, the preview works, and the app is checked
+before it ships. App icons are now kept between runs (`app-icons.json` beside the
+preferences) and asked for all at once instead of one round trip after another, so
+the list is picturing itself before the key is out of your finger the second time
+rather than the first. Ctrl+Enter on a row shows the app's own folder in Explorer —
+the executable's folder, not the Start-menu shortcut's — and what the bar opens now
+lands in **Recent** too, not only what the launcher opens. The keyboard reaches
+further: `Home`, `End`, `PgUp` and `PgDn` move through the rows, and `Esc` clears
+the search before it closes the sheet. A rejected promise or a thrown line in the
+main process is a line in the hook log now instead of a shell that disappears with
+the taskbar on it. The browser preview (`npm run dev`) actually boots: one listener
+the real preload has and the demo bridge did not used to end boot halfway, which is
+why the library card sat empty in it; the demo now answers anything it was not
+taught as a no-op and opens from the whole top strip, not just the narrow pill.
+A folder found by the search now sits under **Folders**, without a pin button, instead
+of posing as an app in the results. Under all of it, `npm run check` and `npm test` (14 cases over the launcher's
+ranking and calculator) now run in CI before the installer is built, so a bridge
+method that does not exist or a rule that quietly changed stops the release instead
+of shipping.
 
 **v1.2.59** — every app in the launcher gets its own picture. A pinned Brave, a
 recent Discord and a Claude with nothing but its initials were all the same fault:
