@@ -105,16 +105,49 @@ jobs:
       - name: Build the native key hook
         if: steps.check.outputs.exists != 'true'
         continue-on-error: true
-        shell: cmd
+        shell: pwsh
         run: |
-          if not exist hook mkdir hook
-          "%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe /out:hook\notchhook.exe /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Management.dll /r:UIAutomationClient.dll /r:UIAutomationTypes.dll /r:WindowsBase.dll hook\JarvisWinHook.cs hook\Program.cs > hook-compile.log 2>&1
-          set CODE=%ERRORLEVEL%
-          type hook-compile.log
-          if not "%CODE%"=="0" (
-            copy /y hook-compile.log hook-compile-error.txt >nul
-            exit /b 1
+          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          if (-not (Test-Path $csc)) {
+            'csc.exe not found' | Tee-Object -FilePath hook-compile.log
+            Copy-Item hook-compile.log hook-compile-error.txt
+            exit 1
+          }
+          # UIAutomationClient, UIAutomationTypes and WindowsBase are not beside csc:
+          # they live in the GAC or the .NET Framework targeting pack. A bare name is
+          # only searched for in the compiler's own folder, which is precisely why
+          # Add-Type failed on a real machine (TypeNotFound) and the hook never ran.
+          # So they are found first and passed by full path.
+          $refs = @(
+            "/r:$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\System.dll",
+            "/r:$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\System.Core.dll",
+            "/r:$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\System.Drawing.dll",
+            "/r:$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\System.Management.dll"
           )
+          $roots = @(
+            "$env:WINDIR\Microsoft.NET\assembly",
+            "${env:ProgramFiles(x86)}\Reference Assemblies\Microsoft\Framework\.NETFramework",
+            "$env:ProgramFiles\Reference Assemblies\Microsoft\Framework\.NETFramework"
+          )
+          foreach ($name in @('UIAutomationClient.dll', 'UIAutomationTypes.dll', 'WindowsBase.dll')) {
+            $hit = $null
+            foreach ($root in $roots) {
+              if (-not (Test-Path $root)) { continue }
+              $hit = Get-ChildItem $root -Recurse -Filter $name -ErrorAction SilentlyContinue |
+                Sort-Object FullName | Select-Object -First 1
+              if ($hit) { break }
+            }
+            if ($hit) { $refs += "/r:$($hit.FullName)" }
+            else { "missing $name" | Out-String }
+          }
+          & $csc /nologo /target:exe /out:hook\notchhook.exe @refs hook\JarvisWinHook.cs hook\Program.cs *>&1 |
+            Tee-Object -FilePath hook-compile.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0 -or -not (Test-Path hook\notchhook.exe)) {
+            Copy-Item hook-compile.log hook-compile-error.txt -Force
+            exit 1
+          }
+          Get-Item hook\notchhook.exe | Select-Object Name, Length
 
       # The log of a failed run is not readable without admin rights, so the
       # failure is repeated as an annotation, which is public: the last lines of

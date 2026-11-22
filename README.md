@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.45.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.45/Notch-Setup-1.2.45.exe)**
+**[Notch-Setup-1.2.46.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.46/Notch-Setup-1.2.46.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -373,6 +373,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.46** — 1.2.45's build log named the cause in three lines: `CS0006: Metadata
+file 'UIAutomationClient.dll' could not be found` (and `UIAutomationTypes.dll`,
+`WindowsBase.dll`). The hook's C# uses those three, and a compiler only looks for a
+bare assembly name in its own folder — so compilation failed, `JarvisWinHook` was
+never created, and `Add-Type` reported `TypeNotFound` on the machine that mattered.
+The build now finds them in the GAC and the .NET Framework targeting pack and
+passes full paths, so `hook/notchhook.exe` is actually produced and travels in the
+installer; the app runs it directly. 1.2.45 shipped without the exe, so it behaves
+exactly like 1.2.44 — this is the one to install.
 
 **v1.2.45** — the Windows key, for real this time, and the log finally said why:
 `TypeNotFound`. PowerShell's `Add-Type` had been refusing the helper's C# on that
