@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.47.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.47/Notch-Setup-1.2.47.exe)**
+**[Notch-Setup-1.2.49.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.49/Notch-Setup-1.2.49.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -373,6 +373,19 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.49** — the launcher and the taskbar now wear the same surface as the
+panel. Liquid is the ybouane liquid-glass lens, unchanged; Frosted is the blurred
+desktop the frosted panel shows, clipped to the sheet and to the bar; Black is the
+plain dark sheet, with the lens parked so it costs nothing. The taskbar used to
+know only glass and black, and the Start sheet never knew about the setting at all
+— both follow it the moment it changes. The launcher also searches folders now:
+the top level of Desktop, Documents, Downloads, Pictures, Videos and Music, listed
+under the apps behind their own rule, so a folder is never mixed into the app
+list.
+
+**v1.2.48** — the hook's C# lost the last call the reference assemblies did not
+carry, so the helper compiles clean and ships as `hook/notchhook.exe`.
 
 **v1.2.47** — with the assemblies found, the compiler reached the C# and said the
 thing that mattered: `CS0111: JarvisWinHook already defines a member called

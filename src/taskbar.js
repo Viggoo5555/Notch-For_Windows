@@ -142,6 +142,7 @@ async function setBackdrop(data) {
       : null;
   source.src = data.url;
   placeSource();
+  alignFrost();
   if (instance) {
     instance.markChanged(source);
     pulse();
@@ -599,6 +600,7 @@ function build() {
   measure();
   placeIslandPanes();
   rebuildGlass();
+  alignFrost();
   reportHits();
 }
 
@@ -609,7 +611,7 @@ function build() {
 // the glass has to be laid out again after every resize, not just after a build.
 function placeIslandPanes() {
   const wanted = [];
-  if (mode.shape === 'islands' && mode.style !== 'hidden') {
+  if (mode.shape === 'islands' && (mode.style === 'glass' || mode.style === 'frost')) {
     const base = root.getBoundingClientRect();
     for (const zone of [appsEl, rightEl]) {
       if (!zone.offsetWidth) continue;
@@ -677,12 +679,48 @@ async function rebuildGlass() {
   }
 }
 
+// Frosted: the same blurred desktop the frosted panel shows, clipped to the bar.
+// The sample is the size of the display, so it is aligned to the screen instead
+// of stretched to fit a 52px island; the layer runs past the surface, so the
+// blur has no faded edge inside it.
+const FROST_PAD = 48;
+
+function alignFrost() {
+  if (mode.style !== 'frost') return;
+  const url = source.getAttribute('src');
+  if (!url) return;
+  const surfaces = mode.shape === 'islands' ? [...root.querySelectorAll('.tb-pane')] : [bar];
+  for (const surface of surfaces) {
+    const box = surface.getBoundingClientRect();
+    if (box.width < 1) continue;
+    surface.style.setProperty('--frost-image', `url("${url}")`);
+    if (!display) continue;
+    surface.style.setProperty('--frost-w', `${display.width}px`);
+    surface.style.setProperty('--frost-h', `${display.height}px`);
+    surface.style.setProperty(
+      '--frost-x',
+      `${display.x - (window.screenX || 0) - box.left + FROST_PAD}px`,
+    );
+    surface.style.setProperty(
+      '--frost-y',
+      `${display.y - (window.screenY || 0) - box.top + FROST_PAD}px`,
+    );
+  }
+}
+
 function apply(data) {
   if (!data) return;
   apps = Array.isArray(data.apps) ? data.apps : [];
   tray = Array.isArray(data.tray) ? data.tray : [];
   battery = data.battery || null;
-  const style = data.style === 'hidden' ? 'hidden' : data.style === 'black' ? 'black' : 'glass';
+  const style =
+    data.style === 'hidden'
+      ? 'hidden'
+      : data.style === 'black'
+        ? 'black'
+        : data.style === 'frost'
+          ? 'frost'
+          : 'glass';
   const shape = data.shape === 'islands' ? 'islands' : 'attached';
   if (style !== mode.style || shape !== mode.shape) built = '';
   mode = { style, shape };
@@ -694,12 +732,14 @@ function apply(data) {
       pulse();
     }
   }
+  alignFrost();
 }
 
 window.addEventListener('resize', () => {
   measure();
   reportHits();
   placeSource();
+  alignFrost();
   // The window just grew or shrank to its zone, so the island's glass moved with
   // it. Rebuilding costs a frame or two, hence the short wait for it to settle.
   if (placeIslandPanes()) {

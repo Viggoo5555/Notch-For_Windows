@@ -3851,6 +3851,77 @@ async function buildAppIndex() {
   return build;
 }
 
+// The launcher searches folders too, but only the ones people keep things in:
+// one level inside each standard folder is enough to find "Taxes" or
+// "Screenshots" without indexing a whole drive.
+const FOLDER_ROOTS = ['desktop', 'documents', 'downloads', 'pictures', 'videos', 'music'];
+const FOLDER_LABELS = {
+  desktop: 'Desktop',
+  documents: 'Documents',
+  downloads: 'Downloads',
+  pictures: 'Pictures',
+  videos: 'Videos',
+  music: 'Music',
+};
+
+let folderIndex = null;
+let folderIndexBuilding = null;
+
+async function buildFolderIndex() {
+  if (folderIndex) return folderIndex;
+  if (folderIndexBuilding) return folderIndexBuilding;
+  const build = (async () => {
+    const rows = [];
+    const seen = new Set();
+    for (const name of FOLDER_ROOTS) {
+      let root = '';
+      try {
+        root = app.getPath(name);
+      } catch {
+        continue;
+      }
+      let entries = [];
+      try {
+        entries = await fs.promises.readdir(root, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (String(entry.name).startsWith('.')) continue;
+        const full = path.join(root, entry.name);
+        let isDir = entry.isDirectory();
+        if (!isDir && entry.isSymbolicLink()) {
+          try {
+            isDir = (await fs.promises.stat(full)).isDirectory();
+          } catch {
+            isDir = false;
+          }
+        }
+        if (!isDir) continue;
+        const key = full.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push({
+          id: full,
+          name: entry.name,
+          target: full,
+          sub: `Folder in ${FOLDER_LABELS[name] || name}`,
+        });
+      }
+    }
+    rows.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    folderIndex = rows;
+    return rows;
+  })();
+  folderIndexBuilding = build;
+  build
+    .catch(() => {})
+    .then(() => {
+      if (folderIndexBuilding === build) folderIndexBuilding = null;
+    });
+  return build;
+}
+
 async function iconForTarget(target) {
   const key = String(target || '');
   if (!key) return null;
@@ -4231,6 +4302,9 @@ function sendLauncherState() {
   const window = launcherWin;
   if (!window || window.isDestroyed() || !window.isVisible()) return;
   window.webContents.send('launcher:show');
+  // The surface can change while the sheet is hidden, so it is sent again with
+  // every show instead of only when the setting moves.
+  window.webContents.send('launcher:material', prefs.settings.material);
   // The sheet is drawn into a window that spends its life hidden, and a
   // transparent window can hand back the frame it had before: ask for the whole
   // frame now, and once more after the sheet has dropped in, so the first press
@@ -4699,9 +4773,14 @@ function rememberRecent(target) {
 
 ipcMain.handle('launcher:boot', async () => ({
   index: await buildAppIndex(),
+  folders: await buildFolderIndex(),
   pinned: pinnedEntries(),
   recent: recentEntries(),
-  settings: { windowsKey: !!prefs.settings.windowsKey, animations: prefs.settings.animations },
+  settings: {
+    windowsKey: !!prefs.settings.windowsKey,
+    animations: prefs.settings.animations,
+    material: prefs.settings.material,
+  },
 }));
 
 ipcMain.handle('launcher:recent', () => recentEntries());
@@ -5689,6 +5768,7 @@ function applySettingsPatch(patch) {
   // The launcher window is loaded already, so its motion choice arrives by message.
   if (launcherWin && !launcherWin.isDestroyed()) {
     launcherWin.webContents.send('launcher:motion', prefs.settings.animations);
+    launcherWin.webContents.send('launcher:material', prefs.settings.material);
   }
   if (!usesLiveBackdrop()) {
     // Pinned image: stop sampling entirely (also the cheapest idle state) and
@@ -6345,9 +6425,15 @@ function taskbarOn() {
 // glass when it is glass, and nothing but icons when it is set to invisible.
 function taskbarMode() {
   const hidden = prefs.settings.taskbarStyle === 'hidden';
-  const black = prefs.settings.material === 'black';
+  const material = prefs.settings.material;
   return {
-    style: hidden ? 'hidden' : black ? 'black' : 'glass',
+    style: hidden
+      ? 'hidden'
+      : material === 'black'
+        ? 'black'
+        : material === 'frost'
+          ? 'frost'
+          : 'glass',
     shape: prefs.settings.taskbarShape === 'islands' ? 'islands' : 'attached',
   };
 }
@@ -7562,6 +7648,16 @@ function refreshTaskbar() {
   }
   if (!taskbarWin || taskbarWin.isDestroyed()) createTaskbar();
   else sendTaskbarUpdate();
+  // A surface that draws the desktop (glass, frosted) needs its strip now rather
+  // than at the next poll: the material can change while the bar is already up.
+  if (
+    prefs.settings.material !== 'black' &&
+    taskbarWin &&
+    !taskbarWin.isDestroyed() &&
+    taskbarWin.isVisible()
+  ) {
+    sendTaskbarBackdrop();
+  }
   syncTaskbarPeek();
   syncDesktopSampling();
 }

@@ -46,6 +46,35 @@ body {
   display: none;
 }
 
+/* The sheet wears the panel's surface. Frosted is the desktop itself, blurred
+   and tinted, the way the frosted panel is; black is the flat sheet. Liquid is
+   the lens above, and only the lens. */
+body[data-material="frost"] .source {
+  opacity: 0.94;
+  filter: blur(26px) saturate(215%) brightness(1.03);
+}
+
+body[data-material="frost"] .pane,
+body[data-material="black"] .pane {
+  display: none;
+}
+
+body[data-material="frost"] .tint {
+  display: block;
+  background:
+    linear-gradient(180deg, rgba(22, 24, 32, 0.26) 0%, rgba(6, 7, 11, 0.46) 100%),
+    radial-gradient(120% 80% at 50% -10%, rgba(255, 255, 255, 0.08), transparent 60%);
+}
+
+body[data-material="black"] .source {
+  opacity: 0;
+}
+
+body[data-material="black"] .tint {
+  display: block;
+  background: linear-gradient(180deg, #15171e, #08090e 70%);
+}
+
 /* The desktop sample the lens bends, kept invisible. */
 .source {
   position: absolute;
@@ -152,6 +181,14 @@ body {
 
 .section {
   padding: 8px 6px 4px;
+}
+
+/* Folders sit under the apps, below their own rule: the box searches both, but a
+   folder is not an app and never mixes into their list. */
+.folders-section {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
 }
 
 .section h2 {

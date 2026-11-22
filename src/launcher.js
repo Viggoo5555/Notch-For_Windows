@@ -19,6 +19,8 @@ const els = {
   appsSection: $('appsSection'),
   appsTitle: $('appsTitle'),
   results: $('results'),
+  foldersSection: $('foldersSection'),
+  folders: $('folders'),
   empty: $('empty'),
   count: $('count'),
   closeBtn: $('closeBtn'),
@@ -26,6 +28,7 @@ const els = {
 
 const state = {
   index: [],
+  folders: [],
   pinned: [],
   recent: [],
   rows: [],
@@ -34,6 +37,10 @@ const state = {
   display: null,
   glass: null,
 };
+
+// Which surface the sheet wears: the liquid lens, the frosted desktop, or the
+// black sheet. The panel decides it; the sheet is never a surface of its own.
+let material = 'liquid';
 
 // ---------------------------------------------------------------- open/close
 // The sheet sits painted in its dismissed state while the window is hidden. The
@@ -161,7 +168,13 @@ function placeSource() {
 }
 
 async function ensureGlass() {
-  if (state.glass || !els.source.getAttribute('src')) return;
+  if (material !== 'liquid' || !els.source.getAttribute('src')) return;
+  if (state.glass) {
+    els.shell.classList.add('gl');
+    state.glass.setPaused(false);
+    state.glass.markChanged(els.source);
+    return;
+  }
   await els.source.decode().catch(() => {});
   els.pane.dataset.config = JSON.stringify(CONFIG);
   try {
@@ -170,11 +183,29 @@ async function ensureGlass() {
       glassElements: [els.pane],
       defaults: CONFIG,
     });
+    // The surface can be changed while the lens is still starting.
+    if (material !== 'liquid') {
+      state.glass.setPaused(true);
+      return;
+    }
     els.shell.classList.add('gl');
     state.glass.markChanged(els.source);
   } catch (error) {
     console.warn('Launcher glass unavailable', error);
   }
+}
+
+function applyMaterial(value) {
+  material = value === 'black' ? 'black' : value === 'frost' ? 'frost' : 'liquid';
+  document.body.dataset.material = material;
+  if (material === 'liquid') {
+    ensureGlass();
+    return;
+  }
+  // Frosted and black are painted by the stylesheet; the lens is parked so it
+  // costs nothing while it is not on screen.
+  if (state.glass && typeof state.glass.setPaused === 'function') state.glass.setPaused(true);
+  els.shell.classList.remove('gl');
 }
 
 // ----------------------------------------------------------------- searching
@@ -204,6 +235,18 @@ function filter(query) {
   }
   hits.sort((a, b) => a.value - b.value || a.entry.name.localeCompare(b.entry.name));
   return hits.slice(0, 40).map((hit) => hit.entry);
+}
+
+function filterFolders(query) {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return [];
+  const hits = [];
+  for (const entry of state.folders) {
+    const value = score(entry.name, needle);
+    if (value >= 0) hits.push({ entry, value });
+  }
+  hits.sort((a, b) => a.value - b.value || a.entry.name.localeCompare(b.entry.name));
+  return hits.slice(0, 16).map((hit) => hit.entry);
 }
 
 // -------------------------------------------------------------- not just apps
@@ -408,35 +451,49 @@ function runRow(entry) {
   else api.launch(entry.target);
 }
 
+function rowNode(entry, index) {
+  const row = document.createElement('div');
+  row.className = `row${index === state.active ? ' active' : ''}${entry.kind ? ` row-${entry.kind}` : ''}`;
+  row.dataset.index = String(index);
+  // An answer row is not an app, so it carries a mark instead of an icon.
+  row.appendChild(entry.glyph ? glyphNode(entry.glyph) : iconNode(entry.target, entry.name, 22));
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const name = document.createElement('span');
+  name.className = 'name';
+  name.textContent = entry.name;
+  const sub = document.createElement('span');
+  sub.className = 'sub';
+  sub.textContent =
+    entry.sub ||
+    (String(entry.target || '').startsWith('uwp:') ? 'Windows app' : entry.target || '');
+  meta.append(name, sub);
+  row.appendChild(meta);
+
+  // A folder opens in Explorer and is not an app to pin to the bar.
+  if (entry.target && entry.kind !== 'folder') buildPinButton(row, entry);
+  row.addEventListener('click', () => runRow(entry));
+  row.addEventListener('mousemove', () => setActive(index, false));
+  return row;
+}
+
+// One list, two boxes: the row index is the place in `state.rows`, so ↑ ↓ runs
+// through apps and folders as one, while each draws under its own heading.
 function renderRows(entries) {
   els.results.replaceChildren();
+  els.folders.replaceChildren();
   state.rows = entries;
   state.active = entries.length ? 0 : -1;
   entries.forEach((entry, index) => {
-    const row = document.createElement('div');
-    row.className = `row${index === state.active ? ' active' : ''}${entry.kind ? ` row-${entry.kind}` : ''}`;
-    row.dataset.index = String(index);
-    // An answer row is not an app, so it carries a mark instead of an icon.
-    row.appendChild(entry.glyph ? glyphNode(entry.glyph) : iconNode(entry.target, entry.name, 22));
-
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    const name = document.createElement('span');
-    name.className = 'name';
-    name.textContent = entry.name;
-    const sub = document.createElement('span');
-    sub.className = 'sub';
-    sub.textContent =
-      entry.sub ||
-      (String(entry.target || '').startsWith('uwp:') ? 'Windows app' : entry.target || '');
-    meta.append(name, sub);
-    row.appendChild(meta);
-
-    if (entry.target) buildPinButton(row, entry);
-    row.addEventListener('click', () => runRow(entry));
-    row.addEventListener('mousemove', () => setActive(index, false));
-    els.results.appendChild(row);
+    const row = rowNode(entry, index);
+    if (entry.kind === 'folder') els.folders.appendChild(row);
+    else els.results.appendChild(row);
   });
+  els.foldersSection.hidden = els.folders.children.length === 0;
+  // A heading over an empty list is worse than no heading: the folders below
+  // already say the search found something.
+  els.appsSection.hidden = entries.length > 0 && els.results.children.length === 0;
   els.empty.hidden = entries.length > 0;
 }
 
@@ -463,11 +520,12 @@ function render() {
   const searched = query.trim();
   const searching = searched.length > 0;
   const results = filter(query);
+  const folders = filterFolders(query);
   const quick = quickRows(query);
   // Only when nothing here answers it: a web search is the last resort, not a
   // banner across every search.
   const web =
-    searching && searched.length >= 2 && !results.length
+    searching && searched.length >= 2 && !results.length && !folders.length
       ? [
           {
             kind: 'web',
@@ -486,19 +544,23 @@ function render() {
   renderRecent(searching);
   els.pinnedSection.hidden = searching || state.pinned.length === 0;
   els.appsTitle.textContent = searching ? 'Best matches' : 'All apps';
-  renderRows([...quick, ...results, ...web]);
-  els.count.textContent = `${results.length}${searching ? '' : ` of ${state.index.length}`} apps`;
+  renderRows([...quick, ...results, ...folders, ...web]);
+  const counted = [
+    `${results.length}${searching ? '' : ` of ${state.index.length}`} apps`,
+  ];
+  if (folders.length) counted.push(`${folders.length} folder${folders.length === 1 ? '' : 's'}`);
+  els.count.textContent = counted.join(' · ');
   requestIcons();
 }
 
 function setActive(index, scroll = true) {
   if (index < 0 || index >= state.rows.length) return;
   state.active = index;
-  for (const row of els.results.children) {
+  for (const row of els.body.querySelectorAll('.row')) {
     row.classList.toggle('active', Number(row.dataset.index) === index);
   }
   if (scroll) {
-    const node = els.results.children[index];
+    const node = els.body.querySelector(`.row[data-index="${index}"]`);
     if (node) node.scrollIntoView({ block: 'nearest' });
   }
 }
@@ -574,11 +636,15 @@ async function boot() {
   const data = await api.boot();
   if (!data) return;
   state.index = Array.isArray(data.index) ? data.index : [];
+  state.folders = Array.isArray(data.folders) ? data.folders : [];
   state.pinned = Array.isArray(data.pinned) ? data.pinned : [];
   state.recent = Array.isArray(data.recent) ? data.recent : [];
-  if (data.settings && data.settings.animations) {
-    animations = data.settings.animations === 'always' ? 'always' : 'system';
-    applyMotion();
+  if (data.settings) {
+    if (data.settings.animations) {
+      animations = data.settings.animations === 'always' ? 'always' : 'system';
+      applyMotion();
+    }
+    applyMaterial(data.settings.material);
   }
   render();
 }
@@ -613,6 +679,8 @@ api.onMotion((value) => {
   animations = value === 'always' ? 'always' : 'system';
   applyMotion();
 });
+
+api.onMaterial((value) => applyMaterial(value));
 
 api.onBackdrop((data) => {
   if (!data || !data.url) return;
