@@ -5152,6 +5152,19 @@ async function downloadInstaller(target) {
   return size;
 }
 
+// An update that fails after this process has quit has nowhere left to say so, so
+// every step is written next to the settings first.
+function updateLog(line) {
+  try {
+    fs.appendFileSync(
+      path.join(app.getPath('userData'), 'update.log'),
+      `${new Date().toISOString()} ${line}\n`,
+    );
+  } catch {
+    /* logging is never worth failing an update for */
+  }
+}
+
 async function installUpdate() {
   if (updateState.busy) return { ok: false, error: 'Already updating' };
   if (!updateState.url) return { ok: false, error: 'Nothing to download' };
@@ -5162,47 +5175,92 @@ async function installUpdate() {
   updateState.percent = 0;
   updateState.error = '';
   sendUpdate();
+  const log = path.join(app.getPath('userData'), 'update.log');
   const target = path.join(
     app.getPath('temp'),
     updateState.name || `Notch-Setup-${updateState.latest}.exe`,
   );
+  updateLog(`update ${updateState.current} -> ${updateState.latest} from ${updateState.url}`);
   try {
     fs.rmSync(target, { force: true });
   } catch {
     /* nothing there */
   }
-  try {
-    await downloadInstaller(target);
-  } catch {
+  let downloaded = 0;
+  let failed = '';
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      downloaded = await downloadInstaller(target);
+      failed = '';
+      break;
+    } catch (error) {
+      failed = String((error && error.message) || error);
+      updateLog(`download attempt ${attempt} failed: ${failed}`);
+      try {
+        fs.rmSync(target, { force: true });
+      } catch {
+        /* nothing there */
+      }
+    }
+  }
+  if (failed) {
     updateState.busy = false;
     updateState.percent = 0;
     updateState.error = 'Download failed';
     sendUpdate();
     return { ok: false, error: 'Download failed' };
   }
+  // An error page or a half-written file is not an installer, and running one
+  // does nothing at all — which is what "it closes and never comes back" is.
+  try {
+    const handle = fs.openSync(target, 'r');
+    const head = Buffer.alloc(2);
+    fs.readSync(handle, head, 0, 2, 0);
+    fs.closeSync(handle);
+    if (head.toString('latin1') !== 'MZ') throw new Error('not an executable');
+  } catch (error) {
+    updateLog(`downloaded file rejected: ${(error && error.message) || error} (${downloaded} bytes)`);
+    updateState.busy = false;
+    updateState.percent = 0;
+    updateState.error = 'Download was not an installer';
+    sendUpdate();
+    return { ok: false, error: updateState.error };
+  }
   updateState.percent = 100;
   sendUpdate();
-  // The app cannot stay open while its own files are replaced. The command waits
-  // four seconds first — long enough for this process to be gone, so the silent
-  // install is not fighting a locked file — then installs without a window and
-  // starts the new build itself. This process quits at once rather than sitting
-  // on an installer it will not live to see.
   const exe = app.getPath('exe');
+  // The app cannot stay open while its own files are replaced, and the installer
+  // needs a moment after this process is gone. That used to be one long `cmd /c`
+  // line: its inner quotes did not survive the trip through cmd, so the installer
+  // was never run and nothing came back. A script on disk has no quoting to lose.
+  const script = path.join(app.getPath('temp'), 'notch-update.cmd');
+  const body = [
+    '@echo off',
+    // No console is attached, so timeout would refuse to wait; ping does.
+    'ping -n 4 127.0.0.1 >nul',
+    `start "" /wait "${target}" /S --updated`,
+    `echo installer=%ERRORLEVEL%>> "${log}"`,
+    `start "" "${exe}"`,
+    `echo relaunch=%ERRORLEVEL%>> "${log}"`,
+  ].join('\r\n');
   try {
-    spawn('cmd.exe', ['/c', `ping -n 5 127.0.0.1 >nul & "${target}" /S & start "" "${exe}"`], {
+    fs.writeFileSync(script, `${body}\r\n`, 'utf8');
+    spawn('cmd.exe', ['/c', script], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
     }).unref();
-    app.isQuitting = true;
-    setTimeout(() => app.quit(), 400);
-    return { ok: true };
-  } catch {
+  } catch (error) {
+    updateLog(`installer script could not start: ${(error && error.message) || error}`);
     updateState.busy = false;
     updateState.error = 'Could not start the installer';
     sendUpdate();
     return { ok: false, error: updateState.error };
   }
+  updateLog(`installer started: ${target} (${downloaded} bytes), relaunching ${exe}`);
+  app.isQuitting = true;
+  setTimeout(() => app.quit(), 700);
+  return { ok: true };
 }
 
 // ------------------------------------------------------------------------- ipc

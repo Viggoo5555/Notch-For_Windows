@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.38.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.38/Notch-Setup-1.2.38.exe)**
+**[Notch-Setup-1.2.39.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.39/Notch-Setup-1.2.39.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -363,6 +363,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.39** — the update actually installs. Pressing **Install** downloaded the
+installer, quit the app and then did nothing: the whole step was one `cmd /c`
+line with quotes inside quotes, and that does not survive the trip through cmd,
+so the installer was never run and nothing came back — the next start was still
+the old version. The step is a small script on disk now: wait for this process to
+go, run the installer `/S --updated`, then start the app again. The downloaded
+file is checked to be a real executable before anything quits (an error page or a
+half-written file used to be "run" silently), a failed download is retried once,
+and every step — including the installer's exit code — is written to `update.log`
+next to the settings. A failed install also turns the button into **Open
+release**, so a broken install is never a dead end.
 
 **v1.2.38** — the bar behaves like the one it replaces. A press on an app's
 button now does what Windows does with it: the app in front is put away, an app

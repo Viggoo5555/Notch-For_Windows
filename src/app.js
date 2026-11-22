@@ -62,6 +62,8 @@ const state = {
     busy: false,
     percent: 0,
     error: '',
+    // An install that could not run: the button offers the release page instead.
+    failed: false,
   },
   // What the Windows-key helper last reported: running, starting, or refused.
   winHook: 'starting',
@@ -1337,10 +1339,19 @@ function renderSettings() {
       button.className = 'set-action';
       button.disabled = u.busy;
       if (u.busy) button.textContent = 'Updating\u2026';
+      else if (u.failed) button.textContent = 'Open release';
       else if (u.newer && u.url) button.textContent = 'Install';
       else if (u.newer) button.textContent = 'Open release';
       else button.textContent = 'Check now';
       button.addEventListener('click', async () => {
+        // An install that could not run is not a dead end: the same file can be
+        // downloaded from the release page by hand.
+        if (state.update.failed) {
+          if (api.openUpdatePage) api.openUpdatePage();
+          state.update = { ...state.update, failed: false };
+          renderSettings();
+          return;
+        }
         if (state.update.newer && state.update.url) {
           state.update = { ...state.update, busy: true, percent: 0 };
           renderSettings();
@@ -1349,6 +1360,7 @@ function renderSettings() {
             state.update = {
               ...state.update,
               busy: false,
+              failed: true,
               error: (result && result.error) || 'Update failed',
             };
             renderSettings();
@@ -1362,7 +1374,7 @@ function renderSettings() {
           return;
         }
         const result = await api.checkUpdate();
-        if (result) state.update = { ...state.update, ...result, checked: true };
+        if (result) state.update = { ...state.update, ...result, checked: true, failed: false };
         renderSettings();
         toast(state.update.newer ? `Notch ${state.update.latest} is ready` : 'Notch is up to date');
       });
@@ -2557,7 +2569,7 @@ function bindEvents() {
   if (api.onUpdate) {
     api.onUpdate((data) => {
       if (!data) return;
-      state.update = { ...state.update, ...data, checked: true };
+      state.update = { ...state.update, ...data, checked: true, failed: false };
       paintUpdate();
       if (state.settingsOpen) renderSettings();
       // Said once per version: a newer build is waiting, and the drawer is where it
@@ -2635,7 +2647,7 @@ async function boot() {
       .checkUpdate()
       .then((data) => {
         if (!data) return;
-        state.update = { ...state.update, ...data, checked: true };
+        state.update = { ...state.update, ...data, checked: true, failed: false };
         paintUpdate();
         if (state.settingsOpen) renderSettings();
       })
