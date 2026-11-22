@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.51.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.51/Notch-Setup-1.2.51.exe)**
+**[Notch-Setup-1.2.52.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.52/Notch-Setup-1.2.52.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -373,6 +373,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.52** — Wi-Fi, the volume and brightness icons now answer a press. The tray
+click was still being taken by Notch's own bar: the 40 ms mouse poll put the bar
+back under the cursor a frame after the click began, so the helper's real click
+never reached Windows' icon. The bar now stays out of the way for the whole
+show-click-hide sequence; the helper waits for the bar to lay its icons out,
+clicks the icon's pixels first and only asks it to Invoke if there is nothing to
+aim at (the shell's tray buttons accept Invoke and then do nothing), and returns
+the pointer afterwards. Windows' bar is left up a little longer too, so Quick
+Settings is fully open before it is hidden again. Tray presses log
+`tray press N`, the helper logs `pressed tray N`, and a helper that never answers
+says so in the hook log.
 
 **v1.2.51** — the notification area finally answers a press. A tray icon belongs
 to Windows' own bar: the helper shows that bar and clicks the icon for a moment.

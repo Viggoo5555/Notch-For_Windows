@@ -403,10 +403,10 @@ public class JarvisWinHook
         Console.Out.Flush();
     }
 
-    // One press on an element: its own Invoke where the provider has one, and a
-    // physical click at its middle where it does not (the tray's buttons are
-    // drawn by the shell, so most of them have no Invoke).
-    private static bool Press(AutomationElement element)
+    // The element's own action, where the provider offers one. Its presence is
+    // no promise that anything happens: the shell's tray buttons have been seen
+    // to take Invoke and do nothing, which is why a real click is tried first.
+    private static bool Invoke(AutomationElement element)
     {
         if (element == null) return false;
         try
@@ -420,13 +420,20 @@ public class JarvisWinHook
             // A default action would be the next thing to try, but
             // LegacyIAccessiblePattern is not in the reference assembly this hook
             // is compiled against, and a type that does not exist is a build error
-            // for the whole helper. The physical click below covers the same tray
-            // buttons; it is the one that has always been there.
+            // for the whole helper.
         }
         catch
         {
-            // fall through to a physical click
+            // no action to take
         }
+        return false;
+    }
+
+    // A pointer click where the element sits: the one press that means exactly
+    // what a user means by pressing it.
+    private static bool ClickAt(AutomationElement element)
+    {
+        if (element == null) return false;
         try
         {
             System.Windows.Rect box = element.Current.BoundingRectangle;
@@ -442,6 +449,11 @@ public class JarvisWinHook
         }
     }
 
+    private static bool Press(AutomationElement element)
+    {
+        return Invoke(element) || ClickAt(element);
+    }
+
     // Open a tray flyout the way a click on it would. When the bar is hidden
     // behind Notch's own, it is put back just long enough to be clicked: the
     // flyouts hang off the shell's icons, and an icon with no pixels on screen
@@ -454,7 +466,9 @@ public class JarvisWinHook
         if (wasHidden)
         {
             ShowWindow(bar, 4); // SW_SHOWNOACTIVATE
-            System.Threading.Thread.Sleep(120);
+            // The bar takes a moment to lay its icons out again: pressing before
+            // that reads an empty rectangle and the click goes nowhere.
+            System.Threading.Thread.Sleep(260);
         }
         // The press moves the pointer onto the icon, so it is put back where the
         // user left it as soon as the click has landed.
@@ -462,7 +476,16 @@ public class JarvisWinHook
         bool hadCursor = GetCursorPos(out before);
         try
         {
-            if (Press(_tray[index]))
+            // The real click comes first: a tray button's Invoke can be accepted
+            // and then do nothing, which looks exactly like a dead button.
+            bool pressed = ClickAt(_tray[index]);
+            if (!pressed)
+            {
+                // Nothing to aim at yet: one more beat, then its own action.
+                System.Threading.Thread.Sleep(240);
+                pressed = ClickAt(_tray[index]) || Invoke(_tray[index]);
+            }
+            if (pressed)
             {
                 Console.WriteLine("pressed tray " + index);
                 Console.Out.Flush();
@@ -473,9 +496,9 @@ public class JarvisWinHook
             if (hadCursor) SetCursorPos(before.X, before.Y);
             if (wasHidden)
             {
-                // Long enough for the press to reach the shell and its flyout to
-                // be on its way out before the bar goes away again.
-                System.Threading.Thread.Sleep(220);
+                // Long enough for the click to reach the shell and its flyout to
+                // be fully up before the bar goes away again.
+                System.Threading.Thread.Sleep(600);
                 ShowWindow(bar, 0); // SW_HIDE
             }
         }

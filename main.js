@@ -4648,7 +4648,10 @@ function startWinHook() {
         windowListBuffer = [];
       } else if (text === 'win') onWinKey();
       else if (text.startsWith('slot ')) activateTaskbarSlot(Number(text.slice(5)));
-      else if (text.startsWith('pressed ')) hookLogNote(text);
+      else if (text.startsWith('pressed ')) {
+        if (text.startsWith('pressed tray')) trayPressAwaiting = 0;
+        hookLogNote(text);
+      }
       else if (text === 'windown' || text === 'winup' || text === 'chord') hookLogNote(text);
       else if (text === 'ready') {
         hookFailures = 0;
@@ -6387,6 +6390,9 @@ let taskbarWidths = { apps: 300, tray: 250, both: 620 };
 // window takes the click or lets it fall through.
 let taskbarHitRects = new Map(); // window id -> drawn boxes, window coordinates
 let taskbarIgnoring = new Map(); // window id -> whether clicks pass through
+// While a tray icon is being pressed in Windows' own bar, every point is treated
+// as outside Notch's bar, so the bar cannot take that click for itself.
+let trayClickUntil = 0;
 let taskbarMouseTimer = null;
 
 // ------------------------------------------------------------------ tray
@@ -6538,7 +6544,7 @@ function syncTaskbarMouse(point) {
             point.y >= box.y + r.y &&
             point.y <= box.y + r.y + r.height,
         );
-    const ignore = !inside;
+    const ignore = Date.now() < trayClickUntil || !inside;
     if (taskbarIgnoring.get(win.id) === ignore) continue;
     taskbarIgnoring.set(win.id, ignore);
     win.setIgnoreMouseEvents(ignore, { forward: true });
@@ -7830,7 +7836,9 @@ const TASKBAR_SYSTEM_URIS = {
 
 ipcMain.on('taskbar:system', (_event, kind) => {
   const uri = TASKBAR_SYSTEM_URIS[String(kind || '')];
-  if (uri) shell.openExternal(uri);
+  if (!uri) return;
+  hookLogNote(`tray system ${uri}`);
+  shell.openExternal(uri).catch(() => hookLogNote(`tray system ${uri}: Windows refused it`));
 });
 
 ipcMain.on('taskbar:ready', (event) => {
@@ -7912,10 +7920,12 @@ ipcMain.on('taskbar:close', (_event, key) => {
 // helper shows that bar and clicks the icon, Notch's bar — always on top, lying
 // exactly over the same strip — must not take the click instead.
 let trayClickPassThrough = null;
+let trayPressAwaiting = 0;
 
 function releaseTrayClickPassThrough() {
   clearTimeout(trayClickPassThrough);
   trayClickPassThrough = null;
+  trayClickUntil = 0;
   for (const { win } of taskbarZones()) {
     if (!win || win.isDestroyed()) continue;
     taskbarIgnoring.delete(win.id);
@@ -7930,21 +7940,31 @@ ipcMain.on('taskbar:tray', (_event, index) => {
     return;
   }
   hookLogNote(`tray press ${value}`);
+  // The mouse poll runs every 40 ms and would put the bar back under the cursor
+  // a frame after this returns — which is exactly what it did, so the helper's
+  // click kept landing on Notch's bar. The deadline is held here, where the poll
+  // can see it, and outlasts the helper's show-press-hide sequence.
+  trayClickUntil = Date.now() + 1300;
   for (const { win } of taskbarZones()) {
     if (!win || win.isDestroyed()) continue;
     taskbarIgnoring.set(win.id, true);
     win.setIgnoreMouseEvents(true, { forward: true });
   }
+  trayPressAwaiting = Date.now();
   try {
     hookProc.stdin.write(`trayclick ${value}\n`);
   } catch {
     hookLogNote('tray press: the helper is gone');
   }
-  // The helper shows the bar, presses at ~120 ms and hides it at ~340 ms; the
-  // surface stays out of the way for a little longer than that, then the poll
-  // takes it back.
   clearTimeout(trayClickPassThrough);
-  trayClickPassThrough = setTimeout(releaseTrayClickPassThrough, 800);
+  trayClickPassThrough = setTimeout(releaseTrayClickPassThrough, 1300);
+  // A helper that never answers is the one thing the log has to say out loud.
+  setTimeout(() => {
+    if (trayPressAwaiting && Date.now() - trayPressAwaiting >= 1000) {
+      trayPressAwaiting = 0;
+      hookLogNote('tray press: the helper did not answer');
+    }
+  }, 1100);
 });
 
 // Right-click on a button is where a pin is made or broken, the way Windows'
