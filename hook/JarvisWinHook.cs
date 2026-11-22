@@ -82,9 +82,6 @@ public class JarvisWinHook
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
 
-    [DllImport("user32.dll")]
-    private static extern int GetWindowLong(IntPtr hWnd, int index);
-
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT
     {

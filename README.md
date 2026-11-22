@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.46.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.46/Notch-Setup-1.2.46.exe)**
+**[Notch-Setup-1.2.47.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.47/Notch-Setup-1.2.47.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -373,6 +373,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.47** — with the assemblies found, the compiler reached the C# and said the
+thing that mattered: `CS0111: JarvisWinHook already defines a member called
+'GetWindowLong' with the same parameter types`. The Win32 import was declared
+twice — once as `GetWindowLongW`, once plain — and C# will not allow two members
+with one signature. That error is why `Add-Type` failed on every machine it was
+ever tried on, why the type was missing, why the Windows key was never taken, and
+why the tray, the window list, the hidden taskbar and `Win+number` were all dead
+in the same way. The duplicate is gone; the hook compiles and ships inside the
+installer as `hook/notchhook.exe`.
 
 **v1.2.46** — 1.2.45's build log named the cause in three lines: `CS0006: Metadata
 file 'UIAutomationClient.dll' could not be found` (and `UIAutomationTypes.dll`,
