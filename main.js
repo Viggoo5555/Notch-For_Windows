@@ -17,6 +17,7 @@ const {
   desktopCapturer,
   net,
   session,
+  Notification,
 } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -3948,19 +3949,138 @@ function reorderPinnedApps(ids) {
   return true;
 }
 
+// -------------------------------------------------------------- Windows pins
+// The apps Windows itself has pinned, in the order it shows them: the shortcuts
+// in Explorer's taskbar-pins folder, ordered the way the taskbar orders them.
+// The bar used to be filled from a hard-coded list of Starts-menu apps, which is
+// why it showed the wrong apps in the wrong order.
+function taskbarPinFolder() {
+  return path.join(
+    app.getPath('appData'),
+    'Microsoft',
+    'Internet Explorer',
+    'Quick Launch',
+    'User Pinned',
+    'TaskBar',
+  );
+}
+
+function taskbarPinFiles() {
+  const folder = taskbarPinFolder();
+  try {
+    return fs
+      .readdirSync(folder)
+      .filter((name) => /\.lnk$/i.test(name))
+      .map((name) => ({ name, file: path.join(folder, name) }));
+  } catch {
+    return [];
+  }
+}
+
+// Taskband\Favorites is the taskbar's own record of its buttons, and a drag to
+// reorder only ever changes that. Each pinned shortcut carries its file name in
+// there as UTF-16, in button order, so the names can be read straight out of the
+// blob without decoding the shell item list around them.
+function taskbarPinOrder(rows) {
+  if (rows.length < 2) return rows;
+  try {
+    const output = execFileSync(
+      'reg',
+      [
+        'query',
+        'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Taskband',
+        '/v',
+        'Favorites',
+      ],
+      { windowsHide: true, encoding: 'latin1', timeout: 4000 },
+    );
+    const hex = String(output).match(/\b[0-9a-f]{2}\b/gi);
+    if (!hex || hex.length < 16) return rows;
+    const data = Buffer.from(hex.join(''), 'hex');
+    const named = [];
+    let run = '';
+    for (let at = 0; at + 1 < data.length; at += 2) {
+      const code = data.readUInt16LE(at);
+      if (code >= 32 && code < 127) {
+        run += String.fromCharCode(code);
+        continue;
+      }
+      if (/\.lnk$/i.test(run)) named.push(run.toLowerCase());
+      run = '';
+    }
+    if (/\.lnk$/i.test(run)) named.push(run.toLowerCase());
+    if (!named.length) return rows;
+    const ordered = [];
+    for (const name of named) {
+      const row = rows.find((entry) => entry.name.toLowerCase() === name && !ordered.includes(entry));
+      if (row) ordered.push(row);
+    }
+    // Anything the blob did not name keeps the folder's order, after the rest.
+    for (const row of rows) if (!ordered.includes(row)) ordered.push(row);
+    return ordered;
+  } catch {
+    return rows;
+  }
+}
+
+// What the bar needs for each: the pin the launcher would make, icon and the
+// executable behind the shortcut included.
+async function readTaskbarPins() {
+  const rows = taskbarPinOrder(taskbarPinFiles());
+  if (!rows.length) return [];
+  const infos = await readShortcutInfo(rows.map((row) => row.file));
+  const pins = [];
+  for (const row of rows.slice(0, 12)) {
+    const info = infos.get(row.file);
+    const name = row.name.replace(/\.lnk$/i, '').trim() || 'App';
+    pins.push({
+      id: row.file,
+      name: name.slice(0, 60),
+      target: row.file,
+      icon: await iconForTarget(row.file),
+      exe: info ? String(info.target || '') : '',
+    });
+  }
+  return pins;
+}
+
+// Settings → Pins: take Windows' pins and their order again, for when they have
+// changed since the bar last looked.
+async function syncTaskbarPins() {
+  const pins = await readTaskbarPins();
+  if (!pins.length) return { ok: false, pins: pinnedEntries() };
+  prefs.pinned = pins;
+  prefs.pinsFromTaskbar = true;
+  prefs.pinsSeeded = true;
+  savePrefs();
+  broadcastPinned();
+  return { ok: true, pins: pinnedEntries() };
+}
+
+ipcMain.handle('notch:sync-pins', () => syncTaskbarPins());
+
 // A bar with nothing pinned is only whatever happens to be open. The first run
-// takes the handful of apps Windows starts with, out of the Start menu itself,
-// so every pin is a real shortcut with its real icon.
+// takes Windows' own pinned apps, so every pin is the app the user actually put
+// there, in the order they put it in.
 let pinSeedRunning = false;
 async function seedPinnedApps() {
-  if (pinSeedRunning || prefs.pinsSeeded) return;
-  if (Array.isArray(prefs.pinned) && prefs.pinned.length) {
-    prefs.pinsSeeded = true;
-    savePrefs();
-    return;
-  }
+  // Seeded once; after that the bar's own order is the truth, or every drag
+  // would be undone on the next start.
+  if (pinSeedRunning || (prefs.pinsSeeded && prefs.pinsFromTaskbar)) return;
   pinSeedRunning = true;
   try {
+    // A build before this one filled the bar from a hard-coded list, so an
+    // existing bar is replaced once instead of keeping the wrong apps.
+    const mine = await readTaskbarPins();
+    if (mine.length) {
+      prefs.pinned = mine;
+      prefs.pinsFromTaskbar = true;
+      prefs.pinsSeeded = true;
+      savePrefs();
+      broadcastPinned();
+      return;
+    }
+    if (prefs.pinsSeeded && Array.isArray(prefs.pinned) && prefs.pinned.length) return;
     const rows = await buildAppIndex();
     const one = async (pattern) => {
       const row = rows.find((entry) => pattern.test(entry.name));
@@ -4217,7 +4337,26 @@ function stopWinHook() {
 // way into the launcher, and a machine left running for a week should still answer
 // it. The wait grows so a PowerShell that keeps failing cannot spin, and a `ready`
 // line from a healthy one resets the ladder.
+// A machine where the helper cannot stay up loses the Windows key and the hidden
+// taskbar, and nothing in the window says so. One notification, once, so the
+// reason is not a guessing game.
+let hookWarned = false;
+function warnHookDead() {
+  if (hookWarned || !isWin) return;
+  hookWarned = true;
+  try {
+    if (!Notification.isSupported()) return;
+    new Notification({
+      title: 'Notch cannot watch the Windows key',
+      body: 'Its PowerShell helper would not stay running, so the Windows key and the hidden taskbar are off. The Key hook row in Settings has the details.',
+    }).show();
+  } catch {
+    /* a notification is not worth failing for */
+  }
+}
+
 function scheduleWinHookRetry() {
+  if (hookFailures >= 3) warnHookDead();
   if (hookRetryTimer || !prefs.settings.windowsKey || !isWin) return;
   const wait = Math.min(60000, 1500 * (hookFailures + 1));
   hookRetryTimer = setTimeout(() => {
@@ -7159,10 +7298,42 @@ function nativeTaskbarWanted() {
   return isWin && !gameMode && taskbarOn() && !!prefs.settings.hideWinTaskbar;
 }
 
+// The helper is how the bar normally goes away. A machine whose PowerShell will
+// not stay running for the long-lived helper still gets the bar hidden: the same
+// one call, in a process that ends as soon as it has made it.
+function hideNativeTaskbarOnce(hide) {
+  if (!isWin) return;
+  try {
+    execFile(
+      powershellExe(),
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        path.join(__dirname, 'winhook.ps1'),
+        '-Bar',
+        hide ? 'hide' : 'show',
+      ],
+      { windowsHide: true, timeout: 15000 },
+      () => {},
+    );
+  } catch {
+    /* nothing left to try */
+  }
+}
+
 async function sendNativeTaskbarState(force = false) {
   const want = nativeTaskbarWanted();
   if (!force && want === nativeTaskbarHidden) return;
-  if (!hookProc || !hookProc.stdin || hookProc.stdin.destroyed) return;
+  if (!hookProc || !hookProc.stdin || hookProc.stdin.destroyed) {
+    // Nobody to ask, so the bar is left as it is and Windows' own taskbar keeps
+    // sitting under Notch's — the thing this setting exists to stop.
+    hideNativeTaskbarOnce(want);
+    nativeTaskbarHidden = want;
+    return;
+  }
   // The notification area's icons are pixels on Windows' own bar, so once it is
   // hidden there is nothing to photograph. Take the pictures first, while they
   // are still on screen, and the tray Notch draws keeps them.

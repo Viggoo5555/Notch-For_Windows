@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('notchAPI', {
   pillWidth: (px) => ipcRenderer.send('notch:pill-width', px),
   // Whether the Windows-key helper is up, for the Settings row.
   winHook: () => ipcRenderer.invoke('notch:winhook'),
+  syncPins: () => ipcRenderer.invoke('notch:sync-pins'),
   setPinned: (value) => ipcRenderer.send('notch:pinned', !!value),
   focus: () => ipcRenderer.send('notch:focus'),
   quit: () => ipcRenderer.send('notch:quit'),

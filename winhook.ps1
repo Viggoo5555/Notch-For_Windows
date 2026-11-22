@@ -1,4 +1,4 @@
-param([switch]$Test, [switch]$Overflow)
+param([switch]$Test, [switch]$Overflow, [string]$Bar = '')
 
 # Watches the Windows key at the lowest keyboard level.
 #
@@ -1114,6 +1114,16 @@ public class JarvisWinHook
 if ($Overflow.IsPresent)
 {
     [JarvisWinHook]::OpenOverflow()
+    exit 0
+}
+
+# Windows' own taskbar, put away or brought back without a hook running: the
+# same call the helper makes, in a process that ends as soon as it has made it.
+if ($Bar -ne '')
+{
+    $hide = 0
+    if ($Bar -eq 'hide') { $hide = 1 }
+    Write-Output ([JarvisWinHook]::ShellBar($hide))
     exit 0
 }
 

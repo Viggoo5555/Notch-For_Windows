@@ -749,6 +749,7 @@ const SETTINGS_SCHEMA = [
   { group: 'Taskbar' },
   { key: 'taskbar', label: 'Show taskbar', type: 'toggle' },
   { key: 'hideWinTaskbar', label: 'Hide Windows taskbar', type: 'toggle' },
+  { key: 'syncPins', label: 'Pins', type: 'action', action: 'syncPins', button: 'Sync with Windows' },
   {
     key: 'taskbarStyle',
     label: 'Surface',
@@ -1296,10 +1297,15 @@ function renderSettings() {
       button.type = 'button';
       button.className = 'set-action';
       button.textContent = item.button;
-      button.addEventListener('click', () => {
+      button.addEventListener('click', async () => {
         if (item.action === 'pickWallpaper') pickWallpaper();
         else if (item.action === 'pillEditor') {
           settingsPage = 'pill';
+          renderSettings();
+        } else if (item.action === 'syncPins') {
+          // Windows' pins, in Windows' order: the bar is rebuilt from them.
+          const result = await api.syncPins();
+          toast(result && result.ok ? 'Pins synced with Windows' : 'No Windows pins found');
           renderSettings();
         }
       });

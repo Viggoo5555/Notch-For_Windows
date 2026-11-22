@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.39.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.39/Notch-Setup-1.2.39.exe)**
+**[Notch-Setup-1.2.40.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.40/Notch-Setup-1.2.40.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -363,6 +363,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.40** — the bar is the user's taskbar, not a guess at it. The pins are now the
+apps Windows itself has pinned, read from Explorer's taskbar-pins folder and put
+in the taskbar's own order (the `Taskband\Favorites` blob, which is what a drag to
+reorder actually changes) — before this the bar was filled from a hard-coded list
+of Start-menu apps, so it showed the wrong ones in the wrong order. An existing
+bar is replaced with the real pins once; **Settings → Taskbar → Pins → Sync with
+Windows** takes them again after pinning something new. And when the PowerShell
+helper will not stay running — which is also why the Windows taskbar stayed put
+and the Windows key did nothing — the bar is still hidden, by asking for that one
+call on its own, and a notification now says the helper is the problem instead of
+leaving it to be guessed.
 
 **v1.2.39** — the update actually installs. Pressing **Install** downloaded the
 installer, quit the app and then did nothing: the whole step was one `cmd /c`
