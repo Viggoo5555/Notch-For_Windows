@@ -7507,10 +7507,24 @@ function consumeQuickLine(text) {
 // The notification area's own buttons open flyouts of Windows' shell, and with
 // that bar hidden they open nothing at all. The three everyone reaches for are
 // answered by Notch instead, by what the icon calls itself.
+// The shell names these buttons by what they are doing, not by what they are:
+// on a machine that is online the network icon is "Internet access", one that is
+// not is "Not connected", and either one used to fall through to Windows' own
+// flyout. The status words are matched too, so the name the tooltip happens to
+// carry does not decide whether Notch answers.
 const QUICK_ICONS = [
-  { what: 'wifi', test: /wi-?fi|wlan|wireless|network|netzwerk|netvaerk|netværk/i },
-  { what: 'volume', test: /volume|sound|audio|lautst|lydstyrke|højttaler|hoejttaler|speaker/i },
-  { what: 'brightness', test: /brightness|helligkeit|lysstyrke|skjermlys|skærmlys/i },
+  {
+    what: 'wifi',
+    test: /wi-?fi|wlan|wireless|network|netzwerk|netvaerk|netværk|internet|connect|forbindelse|internetadgang|trådløs|draadloos|signal/i,
+  },
+  {
+    what: 'volume',
+    test: /volume|sound|audio|lautst|lydstyrke|højttaler|hoejttaler|speaker|headphone|headset|lyd|taler/i,
+  },
+  {
+    what: 'brightness',
+    test: /brightness|helligkeit|lysstyrke|skjermlys|skærmlys|backlight/i,
+  },
 ];
 
 function quickFor(name) {
@@ -7526,13 +7540,13 @@ function trayName(index) {
 
 // Notch's own volume, backlight and Wi-Fi panel: the three readings first, then a
 // sheet with the sliders the real shell keeps in its quick settings.
-async function showQuickPanel(left) {
+async function showQuickPanel(left, patience = 1400) {
   if (!taskbarWin || taskbarWin.isDestroyed()) return;
   const bar = taskbarWin.getBounds();
   const [audio, bright, wifi] = await Promise.all([
     requestQuick('audio', 'AUDIO\t'),
     requestQuick('brightness', 'BRIGHT\t'),
-    requestQuick('wifi', 'WIFI\t'),
+    requestQuick('wifi', 'WIFI\t', patience),
   ]);
   if (!taskbarWin || taskbarWin.isDestroyed()) return;
   const parts = String(audio || '').split('\t');
@@ -7546,14 +7560,15 @@ async function showQuickPanel(left) {
     wifi: Number(net[0]) === 1 ? 'on' : Number(net[0]) === 0 ? 'off' : 'none',
     ssid: String(net[1] || ''),
   };
-  const width = 272;
+  const width = 300;
   // No backlight to offer (a desktop monitor): the block is left out rather than
   // drawn dead.
-  const height = data.brightness === null ? 176 : 236;
-  const x = Math.round(
-    Math.min(Math.max(bar.x + left - width / 2, bar.x + 8), bar.x + bar.width - width - 8),
-  );
-  const y = Math.round(bar.y - height - 6);
+  const height = data.brightness === null ? 184 : 244;
+  // The bottom-right corner, where Windows keeps its own quick settings: the sheet
+  // is anchored to the end of the bar rather than to the icon that was pressed, so
+  // the same panel comes up in the same place whichever of the three opened it.
+  const x = Math.round(Math.max(8, bar.x + bar.width - width - 12));
+  const y = Math.round(bar.y - height - 8);
   const win = createFlyout();
   flyoutBounds = { x, y, width, height };
   flyoutKey = null;
@@ -8144,12 +8159,17 @@ function pressTrayIcon(index) {
 ipcMain.on('taskbar:tray', (_event, payload) => {
   const data = payload && typeof payload === 'object' ? payload : { index: payload };
   const index = Math.trunc(Number(data.index) || 0);
-  const what = quickFor(data.name || trayName(index));
+  const name = data.name || trayName(index);
+  const what = quickFor(name);
   if (what) {
     // The volume, the radio and the backlight are Notch's to answer.
     showQuickPanel(Number(data.left) || flyoutLeft || 0);
     return;
   }
+  // What falls through is named in the log: an icon Windows calls something this
+  // app does not know still opens the shell's own flyout, and its name is the one
+  // thing needed to teach the matcher about it.
+  hookLogNote(`tray press "${String(name)}" -> Windows`);
   pressTrayIcon(index);
 });
 
@@ -8258,13 +8278,15 @@ ipcMain.on('flyout:pick', (_event, hwnd) => {
 ipcMain.on('flyout:tray', (_event, payload) => {
   const data = payload && typeof payload === 'object' ? payload : { index: payload };
   const index = Math.trunc(Number(data.index) || 0);
-  const what = quickFor(data.name || trayName(index));
+  const name = data.name || trayName(index);
+  const what = quickFor(name);
   const left = Number(data.left);
   hideFlyout();
   if (what) {
     showQuickPanel(Number.isFinite(left) ? left : flyoutLeft);
     return;
   }
+  hookLogNote(`tray press "${String(name)}" -> Windows`);
   pressTrayIcon(index);
 });
 
@@ -8280,6 +8302,23 @@ ipcMain.on('quick:set', (_event, payload) => {
 });
 
 ipcMain.on('quick:mute', () => sendHookCommand('mute'));
+
+// The Wi-Fi radio, switched by the helper through Windows' own radio API: no
+// elevation, and no settings page to visit. The panel is asked again once the
+// radio has had time to move, so its button ends up reading what the machine
+// actually did rather than what it was told to do.
+let quickWifiTimer = 0;
+
+ipcMain.on('quick:wifi', (_event, on) => {
+  const wants = on === true || on === 1 || on === 'on' || on === 'true';
+  sendHookCommand(`wifi set ${wants ? 'on' : 'off'}`);
+  clearTimeout(quickWifiTimer);
+  quickWifiTimer = setTimeout(() => {
+    if (flyoutKind === 'quick' && flyoutWin && !flyoutWin.isDestroyed() && flyoutWin.isVisible()) {
+      showQuickPanel(flyoutLeft, 5000);
+    }
+  }, 2400);
+});
 
 // Joining a network needs a password, which is the one thing this panel cannot
 // ask for: the setting Windows already has opens instead.

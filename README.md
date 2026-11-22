@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.57.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.57/Notch-Setup-1.2.57.exe)**
+**[Notch-Setup-1.2.58.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.58/Notch-Setup-1.2.58.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -386,6 +386,27 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.58** — the library's wheel and the tray's three switches behave.
+Scrolling the game list with the panel merely hovered — nothing clicked — used to
+run down to the last game after one nudge: every repaint moves the spacer above
+the visible rows, and the browser's scroll anchoring was adding that movement to
+the scroll position as well, frame after frame. Anchoring is off on the list now,
+so the wheel moves by what the wheel turned and stops where it was told to (the
+store got the same fix). The notification area stops drawing dots: Notch hides
+Windows' own bar, and a tray icon was only ever a crop of that bar, so nothing
+could be photographed and every icon arrived as a bare dot. The icons a tray is
+read by — network, volume, brightness, Bluetooth, battery, security,
+notifications — are now drawn by Notch as glyphs in the bar's own 20 px hairline,
+and an icon it does not recognise shows its initial instead of a dot. The quick
+settings sheet is anchored in the **bottom-right corner** like Windows' own, not
+above whichever icon was pressed; its **Wi-Fi** row is a real switch now (Windows'
+radio API through the helper, no elevation) with the network settings page for the
+one thing a panel cannot ask for, a password; and the radio, the volume and the
+backlight are matched by the status the shell names them with ("Internet access",
+"Not connected"), so a network icon no longer falls through to Windows' own
+flyout. Any press that still does is written to the hook log with the name, which
+is how the matcher gets taught the next one.
 
 **v1.2.57** — the library scrolls all the way down in the notch itself. The card used
 to stop at twelve games, so the rest of the shelf only existed after opening the full

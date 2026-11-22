@@ -1178,6 +1178,39 @@ public class JarvisWinHook
         }
     }
 
+    // The radio, not the adapter: Windows.Devices.Radios is what the shell's own
+    // Wi-Fi switch uses, and it needs no elevation — "netsh interface set" would
+    // ask for rights this helper has no business requesting. PowerShell is the
+    // shortest way to a WinRT API from a .NET Framework process, and it runs on a
+    // worker, so a press never waits behind the radio coming down.
+    public static void SetWifi(bool on)
+    {
+        string script =
+            "[Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null;" +
+            "$op=[Windows.Devices.Radios.Radio]::GetRadiosAsync();" +
+            "$n=0;while($op.Status -eq 0 -and $n -lt 100){Start-Sleep -Milliseconds 40;$n++};" +
+            "$radios=$op.GetResults();" +
+            "foreach($radio in $radios){if($radio.Kind -ne [Windows.Devices.Radios.RadioKind]::WiFi){continue};" +
+            "$set=$radio.SetStateAsync([Windows.Devices.Radios.RadioState]::" + (on ? "On" : "Off") + ");" +
+            "$n=0;while($set.Status -eq 0 -and $n -lt 100){Start-Sleep -Milliseconds 40;$n++}}";
+        try
+        {
+            ProcessStartInfo info = new ProcessStartInfo(
+                "powershell",
+                "-NoProfile -NonInteractive -WindowStyle Hidden -Command \"" + script + "\"");
+            info.UseShellExecute = false;
+            info.CreateNoWindow = true;
+            using (Process process = Process.Start(info))
+            {
+                if (process != null) process.WaitForExit(9000);
+            }
+        }
+        catch
+        {
+            // no PowerShell, or no radio to switch: the panel re-reads the truth
+        }
+    }
+
     // Reading stdin is one thread, and everything slow used to run on it: the
     // notification area's UI Automation walk, the window list, the executable and
     // window icon reads, the GPU counter read, a screenshot. A press queued behind
@@ -1246,6 +1279,7 @@ public class JarvisWinHook
         }
         if (text == "windows" || text == "game" || text == "gpu" ||
             text == "audio" || text == "brightness" || text == "wifi" ||
+            text.StartsWith("wifi set ") ||
             text.StartsWith("icons ") || text.StartsWith("exeicon ") ||
             text.StartsWith("hostexe ") || text.StartsWith("shot "))
         {
@@ -1333,6 +1367,10 @@ public class JarvisWinHook
         {
             Console.WriteLine("WIFI\t" + Wifi());
             Console.Out.Flush();
+        }
+        else if (text.StartsWith("wifi set "))
+        {
+            SetWifi(text.EndsWith("on"));
         }
     }
 

@@ -35,5 +35,7 @@ contextBridge.exposeInMainWorld('taskbarAPI', {
   // The quick panel's own controls: the sliders and the mute button.
   setQuick: (payload) => ipcRenderer.send('quick:set', payload),
   mute: () => ipcRenderer.send('quick:mute'),
+  // The Wi-Fi radio itself, off or on.
+  wifiToggle: (on) => ipcRenderer.send('quick:wifi', !!on),
   openQuick: (what) => ipcRenderer.send('quick:open', what),
 });

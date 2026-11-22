@@ -1430,6 +1430,11 @@ html.demo .glass-backdrop {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
+  /* The spacer above the rows changes height as they turn over. With the
+     browser's scroll anchoring on, every one of those changes is added to the
+     scroll position as well as to the layout, and one nudge of the wheel runs
+     away to the end of the list. */
+  overflow-anchor: none;
 }
 
 .game-space {
@@ -2406,6 +2411,8 @@ html.demo .glass-backdrop {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
+  /* Same reason as the library: the spacers move, the scroll must not. */
+  overflow-anchor: none;
   padding-bottom: 2px;
 }
 

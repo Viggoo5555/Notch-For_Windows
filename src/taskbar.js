@@ -463,6 +463,54 @@ function overflowButton() {
   return button;
 }
 
+// Notch hides Windows' own taskbar, and a tray icon is only ever a crop of that
+// bar: with the bar hidden there is no crop, so every icon arrived as a bare dot.
+// These are ours instead — the icons a tray is read by, drawn in the same 20 px
+// hairline as the built-in ones, matched on the name the shell gives the button.
+const TRAY_GLYPHS = [
+  {
+    test: /wi-?fi|wlan|wireless|network|netzwerk|netvaerk|netværk|internet|connect|forbindelse|internetadgang|trådløs|draadloos/i,
+    svg: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.9 7.3a10.2 10.2 0 0 1 14.2 0M5.6 10.1a6.3 6.3 0 0 1 8.8 0M8.4 12.9a2.7 2.7 0 0 1 3.2 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="15.5" r="1.1" fill="currentColor"/></svg>',
+  },
+  {
+    test: /volume|sound|audio|lautst|lydstyrke|højttaler|hoejttaler|speaker|headphone|headset|lyd|taler/i,
+    svg: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.6 7.9h2.7L9.9 5v10l-3.6-2.9H3.6z" fill="currentColor"/><path d="M12.4 7.6a3.5 3.5 0 0 1 0 4.8M14.6 5.4a6.4 6.4 0 0 1 0 9.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  },
+  {
+    test: /brightness|helligkeit|lysstyrke|skjermlys|skærmlys|backlight/i,
+    svg: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 2.6v1.8M10 15.6v1.8M2.6 10h1.8M15.6 10h1.8M4.7 4.7l1.3 1.3M14 14l1.3 1.3M15.3 4.7 14 6M6 14l-1.3 1.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  },
+  {
+    test: /bluetooth|blåtand/i,
+    svg: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M9.6 3.4v13.2l3.9-3-7.5-7.4M13.5 6.4l-3.9 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  },
+  {
+    test: /battery|akku|batteri|power|strøm|strom/i,
+    svg: '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.8" y="6.4" width="12.2" height="7.2" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="16.1" y="8.7" width="1.5" height="2.6" rx="0.75" fill="currentColor"/><rect x="4.6" y="8.1" width="6.2" height="4" rx="0.9" fill="currentColor"/></svg>',
+  },
+  {
+    test: /security|protect|defender|sikkerhed|virus/i,
+    svg: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.2 15.3 5v4.6c0 3.1-2.1 5.5-5.3 7.1-3.2-1.6-5.3-4-5.3-7.1V5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+  },
+  {
+    test: /notification|notifikation|meddelelse/i,
+    svg: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.6 13.6h8.8c-.9-1-1.3-2-1.3-3.5V8.5a3.1 3.1 0 0 0-6.2 0v1.6c0 1.5-.4 2.5-1.3 3.5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.6 15.6a1.55 1.55 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  },
+];
+
+function trayGlyph(name) {
+  const text = String(name || '');
+  for (const glyph of TRAY_GLYPHS) if (glyph.test.test(text)) return glyph.svg;
+  return '';
+}
+
+// Nothing to draw and no name to match: the first letter of whatever the shell
+// calls it, which is more use than a dot and still says this one is unnamed.
+function trayLetter(name) {
+  const letter = String(name || '').trim().charAt(0);
+  return letter && /[\p{L}\p{N}]/u.test(letter) ? letter.toUpperCase() : '?';
+}
+
 function buildTray() {
   trayEl.replaceChildren();
   trayEl.appendChild(overflowButton());
@@ -479,9 +527,18 @@ function buildTray() {
       useTrayIcon(img, item.icon);
       button.appendChild(img);
     } else {
-      const dot = document.createElement('span');
-      dot.className = 'tb-tray-dot';
-      button.appendChild(dot);
+      const glyph = trayGlyph(item.name);
+      if (glyph) {
+        const icon = document.createElement('span');
+        icon.className = 'tb-tray-glyph';
+        icon.innerHTML = glyph;
+        button.appendChild(icon);
+      } else {
+        const letter = document.createElement('span');
+        letter.className = 'tb-tray-letter';
+        letter.textContent = trayLetter(item.name);
+        button.appendChild(letter);
+      }
     }
     button.addEventListener('click', () => {
       if (!api) return;

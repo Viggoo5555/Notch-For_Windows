@@ -154,19 +154,30 @@ function renderQuick() {
     });
     list.appendChild(quickBlock('Brightness', readout, null, slider));
   }
+  // The radio is Notch's own here: a toggle that turns the adapter itself off and
+  // on, and the settings page for the one thing this panel cannot ask — the
+  // password for a network it has never joined.
+  const on = data.wifi === 'on';
+  const known = on || data.wifi === 'off';
   const state =
-    data.wifi === 'on'
-      ? data.ssid
-        ? `Connected · ${data.ssid}`
-        : 'Connected'
-      : data.wifi === 'off'
-        ? 'Off'
-        : 'No Wi-Fi adapter';
+    on && data.ssid ? `Connected · ${data.ssid}` : on ? 'Connected' : known ? 'Off' : 'No Wi-Fi adapter';
+  const readout = quickReadout(state);
+  const row = document.createElement('div');
+  row.className = 'qs-row';
+  if (known) {
+    const toggle = quickButton(on ? 'Turn off' : 'Turn on', () => {
+      if (!api) return;
+      api.wifiToggle(!on);
+      toggle.textContent = 'Switching…';
+      readout.textContent = on ? 'Turning off…' : 'Turning on…';
+    });
+    row.appendChild(toggle);
+  }
   const settings = quickButton('Network settings', () => {
     if (api) api.openQuick('wifi');
   });
-  settings.classList.add('qs-wide');
-  list.appendChild(quickBlock('Wi-Fi', quickReadout(state), null, settings));
+  row.appendChild(settings);
+  list.appendChild(quickBlock('Wi-Fi', readout, null, row));
 }
 
 function render() {
