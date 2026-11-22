@@ -97,6 +97,25 @@ jobs:
           if (-not (Test-Path tts/piper/piper.exe)) { Write-Warning 'piper.exe did not arrive; the installer will fall back to the Windows voice.' }
           exit 0
 
+      # PowerShell's Add-Type refused this C# on a machine the app has to run on:
+      # the type was never created (TypeNotFound), the hook never installed, and the
+      # Windows key stayed Windows'. Compiled here it is a small exe the app runs
+      # directly, so no compiler is needed at run time. If it fails even here the
+      # output is attached to the release, where it can be read from outside.
+      - name: Build the native key hook
+        if: steps.check.outputs.exists != 'true'
+        continue-on-error: true
+        shell: cmd
+        run: |
+          if not exist hook mkdir hook
+          "%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe /out:hook\notchhook.exe /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Management.dll /r:UIAutomationClient.dll /r:UIAutomationTypes.dll /r:WindowsBase.dll hook\JarvisWinHook.cs hook\Program.cs > hook-compile.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type hook-compile.log
+          if not "%CODE%"=="0" (
+            copy /y hook-compile.log hook-compile-error.txt >nul
+            exit /b 1
+          )
+
       # The log of a failed run is not readable without admin rights, so the
       # failure is repeated as an annotation, which is public: the last lines of
       # the packer's output are what say why it stopped.
@@ -141,3 +160,12 @@ jobs:
             --title "Notch ${{ steps.version.outputs.version }}" `
             --notes-file release-notes.md `
             --target "${{ github.sha }}"
+
+      - name: Attach a hook compile error
+        if: steps.check.outputs.exists != 'true' && hashFiles('hook-compile-error.txt') != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "v${{ steps.version.outputs.version }}" hook-compile-error.txt `
+            --repo "${{ github.repository }}" --clobber

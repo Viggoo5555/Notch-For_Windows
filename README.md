@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.44.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.44/Notch-Setup-1.2.44.exe)**
+**[Notch-Setup-1.2.45.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.45/Notch-Setup-1.2.45.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -147,7 +147,8 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
 
 ## Requirements
 
-- Windows 10 or 11 (the window helper and the key hook are PowerShell + Win32 calls)
+- Windows 10 or 11 (the key hook is a small compiled helper; PowerShell is only a
+  fallback for a checkout)
 - Node.js 18 or newer, for development only — the packaged executable needs
   nothing installed
 - PowerShell 5.1, which ships with Windows
@@ -372,6 +373,22 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.45** — the Windows key, for real this time, and the log finally said why:
+`TypeNotFound`. PowerShell's `Add-Type` had been refusing the helper's C# on that
+machine, so the type was never created, the hook was never installed, and every
+Windows key went where Windows sends it — the Start menu. Everything else that
+lives in the helper (tray, window list, screenshots, hiding the bar, Win+number)
+was dead with it, which is what the last several rounds were chasing.
+
+The C# now lives in `hook/JarvisWinHook.cs`, and the build compiles it into
+`hook/notchhook.exe` on the Windows runner: the app runs that exe directly,
+with no compiler needed at run time. `winhook.ps1` is a thin loader for a
+checkout, so there is still one copy of the Win32 work. If the compiler refuses
+even on the runner, its output is attached to the release as
+`hook-compile-error.txt` instead of disappearing. The Settings row also shows a
+compiler error verbatim now (`error CS…`) rather than the `TypeNotFound` that
+followed it.
 
 **v1.2.44** — the cards in the panel all work the same way now. Before, the Library
 had four little icons in its head, the other three had a chevron that sat *before*

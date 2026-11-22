@@ -1,6 +1,6 @@
 {
   "name": "notch",
-  "version": "1.2.44",
+  "version": "1.2.45",
   "private": true,
   "description": "A glass notch for Windows — hover the top of your screen.",
   "main": "main.js",
@@ -30,6 +30,7 @@
       "games.js",
       "*preload.js",
       "winhook.ps1",
+      "hook/**/*",
       "shot-tools.ps1",
       "src/**/*",
       "!**/*.map"

@@ -4442,6 +4442,21 @@ function winHookArgs(script) {
   ];
 }
 
+// The helper is a small native exe when the package carries one. It has to be:
+// PowerShell's own compiler refused this exact C# on a machine the app must run on,
+// the type was never created, and the hook never started — the key stayed Windows'
+// because of a compiler, not because of the hook. winhook.ps1 is still the route
+// for a checkout, where no build has run.
+function hookExe() {
+  try {
+    const exe = path.join(__dirname, 'hook', 'notchhook.exe');
+    if (fs.existsSync(exe)) return exe;
+  } catch {
+    /* no package folder */
+  }
+  return '';
+}
+
 function startWinHook() {
   // The helper is not only the Windows key: it is the tray, the window list, the
   // screenshots and the hidden taskbar too. Stopping it because the key setting
@@ -4449,12 +4464,15 @@ function startWinHook() {
   // nothing else answered either. The setting is sent to it as a flag instead.
   if (hookProc || !isWin) return;
   const script = path.join(__dirname, 'winhook.ps1');
+  const exe = hookExe();
   let proc = null;
   try {
-    proc = spawn(powershellExe(), winHookArgs(script), {
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    proc = exe
+      ? spawn(exe, [], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(powershellExe(), winHookArgs(script), {
+          windowsHide: true,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
   } catch (error) {
     hookFailures += 1;
     hookNeedsBlock = true;
@@ -4465,7 +4483,7 @@ function startWinHook() {
   }
   hookProc = proc;
   hookReady = false;
-  hookLogNote(`start ${proc.pid || '?'} ${hookNeedsBlock ? 'block' : 'file'}`);
+  hookLogNote(`start ${proc.pid || '?'} ${exe ? 'native' : hookNeedsBlock ? 'block' : 'file'}`);
   // Anything PowerShell cannot do — a refused script, a C# that will not compile —
   // is said here and nowhere else.
   if (proc.stderr) {
@@ -4475,7 +4493,12 @@ function startWinHook() {
       const text = errors.trim();
       if (!text) return;
       errors = '';
-      hookLastError = text.split('\n').slice(-2).join(' ').slice(0, 300);
+      // A compiler error is the one line worth showing: everything after it is a
+      // consequence, and it is what says why the type was never created.
+      const compiled = text.match(/error CS\d+:[^\r\n]*/);
+      hookLastError = compiled
+        ? compiled[0].slice(0, 220)
+        : text.split('\n').slice(-2).join(' ').slice(0, 300);
       hookLogNote(`stderr: ${text.slice(0, 600)}`);
     });
   }
@@ -7473,10 +7496,10 @@ function nativeTaskbarWanted() {
 // one call, in a process that ends as soon as it has made it.
 function hideNativeTaskbarOnce(hide) {
   if (!isWin) return;
-  try {
-    execFile(
-      powershellExe(),
-      [
+  const exe = hookExe();
+  const args = exe
+    ? ['-Bar', hide ? 'hide' : 'show']
+    : [
         '-NoProfile',
         '-NonInteractive',
         '-ExecutionPolicy',
@@ -7485,10 +7508,9 @@ function hideNativeTaskbarOnce(hide) {
         path.join(__dirname, 'winhook.ps1'),
         '-Bar',
         hide ? 'hide' : 'show',
-      ],
-      { windowsHide: true, timeout: 15000 },
-      () => {},
-    );
+      ];
+  try {
+    execFile(exe || powershellExe(), args, { windowsHide: true, timeout: 15000 }, () => {});
   } catch {
     /* nothing left to try */
   }
@@ -7784,18 +7806,21 @@ ipcMain.on('taskbar:overflow', () => {
       /* fall through to the helper process */
     }
   }
-  // No keyboard hook to ask: the same script presses the chevron on its own.
+  // No keyboard hook to ask: the same helper presses the chevron on its own.
+  const exe = hookExe();
   execFile(
-    'powershell',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-File',
-      path.join(__dirname, 'winhook.ps1'),
-      '-Overflow',
-    ],
+    exe || 'powershell',
+    exe
+      ? ['-Overflow']
+      : [
+          '-NoProfile',
+          '-NonInteractive',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+          path.join(__dirname, 'winhook.ps1'),
+          '-Overflow',
+        ],
     { windowsHide: true, timeout: 12000 },
     () => {},
   );
