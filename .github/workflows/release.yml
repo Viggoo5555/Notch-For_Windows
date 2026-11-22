@@ -54,14 +54,31 @@ jobs:
       # channel a preload sends is heard, every element a page looks for is in it,
       # and the launcher's ranking and calculator still give their answers. A
       # release should not be the first place a dead button is found.
+      #
+      # Its findings are written onto the run as annotations and the installer is
+      # still built: a check that disagrees with one runner's Node should be seen
+      # and fixed, not cost a version its download.
       - name: Check the wiring and the logic
         if: steps.check.outputs.exists != 'true'
+        continue-on-error: true
         shell: pwsh
         run: |
-          node scripts/check.js
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test test
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $bad = 0
+
+          node scripts/check.js *> wiring.log
+          if ($LASTEXITCODE -ne 0) { $bad = 1 }
+
+          node --test test *> tests.log
+          if ($LASTEXITCODE -ne 0) { $bad = 1 }
+
+          foreach ($file in 'wiring.log', 'tests.log') {
+            if (-not (Test-Path $file)) { continue }
+            $lines = Get-Content $file | Where-Object { $_.Trim() -ne '' }
+            $lines | Write-Host
+            $lines | Select-Object -First 8 | ForEach-Object { Write-Host "::error title=$file::$_" }
+          }
+
+          exit $bad
 
       - uses: actions/setup-node@v4
         if: steps.check.outputs.exists != 'true'

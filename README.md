@@ -415,10 +415,15 @@ the real preload has and the demo bridge did not used to end boot halfway, which
 why the library card sat empty in it; the demo now answers anything it was not
 taught as a no-op and opens from the whole top strip, not just the narrow pill.
 A folder found by the search now sits under **Folders**, without a pin button, instead
-of posing as an app in the results. Under all of it, `npm run check` and `npm test` (14 cases over the launcher's
-ranking and calculator) now run in CI before the installer is built, so a bridge
-method that does not exist or a rule that quietly changed stops the release instead
-of shipping.
+of posing as an app in the results.
+
+Under all of it, `npm run check` and `npm test` now run in the release job. The first
+reads the source as text and reports what a compiler cannot: a script that does not
+parse, a bridge method a page calls that no preload exposes, a channel a preload sends
+that main never hears, an element id that is not in its page, glass from anywhere but
+this one library, and a channel handled twice. The second holds 14 cases over the
+launcher's ranking and calculator. Their findings are written onto the run as
+annotations, and the installer is built either way.
 
 **v1.2.59** — every app in the launcher gets its own picture. A pinned Brave, a
 recent Discord and a Claude with nothing but its initials were all the same fault:
