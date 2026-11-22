@@ -783,6 +783,7 @@ const SETTINGS_SCHEMA = [
   { group: 'Start menu' },
   { key: 'windowsKey', label: 'Windows key opens it', type: 'toggle' },
   { key: 'winHook', label: 'Key hook', type: 'status', text: () => state.winHook },
+  { key: 'hookLog', label: 'Hook log', type: 'action', action: 'copyHookLog', button: 'Copy' },
   { group: 'Update' },
   { key: 'version', label: 'Version', type: 'status', text: () => state.update.current || 'unknown' },
   { key: 'update', label: 'Updates', type: 'update' },
@@ -1303,6 +1304,9 @@ function renderSettings() {
         else if (item.action === 'pillEditor') {
           settingsPage = 'pill';
           renderSettings();
+        } else if (item.action === 'copyHookLog') {
+          const length = await api.copyHookLog();
+          toast(length ? 'Key hook log copied — paste it in the chat' : 'No hook log yet');
         } else if (item.action === 'syncPins') {
           // Windows' pins, in Windows' order: the bar is rebuilt from them.
           const result = await api.syncPins();

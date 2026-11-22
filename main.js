@@ -3645,6 +3645,40 @@ let hookProc = null;
 let hookFailures = 0;
 let hookReady = false;
 let hookRetryTimer = null;
+// The helper's own words, kept so a machine where it will not start can say why
+// instead of leaving it to be guessed from the outside. PowerShell writes its
+// compile errors to stderr, and stderr used to be thrown away.
+let hookLastError = '';
+let hookLogLines = [];
+
+function hookLogNote(line) {
+  const stamp = new Date().toISOString().slice(11, 19);
+  hookLogLines.push(`${stamp} ${line}`);
+  if (hookLogLines.length > 80) hookLogLines.splice(0, hookLogLines.length - 80);
+  try {
+    fs.appendFileSync(path.join(app.getPath('userData'), 'hook.log'), `${stamp} ${line}\n`);
+  } catch {
+    /* logging is never worth failing the app for */
+  }
+}
+
+function sendHookCommand(line) {
+  if (!hookProc || !hookProc.stdin || hookProc.stdin.destroyed) return false;
+  try {
+    hookProc.stdin.write(`${line}\n`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The key reached the helper, which swallowed it. Whether that opens the launcher
+// or leaves Windows its own menu is this setting alone.
+function onWinKey() {
+  hookLogNote(prefs.settings.windowsKey ? 'win -> launcher' : 'win -> left to Windows');
+  if (!prefs.settings.windowsKey) return;
+  toggleLauncher();
+}
 // When the sheet was put up. A blur in the first moment after that is Windows
 // finishing its foreground handover, not the user clicking somewhere else.
 let launcherShownAt = 0;
@@ -4362,7 +4396,7 @@ function warnHookDead() {
 
 function scheduleWinHookRetry() {
   if (hookFailures >= 3) warnHookDead();
-  if (hookRetryTimer || !prefs.settings.windowsKey || !isWin) return;
+  if (hookRetryTimer || !isWin) return;
   const wait = Math.min(60000, 1500 * (hookFailures + 1));
   hookRetryTimer = setTimeout(() => {
     hookRetryTimer = null;
@@ -4409,28 +4443,50 @@ function winHookArgs(script) {
 }
 
 function startWinHook() {
-  if (hookProc || !prefs.settings.windowsKey || !isWin) return;
+  // The helper is not only the Windows key: it is the tray, the window list, the
+  // screenshots and the hidden taskbar too. Stopping it because the key setting
+  // was off took all of those with it — which is why the key went to Windows and
+  // nothing else answered either. The setting is sent to it as a flag instead.
+  if (hookProc || !isWin) return;
   const script = path.join(__dirname, 'winhook.ps1');
   let proc = null;
   try {
     proc = spawn(powershellExe(), winHookArgs(script), {
       windowsHide: true,
-      stdio: ['pipe', 'pipe', 'ignore'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
-  } catch {
+  } catch (error) {
     hookFailures += 1;
     hookNeedsBlock = true;
+    hookLastError = String((error && error.message) || error);
+    hookLogNote(`spawn failed: ${hookLastError}`);
     scheduleWinHookRetry();
     return;
   }
   hookProc = proc;
   hookReady = false;
+  hookLogNote(`start ${proc.pid || '?'} ${hookNeedsBlock ? 'block' : 'file'}`);
+  // Anything PowerShell cannot do — a refused script, a C# that will not compile —
+  // is said here and nowhere else.
+  if (proc.stderr) {
+    let errors = '';
+    proc.stderr.on('data', (chunk) => {
+      errors += String(chunk);
+      const text = errors.trim();
+      if (!text) return;
+      errors = '';
+      hookLastError = text.split('\n').slice(-2).join(' ').slice(0, 300);
+      hookLogNote(`stderr: ${text.slice(0, 600)}`);
+    });
+  }
   // Compiled PowerShell takes a moment to start; one that never reports `ready`
   // never installed the hook, so it is replaced instead of leaving the key dead.
   let watchdog = null;
   // A helper that cannot be started at all reports it here. Left unhandled, that
   // error event would take the whole app down with it.
-  proc.on('error', () => {
+  proc.on('error', (error) => {
+    hookLastError = String((error && error.message) || error);
+    hookLogNote(`child error: ${hookLastError}`);
     if (hookProc !== proc) return;
     hookProc = null;
     hookReady = false;
@@ -4471,7 +4527,7 @@ function startWinHook() {
           trayListBuffer = null;
           if (trayRequest) trayRequest.finish(rows);
         } else if (text === 'win') {
-          toggleLauncher();
+          onWinKey();
         } else if (text.startsWith('slot ')) {
           activateTaskbarSlot(Number(text.slice(5)));
         } else if (text.includes('\t')) {
@@ -4485,7 +4541,7 @@ function startWinHook() {
           windowListBuffer = null;
           if (windowRequest) windowRequest.finish(rows);
         } else if (text === 'win') {
-          toggleLauncher();
+          onWinKey();
         } else if (text.startsWith('slot ')) {
           activateTaskbarSlot(Number(text.slice(5)));
         } else if (text.includes('\t')) {
@@ -4493,10 +4549,12 @@ function startWinHook() {
         }
       } else if (text === 'WB') {
         windowListBuffer = [];
-      } else if (text === 'win') toggleLauncher();
+      } else if (text === 'win') onWinKey();
       else if (text.startsWith('slot ')) activateTaskbarSlot(Number(text.slice(5)));
+      else if (text === 'windown' || text === 'winup' || text === 'chord') hookLogNote(text);
       else if (text === 'ready') {
         hookFailures = 0;
+        hookLastError = '';
         hookReady = true;
         if (watchdog) clearTimeout(watchdog);
         watchdog = null;
@@ -4504,8 +4562,14 @@ function startWinHook() {
         // say what it should be, so one left hidden by an earlier helper — or by
         // an explorer restart — is put back or taken away as the setting says.
         sendNativeTaskbarState(true);
+        // The setting the key follows, handed over as a flag rather than deciding
+        // whether the helper exists at all.
+        sendHookCommand(prefs.settings.windowsKey ? 'winkey on' : 'winkey off');
+        hookLogNote(`ready (winkey ${prefs.settings.windowsKey ? 'on' : 'off'})`);
       } else if (text.startsWith('fail')) {
         hookFailures += 1;
+        hookLastError = text;
+        hookLogNote(text);
         stopWinHook();
         scheduleWinHookRetry();
       }
@@ -4519,6 +4583,8 @@ function startWinHook() {
   watchdog = setTimeout(() => {
     if (hookProc !== proc || hookReady) return;
     hookFailures += 1;
+    hookLastError = 'no ready after 30s';
+    hookLogNote('watchdog: no ready');
     hookProc = null;
     nativeTaskbarHidden = false;
     try {
@@ -4528,7 +4594,8 @@ function startWinHook() {
     }
     scheduleWinHookRetry();
   }, 30000);
-  proc.on('exit', () => {
+  proc.on('exit', (code) => {
+    hookLogNote(`exit ${code}`);
     if (hookProc !== proc) return; // stopped on purpose
     hookProc = null;
     hookReady = false;
@@ -4544,8 +4611,11 @@ function startWinHook() {
 }
 
 function syncWinHook() {
-  if (prefs.settings.windowsKey) startWinHook();
-  else stopWinHook();
+  if (!isWin) return;
+  startWinHook();
+  // The helper is told what to do with the key instead of being taken away when
+  // the setting says no: the tray, the window list and the bar need it either way.
+  sendHookCommand(prefs.settings.windowsKey ? 'winkey on' : 'winkey off');
 }
 
 // What the Settings row says: a hook that is running, one on its way up, or one
@@ -4553,13 +4623,31 @@ function syncWinHook() {
 // a key that is being refused.
 function winHookStatus() {
   if (!isWin) return 'not on this system';
-  if (!prefs.settings.windowsKey) return 'off';
-  if (hookReady) return 'running';
+  if (hookReady) return prefs.settings.windowsKey ? 'running' : 'running, key left to Windows';
   if (hookProc) return 'starting';
-  return hookFailures > 1 ? 'not starting' : 'starting';
+  if (hookFailures > 1) return hookLastError ? `not starting — ${hookLastError}` : 'not starting';
+  return 'starting';
 }
 
 ipcMain.handle('notch:winhook', () => winHookStatus());
+
+// Everything the helper has said, and what this side did with it, on the
+// clipboard: a machine where the key does not work can then be described exactly
+// instead of by what it looks like.
+ipcMain.handle('notch:copy-hook-log', () => {
+  const text = [
+    `notch ${app.getVersion()} on ${process.platform}`,
+    `windowsKey: ${!!prefs.settings.windowsKey}`,
+    `status: ${winHookStatus()}`,
+    `ready: ${hookReady}  running: ${!!hookProc}  failures: ${hookFailures}`,
+    `powershell: ${powershellExe()}`,
+    `script: ${path.join(__dirname, 'winhook.ps1')}`,
+    ...hookLogLines,
+  ].join('\n');
+  clipboard.writeText(text.slice(0, 8000));
+  hookLogNote('hook log copied');
+  return text.length;
+});
 
 // The launcher's Recent row: the apps it opened last, newest first, so the thing
 // you need twice a day is one key and one Enter away instead of a search.

@@ -268,6 +268,10 @@ public class JarvisWinHook
     }
 
     public static bool AllowInjected = false;
+    // Whether the Windows key is Notch's or Windows'. Off means every key event is
+    // simply handed on, exactly as if this hook were not installed — the helper is
+    // still up for the tray, the window list and the taskbar.
+    public static bool WatchWin = true;
 
     // The launcher is opened from this process's key event, not the app's, so
     // Windows refuses the app's SetForegroundWindow and typing lands in whatever
@@ -971,6 +975,14 @@ public class JarvisWinHook
                         FocusWindow((IntPtr)value);
                     }
                 }
+                else if (text == "winkey on")
+                {
+                    WatchWin = true;
+                }
+                else if (text == "winkey off")
+                {
+                    WatchWin = false;
+                }
                 else if (text.StartsWith("close "))
                 {
                     long value;
@@ -1053,6 +1065,7 @@ public class JarvisWinHook
 
     private static IntPtr HookDecision(int nCode, IntPtr wParam, IntPtr lParam)
     {
+        if (!WatchWin) return CallNextHookEx(_hook, nCode, wParam, lParam);
         if (nCode >= 0)
         {
             KBDLLHOOKSTRUCT info = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
@@ -1068,6 +1081,8 @@ public class JarvisWinHook
 
                 if (isWin && down)
                 {
+                    Console.WriteLine("windown");
+                    Console.Out.Flush();
                     // Swallowed, both halves yet to come: Windows never sees a press
                     // of its own, so nothing it does with one — Start opening on it,
                     // or on the release — can happen. Before this the press was let
@@ -1098,6 +1113,8 @@ public class JarvisWinHook
                     if (!_chord)
                     {
                         _chord = true;
+                        Console.WriteLine("chord");
+                        Console.Out.Flush();
                         SendWin(_winVk, false);
                     }
                     _other = true;
@@ -1109,6 +1126,8 @@ public class JarvisWinHook
                 }
                 else if (isWin && up)
                 {
+                    Console.WriteLine("winup");
+                    Console.Out.Flush();
                     bool chord = _chord;
                     int slot = _slot;
                     _winDown = false;

@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.42.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.42/Notch-Setup-1.2.42.exe)**
+**[Notch-Setup-1.2.43.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.43/Notch-Setup-1.2.43.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -372,6 +372,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.43** — the helper that takes the Windows key was only allowed to exist
+while *Windows key opens it* was on, and it carried the tray, the window list, the
+screenshots and the hidden taskbar with it: switch that one setting off and every
+one of those died, with the key going straight to Windows' own Start menu. The
+helper now runs whenever Notch does, and the setting is sent to it as a flag
+(`winkey on|off`) — off now means the key is handed to Windows, not that the rest
+of the app stops. Its stderr, where PowerShell writes a refused script or a C#
+that will not compile, was discarded; it is kept now, along with every start,
+`ready`, exit code and Windows-key event, in `%APPDATA%\notch\hook.log`. **Settings
+→ Start menu → Key hook** shows the reason in the row itself, and **Hook log →
+Copy** puts the whole thing on the clipboard.
 
 **v1.2.42** — four small things, each in a place that was already there. The
 **launcher answers**: a sum typed into it comes back worked out as the first row

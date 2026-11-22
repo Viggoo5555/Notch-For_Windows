@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('notchAPI', {
   pillWidth: (px) => ipcRenderer.send('notch:pill-width', px),
   // Whether the Windows-key helper is up, for the Settings row.
   winHook: () => ipcRenderer.invoke('notch:winhook'),
+  // The helper's own log, copied to the clipboard so a machine where the key is
+  // dead can be described exactly instead of by what it looks like.
+  copyHookLog: () => ipcRenderer.invoke('notch:copy-hook-log'),
   syncPins: () => ipcRenderer.invoke('notch:sync-pins'),
   setPinned: (value) => ipcRenderer.send('notch:pinned', !!value),
   focus: () => ipcRenderer.send('notch:focus'),
