@@ -11,6 +11,7 @@
 //   node scripts/check.js --warn   report findings, exit 0 (advisory)
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
@@ -31,31 +32,44 @@ function warn(file, line, message) {
 
 // ---------------------------------------------------------------- every script
 // A file with a syntax error is not worth checking for anything else.
+// Every path in here is relative to the repository and written with forward
+// slashes, so the checks mean the same thing on Windows as on anything else.
 const scripts = [];
 (function walk(dir) {
-  for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
+  const here = dir ? path.join(root, dir) : root;
+  for (const entry of fs.readdirSync(here, { withFileTypes: true })) {
+    const full = dir ? `${dir}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      if (/^(node_modules|dist|tts|\.git|\.github)$/.test(entry.name)) continue;
-      if (full === 'src/vendor') continue;
+      if (/^(node_modules|dist|tts|\.git|\.github|src\/vendor)$/.test(full)) continue;
       walk(full);
       continue;
     }
     if (/\.(js|mjs)$/.test(entry.name)) scripts.push(full);
   }
-})('.');
+})('');
 
-for (const file of scripts.sort()) {
-  try {
-    execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
-  } catch (error) {
-    const output = String((error.stderr || error.stdout || '') + '')
-      .split('\n')
-      .filter((line) => line.trim())
-      .slice(0, 3)
-      .join(' ');
-    problems.push(`${rel(file)} does not parse: ${output}`);
-  }
+// Parsed as a module, whichever file it is: a page script is a `type="module"`
+// document, and checking one of those as CommonJS rejects every `import` in it.
+// A `.mjs` copy in a temporary folder is the same syntax to Node, and it does not
+// depend on the Node version's idea of a `.js` file.
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'notch-check-'));
+try {
+  scripts.sort().forEach((file, index) => {
+    const copy = path.join(scratch, `m${index}.mjs`);
+    try {
+      fs.copyFileSync(path.join(root, file), copy);
+      execFileSync(process.execPath, ['--check', copy], { stdio: 'pipe' });
+    } catch (error) {
+      const output = String((error.stderr || error.stdout || '') + '')
+        .split('\n')
+        .filter((line) => line.trim())
+        .slice(0, 3)
+        .join(' ');
+      problems.push(`${file} does not parse: ${output}`);
+    }
+  });
+} finally {
+  fs.rmSync(scratch, { recursive: true, force: true });
 }
 
 // ------------------------------------------------------------------- the glass
@@ -99,7 +113,7 @@ for (const file of preloads) {
 
 // Every `api.x` a renderer calls must be a key of the bridge it was handed.
 const renderers = scripts.filter(
-  (file) => file.startsWith('src/') && !/vendor|worker|glass/.test(file),
+  (file) => file.startsWith('src/') && !/vendor|worker|glass|core\//.test(file),
 );
 for (const file of renderers) {
   const text = read(file);
