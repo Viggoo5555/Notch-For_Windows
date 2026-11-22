@@ -3922,22 +3922,62 @@ async function buildFolderIndex() {
   return build;
 }
 
+// The shell's own picture of a thing. Electron's call answers a shortcut with
+// the generic page glyph and a store app with nothing at all, which is what left
+// Brave and Discord as blank pages; the helper asks Explorer's own image factory
+// instead, which resolves a .lnk, a .url and a shell:AppsFolder app alike.
+function requestShellIcon(path, size = 96) {
+  return askHook(`shellicon ${size} ${path}`, 'ICO\t', 1800);
+}
+
 async function iconForTarget(target) {
   const key = String(target || '');
   if (!key) return null;
   if (appIconCache.has(key)) return appIconCache.get(key);
   let icon = null;
-  if (!key.startsWith('uwp:')) {
-    const source = iconSourceCache.get(key) || key;
+  const source = key.startsWith('uwp:') ? `shell:AppsFolder\\${key.slice(4)}` : key;
+  const png = await requestShellIcon(source);
+  if (png && png !== '-') icon = `data:image/png;base64,${png}`;
+  if (!icon && !key.startsWith('uwp:')) {
+    // No shell answer (no helper running): Electron's own call, on the file the
+    // shortcut points at rather than on the shortcut itself.
+    let file = iconSourceCache.get(key) || key;
+    if (/\.lnk$/i.test(file)) {
+      const infos = await readShortcutInfo([file]);
+      const info = infos.get(file);
+      if (info && info.target) file = info.target;
+    }
     try {
-      const image = await app.getFileIcon(source, { size: 'large' });
+      const image = await app.getFileIcon(file, { size: 'large' });
       if (!image.isEmpty()) icon = image.toDataURL();
     } catch {
       icon = null;
     }
   }
-  appIconCache.set(key, icon);
+  // Only a picture is remembered: a miss is worth asking about again.
+  if (icon) {
+    if (appIconCache.size > 500) appIconCache.clear();
+    appIconCache.set(key, icon);
+  }
   return icon;
+}
+
+// A pin keeps the icon it was made with, and the build that answered shortcuts
+// with the page glyph left them blank for good. Once per pin, on the first start
+// after this version, the picture is taken again the new way.
+async function refreshPinIcons() {
+  const pins = Array.isArray(prefs.pinned) ? prefs.pinned : [];
+  let changed = false;
+  for (const pin of pins) {
+    if (!pin || pin.iconV === 2) continue;
+    pin.icon = (await iconForTarget(pin.target || pin.id)) || pin.icon || null;
+    pin.iconV = 2;
+    changed = true;
+  }
+  if (changed) {
+    savePrefs();
+    broadcastPinned();
+  }
 }
 
 // The executable a shortcut points at, empty for anything else. A pin carries it
@@ -4016,6 +4056,7 @@ async function addPinnedApp(entry) {
     name: String(entry?.name || 'App').slice(0, 60),
     target,
     icon: entry?.icon || (await iconForTarget(target)),
+    iconV: 2,
     exe,
   });
   prefs.pinned = pins;
@@ -4148,6 +4189,7 @@ async function readTaskbarPins() {
       name: name.slice(0, 60),
       target: row.file,
       icon: await iconForTarget(row.file),
+      iconV: 2,
       exe: info ? String(info.target || '') : '',
     });
   }
@@ -4195,7 +4237,13 @@ async function seedPinnedApps() {
     const one = async (pattern) => {
       const row = rows.find((entry) => pattern.test(entry.name));
       if (!row) return null;
-      return { id: row.id, name: row.name, target: row.target, icon: await iconForTarget(row.target) };
+      return {
+        id: row.id,
+        name: row.name,
+        target: row.target,
+        icon: await iconForTarget(row.target),
+        iconV: 2,
+      };
     };
     const picks = [];
     const browser = await one(/^(microsoft edge|google chrome|firefox|brave)$/i);
@@ -7815,7 +7863,9 @@ function createTaskbar() {
     taskbarTrayWin = null;
   }
   startTaskbarPolling();
-  seedPinnedApps();
+  seedPinnedApps()
+    .catch(() => {})
+    .then(() => refreshPinIcons());
   startTaskbarMouseSync();
 }
 

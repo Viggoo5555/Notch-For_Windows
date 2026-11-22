@@ -799,6 +799,169 @@ public class JarvisWinHook
         }
     }
 
+    // ------------------------------------------------------------ shell icons
+    // The shell's own picture of a thing: a shortcut has no icon of its own, a
+    // store app has no file at all, and Electron answers both with the generic
+    // page glyph — which is why Brave and Discord were blank pages in the
+    // launcher. IShellItemImageFactory is what Explorer itself draws, for a path,
+    // a .lnk, a .url or a shell:AppsFolder\<AppID> alike.
+    [ComImport]
+    [Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellItemImageFactory
+    {
+        void GetImage(SIZE size, int flags, out IntPtr bitmap);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SIZE
+    {
+        public int cx;
+        public int cy;
+        public SIZE(int width, int height)
+        {
+            cx = width;
+            cy = height;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BITMAPINFOHEADER
+    {
+        public uint biSize;
+        public int biWidth;
+        public int biHeight;
+        public ushort biPlanes;
+        public ushort biBitCount;
+        public uint biCompression;
+        public uint biSizeImage;
+        public int biXPelsPerMeter;
+        public int biYPelsPerMeter;
+        public uint biClrUsed;
+        public uint biClrImportant;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GDI_BITMAP
+    {
+        public int bmType;
+        public int bmWidth;
+        public int bmHeight;
+        public int bmWidthBytes;
+        public ushort bmPlanes;
+        public ushort bmBitsPixel;
+        public IntPtr bmBits;
+    }
+
+    private const int SIIGBF_BIGGERSIZEOK = 0x01;
+    private const int SIIGBF_ICONONLY = 0x04;
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+    private static extern void SHCreateItemFromParsingName(
+        string path, IntPtr bindContext, ref Guid iid,
+        [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory factory);
+
+    [DllImport("gdi32.dll", EntryPoint = "GetObjectW")]
+    private static extern int GetObject(IntPtr handle, int bytes, ref GDI_BITMAP info);
+
+    [DllImport("gdi32.dll")]
+    private static extern int GetDIBits(IntPtr dc, IntPtr bitmap, uint start, uint lines,
+        byte[] bits, ref BITMAPINFOHEADER header, uint usage);
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateCompatibleDC(IntPtr dc);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteDC(IntPtr dc);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(IntPtr handle);
+
+    public static string ShellIcon(string path, int size)
+    {
+        IntPtr handle = IntPtr.Zero;
+        IntPtr dc = IntPtr.Zero;
+        try
+        {
+            string name = String.IsNullOrEmpty(path) ? "" : path.Trim().Trim('"');
+            if (name.Length == 0) return "-";
+            if (size < 16) size = 16;
+            if (size > 256) size = 256;
+            Guid iid = new Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b");
+            IShellItemImageFactory factory;
+            SHCreateItemFromParsingName(name, IntPtr.Zero, ref iid, out factory);
+            if (factory == null) return "-";
+            try
+            {
+                factory.GetImage(new SIZE(size, size), SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, out handle);
+            }
+            finally
+            {
+                Marshal.ReleaseComObject(factory);
+            }
+            if (handle == IntPtr.Zero) return "-";
+            GDI_BITMAP info = new GDI_BITMAP();
+            if (GetObject(handle, Marshal.SizeOf(typeof(GDI_BITMAP)), ref info) == 0) return "-";
+            int width = info.bmWidth;
+            int height = Math.Abs(info.bmHeight);
+            if (width < 1 || height < 1 || width > 512 || height > 512) return "-";
+            BITMAPINFOHEADER header = new BITMAPINFOHEADER();
+            header.biSize = (uint)Marshal.SizeOf(typeof(BITMAPINFOHEADER));
+            header.biWidth = width;
+            header.biHeight = -height;
+            header.biPlanes = 1;
+            header.biBitCount = 32;
+            header.biCompression = 0;
+            byte[] bits = new byte[width * height * 4];
+            dc = CreateCompatibleDC(IntPtr.Zero);
+            if (GetDIBits(dc, handle, 0, (uint)height, bits, ref header, 0) == 0) return "-";
+            // An icon out of a bitmap that carries no alpha comes back fully
+            // transparent; the colour is still there, so the alpha is rebuilt from
+            // it rather than handing the launcher an invisible picture.
+            bool anyAlpha = false;
+            for (int i = 3; i < bits.Length; i += 4)
+            {
+                if (bits[i] != 0)
+                {
+                    anyAlpha = true;
+                    break;
+                }
+            }
+            if (!anyAlpha)
+            {
+                for (int i = 0; i < bits.Length; i += 4)
+                {
+                    bits[i + 3] = (byte)((bits[i] | bits[i + 1] | bits[i + 2]) != 0 ? 255 : 0);
+                }
+            }
+            using (Bitmap bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb))
+            {
+                BitmapData area = bitmap.LockBits(
+                    new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                for (int row = 0; row < height; row++)
+                {
+                    Marshal.Copy(bits, row * width * 4,
+                        (IntPtr)((long)area.Scan0 + row * area.Stride), width * 4);
+                }
+                bitmap.UnlockBits(area);
+                using (MemoryStream stream = new MemoryStream())
+                {
+                    bitmap.Save(stream, ImageFormat.Png);
+                    return Convert.ToBase64String(stream.ToArray());
+                }
+            }
+        }
+        catch
+        {
+            return "-";
+        }
+        finally
+        {
+            if (dc != IntPtr.Zero) DeleteDC(dc);
+            if (handle != IntPtr.Zero) DeleteObject(handle);
+        }
+    }
+
     // A strip of the screen as PNG, for the tray icons. GDI reads the desktop
     // surface straight away, where the Chromium capturer waits for a composited
     // frame that a still screen never delivers.
@@ -1279,7 +1442,7 @@ public class JarvisWinHook
         }
         if (text == "windows" || text == "game" || text == "gpu" ||
             text == "audio" || text == "brightness" || text == "wifi" ||
-            text.StartsWith("wifi set ") ||
+            text.StartsWith("wifi set ") || text.StartsWith("shellicon ") ||
             text.StartsWith("icons ") || text.StartsWith("exeicon ") ||
             text.StartsWith("hostexe ") || text.StartsWith("shot "))
         {
@@ -1320,6 +1483,21 @@ public class JarvisWinHook
         else if (text.StartsWith("exeicon "))
         {
             Console.WriteLine("ICO\t" + ExeIcon(text.Substring(8).Trim().Trim('"')));
+            Console.Out.Flush();
+        }
+        else if (text.StartsWith("shellicon "))
+        {
+            // "shellicon <pixels> <path>", the path last because it may hold spaces.
+            string rest = text.Substring(10);
+            int space = rest.IndexOf(' ');
+            int size = 96;
+            string path = rest;
+            if (space > 0)
+            {
+                int.TryParse(rest.Substring(0, space), out size);
+                path = rest.Substring(space + 1);
+            }
+            Console.WriteLine("ICO\t" + ShellIcon(path, size));
             Console.Out.Flush();
         }
         else if (text.StartsWith("hostexe "))

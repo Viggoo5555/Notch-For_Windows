@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.58.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.58/Notch-Setup-1.2.58.exe)**
+**[Notch-Setup-1.2.59.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.59/Notch-Setup-1.2.59.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -386,6 +386,20 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.59** — every app in the launcher gets its own picture. A pinned Brave, a
+recent Discord and a Claude with nothing but its initials were all the same fault:
+the icon was asked of the file, and a shortcut has no icon of its own — Chromium
+answers one with the generic blank page, and a stored app with nothing at all — so
+the tiles that happened to be plain shortcuts stayed empty. The helper now asks
+Windows' own image factory for the picture, the one Explorer draws: it resolves a
+`.lnk`, a `.url` and a `shell:AppsFolder` app alike, and hands back a 96 px icon
+with its alpha intact. Pins made before this version are pictured once more on the
+first start, so an icon that was saved as a blank page does not stay that way, and
+a missing answer is no longer cached — the next look asks again instead of keeping
+the gap for the life of the app. Electron's own call is still the fallback when the
+helper is not running, and it now follows a shortcut to the executable behind it
+rather than reading the shortcut itself.
 
 **v1.2.58** — the library's wheel and the tray's three switches behave.
 Scrolling the game list with the panel merely hovered — nothing clicked — used to
