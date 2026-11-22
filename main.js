@@ -6514,6 +6514,11 @@ function applyTaskbarBounds(zone, win) {
 // Where nothing is drawn, nothing is taken: the bar's empty stretches belong to
 // whatever is behind them, which on the bottom edge is the real taskbar.
 function syncTaskbarMouse(point) {
+  // A bar with a surface covers its whole window, so the window itself is the
+  // hit area: a click there is meant for the bar even if the renderer's measured
+  // boxes are stale, and a bar nobody can press is worse than a padded corner
+  // that eats a click. Only the invisible surface relies on the icons' boxes.
+  const painted = taskbarMode().style !== 'hidden';
   for (const { win } of taskbarZones()) {
     if (!win || win.isDestroyed()) continue;
     const box = win.getBounds();
@@ -6521,13 +6526,18 @@ function syncTaskbarMouse(point) {
     // Until the surface has been measured the whole window counts as drawn,
     // which is what it did before it reported anything.
     const rects = reported || [{ x: 0, y: 0, width: box.width, height: box.height }];
-    const inside = rects.some(
-      (r) =>
-        point.x >= box.x + r.x &&
-        point.x <= box.x + r.x + r.width &&
-        point.y >= box.y + r.y &&
-        point.y <= box.y + r.y + r.height,
-    );
+    const inside = painted
+      ? point.x >= box.x &&
+        point.x <= box.x + box.width &&
+        point.y >= box.y &&
+        point.y <= box.y + box.height
+      : rects.some(
+          (r) =>
+            point.x >= box.x + r.x &&
+            point.x <= box.x + r.x + r.width &&
+            point.y >= box.y + r.y &&
+            point.y <= box.y + r.y + r.height,
+        );
     const ignore = !inside;
     if (taskbarIgnoring.get(win.id) === ignore) continue;
     taskbarIgnoring.set(win.id, ignore);
@@ -7898,13 +7908,43 @@ ipcMain.on('taskbar:close', (_event, key) => {
   }
 });
 
-ipcMain.on('taskbar:tray', (_event, index) => {
-  if (!hookProc || !hookProc.stdin || hookProc.stdin.destroyed) return;
-  try {
-    hookProc.stdin.write(`trayclick ${Math.trunc(Number(index) || 0)}\n`);
-  } catch {
-    /* the helper is gone */
+// A tray icon is pressed in Windows' own bar, not in ours. For the moment the
+// helper shows that bar and clicks the icon, Notch's bar — always on top, lying
+// exactly over the same strip — must not take the click instead.
+let trayClickPassThrough = null;
+
+function releaseTrayClickPassThrough() {
+  clearTimeout(trayClickPassThrough);
+  trayClickPassThrough = null;
+  for (const { win } of taskbarZones()) {
+    if (!win || win.isDestroyed()) continue;
+    taskbarIgnoring.delete(win.id);
   }
+  syncTaskbarMouse(cursorDip());
+}
+
+ipcMain.on('taskbar:tray', (_event, index) => {
+  const value = Math.trunc(Number(index) || 0);
+  if (!hookProc || !hookReady || !hookProc.stdin || hookProc.stdin.destroyed) {
+    hookLogNote(`tray press ${value}: no helper running`);
+    return;
+  }
+  hookLogNote(`tray press ${value}`);
+  for (const { win } of taskbarZones()) {
+    if (!win || win.isDestroyed()) continue;
+    taskbarIgnoring.set(win.id, true);
+    win.setIgnoreMouseEvents(true, { forward: true });
+  }
+  try {
+    hookProc.stdin.write(`trayclick ${value}\n`);
+  } catch {
+    hookLogNote('tray press: the helper is gone');
+  }
+  // The helper shows the bar, presses at ~120 ms and hides it at ~340 ms; the
+  // surface stays out of the way for a little longer than that, then the poll
+  // takes it back.
+  clearTimeout(trayClickPassThrough);
+  trayClickPassThrough = setTimeout(releaseTrayClickPassThrough, 800);
 });
 
 // Right-click on a button is where a pin is made or broken, the way Windows'

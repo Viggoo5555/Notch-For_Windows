@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.50.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.50/Notch-Setup-1.2.50.exe)**
+**[Notch-Setup-1.2.51.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.51/Notch-Setup-1.2.51.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -373,6 +373,17 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.51** — the notification area finally answers a press. A tray icon belongs
+to Windows' own bar: the helper shows that bar and clicks the icon for a moment.
+Notch's bar is always on top and lies exactly over the same strip, so the click
+was landing on Notch's bar instead of the icon, and nothing opened. The bar now
+lets every mouse event through for that moment and takes the surface back
+afterwards, and the helper returns the pointer to where the user left it. A bar
+with a surface also takes the mouse across its whole window instead of only the
+boxes the renderer measured, so a stale measurement can no longer leave part of
+the bar unpressable; the invisible surface still only takes its icons. Tray
+presses are logged as `tray press N` and the helper answers `pressed tray N`.
 
 **v1.2.50** — pressing an app on the bar now does what the button says. A press
 carries the button's own windows and the shortcut behind it, so opening no longer

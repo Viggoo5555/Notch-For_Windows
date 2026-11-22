@@ -69,6 +69,16 @@ public class JarvisWinHook
     private static extern bool CloseHandle(IntPtr handle);
     [DllImport("user32.dll")]
     private static extern bool SetCursorPos(int x, int y);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorPoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out CursorPoint point);
     [DllImport("user32.dll")]
     private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
     [DllImport("shell32.dll")]
@@ -446,12 +456,21 @@ public class JarvisWinHook
             ShowWindow(bar, 4); // SW_SHOWNOACTIVATE
             System.Threading.Thread.Sleep(120);
         }
+        // The press moves the pointer onto the icon, so it is put back where the
+        // user left it as soon as the click has landed.
+        CursorPoint before;
+        bool hadCursor = GetCursorPos(out before);
         try
         {
-            Press(_tray[index]);
+            if (Press(_tray[index]))
+            {
+                Console.WriteLine("pressed tray " + index);
+                Console.Out.Flush();
+            }
         }
         finally
         {
+            if (hadCursor) SetCursorPos(before.X, before.Y);
             if (wasHidden)
             {
                 // Long enough for the press to reach the shell and its flyout to
