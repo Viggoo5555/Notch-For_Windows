@@ -56,6 +56,8 @@ public class JarvisWinHook
     [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr hWnd);
     [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int command);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr FindWindow(string className, string windowName);
@@ -371,7 +373,9 @@ public class JarvisWinHook
                     {
                         string cls = element.Current.ClassName ?? "";
                         System.Windows.Rect box = element.Current.BoundingRectangle;
-                        if (box.Width <= 0 || box.Height <= 0) continue;
+                        // An icon whose bar is hidden still exists to be pressed, so
+                        // it is still listed: there is simply no picture to go with
+                        // it, because there are no pixels left to photograph.
                         string name = (element.Current.Name ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
                         output.Append(_tray.Count).Append('\t')
                             .Append((int)box.X).Append('\t').Append((int)box.Y).Append('\t')
@@ -409,6 +413,14 @@ public class JarvisWinHook
                 ((InvokePattern)pattern).Invoke();
                 return true;
             }
+            // The shell's tray buttons usually offer their click as a default
+            // action rather than Invoke, and that action still works when the bar
+            // they sit on is hidden.
+            if (element.TryGetCurrentPattern(LegacyIAccessiblePattern.Pattern, out pattern))
+            {
+                ((LegacyIAccessiblePattern)pattern).DoDefaultAction();
+                return true;
+            }
         }
         catch
         {
@@ -429,11 +441,34 @@ public class JarvisWinHook
         }
     }
 
-    // Open a tray flyout the way a click on it would.
+    // Open a tray flyout the way a click on it would. When the bar is hidden
+    // behind Notch's own, it is put back just long enough to be clicked: the
+    // flyouts hang off the shell's icons, and an icon with no pixels on screen
+    // has nothing a click can land on.
     public static void ClickTray(int index)
     {
         if (index < 0 || index >= _tray.Count) return;
-        Press(_tray[index]);
+        IntPtr bar = FindWindow("Shell_TrayWnd", null);
+        bool wasHidden = bar != IntPtr.Zero && !IsWindowVisible(bar);
+        if (wasHidden)
+        {
+            ShowWindow(bar, 4); // SW_SHOWNOACTIVATE
+            System.Threading.Thread.Sleep(120);
+        }
+        try
+        {
+            Press(_tray[index]);
+        }
+        finally
+        {
+            if (wasHidden)
+            {
+                // Long enough for the press to reach the shell and its flyout to
+                // be on its way out before the bar goes away again.
+                System.Threading.Thread.Sleep(220);
+                ShowWindow(bar, 0); // SW_HIDE
+            }
+        }
     }
 
     // The first of these buttons whose name says what it is, in the languages
@@ -775,6 +810,58 @@ public class JarvisWinHook
         }
     }
 
+    // A press on a taskbar button, read the way Windows reads it: the app in
+    // front is put away, an app behind comes forward, and a group of windows
+    // moves through its windows before any of them is minimised.
+    public static void GroupClick(string list)
+    {
+        List<IntPtr> windows = new List<IntPtr>();
+        foreach (string part in list.Split(' '))
+        {
+            long value;
+            if (long.TryParse(part, out value) && value != 0) windows.Add((IntPtr)value);
+        }
+        if (windows.Count == 0) return;
+        IntPtr foreground = GetForegroundWindow();
+        bool front = false;
+        foreach (IntPtr hwnd in windows) if (hwnd == foreground) front = true;
+        if (front)
+        {
+            // Another window of this app is still open, so that one comes up
+            // instead of the whole app going away: a second press on a grouped
+            // button moves to the next window, the way Windows does it.
+            foreach (IntPtr hwnd in windows)
+            {
+                if (hwnd == foreground || !IsWindow(hwnd) || IsIconic(hwnd)) continue;
+                ShowWindow(hwnd, 9); // SW_RESTORE
+                FocusWindow(hwnd);
+                return;
+            }
+            foreach (IntPtr hwnd in windows)
+            {
+                if (!IsWindow(hwnd)) continue;
+                ShowWindow(hwnd, 6); // SW_MINIMIZE
+            }
+            return;
+        }
+        // Nothing of this app is in front: a minimised window comes back, and
+        // otherwise the first one is brought forward.
+        foreach (IntPtr hwnd in windows)
+        {
+            if (!IsWindow(hwnd) || !IsIconic(hwnd)) continue;
+            ShowWindow(hwnd, 9);
+            FocusWindow(hwnd);
+            return;
+        }
+        foreach (IntPtr hwnd in windows)
+        {
+            if (!IsWindow(hwnd)) continue;
+            ShowWindow(hwnd, 9);
+            FocusWindow(hwnd);
+            return;
+        }
+    }
+
     // The app talks to us on stdin: "focus <hwnd>".
     private static void ReadCommands()
     {
@@ -865,6 +952,10 @@ public class JarvisWinHook
                 else if (text == "taskbarshow")
                 {
                     ShellBar(0);
+                }
+                else if (text.StartsWith("group "))
+                {
+                    GroupClick(text.Substring(6).Trim());
                 }
                 else if (text.StartsWith("activate "))
                 {

@@ -5930,6 +5930,9 @@ let trayBattery = null;
 let trayShotRequest = null;
 let iconRequest = null;
 const hwndIconCache = new Map();
+// Icon pictures, kept by name. With the Windows bar hidden there are no pixels
+// left to lift an icon from, so a name seen once still knows what it looked like.
+const trayIconByName = new Map();
 
 // Hover list for an app with several windows, the way the Windows taskbar
 // stacks its thumbnails under one button.
@@ -6555,17 +6558,20 @@ function requestScreenShot(rect, timeout = 2500) {
 // them off the screen once per change instead of asking for something Windows
 // does not hand out.
 async function captureTrayIcons() {
-  if (!trayItems.length) return;
+  // Only icons that are on screen have pixels to lift; the rest keep whatever
+  // picture they were last seen with.
+  const pictured = trayItems.filter((row) => row.w > 0 && row.h > 0 && !row.icon);
+  if (!pictured.length) return;
   const display = screen.getPrimaryDisplay();
   const scale = display.scaleFactor || 1;
   // The tray island sits over the notification area, and the capture is the
   // composited desktop: any window of ours covering the icons has to step aside
   // for the moment the screen is read, or we photograph our own bar.
   const box = {
-    left: Math.min(...trayItems.map((row) => row.x)) - 2,
-    top: Math.min(...trayItems.map((row) => row.y)) - 2,
-    right: Math.max(...trayItems.map((row) => row.x + row.w)) + 2,
-    bottom: Math.max(...trayItems.map((row) => row.y + row.h)) + 2,
+    left: Math.min(...pictured.map((row) => row.x)) - 2,
+    top: Math.min(...pictured.map((row) => row.y)) - 2,
+    right: Math.max(...pictured.map((row) => row.x + row.w)) + 2,
+    bottom: Math.max(...pictured.map((row) => row.y + row.h)) + 2,
   };
   const stepped = [];
   for (const { win } of taskbarZones()) {
@@ -6594,14 +6600,16 @@ async function captureTrayIcons() {
     // ratio only guards against a scaled bitmap.
     const ratioX = size.width / Math.max(1, strip.width);
     const ratioY = size.height / Math.max(1, strip.height);
-    for (const item of trayItems) {
-      if (item.icon) continue;
+    for (const item of pictured) {
       const side = Math.max(8, Math.round(Math.min(item.w, item.h, 32) * ratioX));
       const x = Math.round((item.x - box.left + item.w / 2) * ratioX - side / 2);
       const y = Math.round((item.y - box.top + item.h / 2) * ratioY - side / 2);
       if (x < 0 || y < 0 || x + side > size.width || y + side > size.height) continue;
       const crop = image.crop({ x, y, width: side, height: side });
-      if (crop && !crop.isEmpty()) item.icon = crop.resize({ width: 36, height: 36 }).toDataURL();
+      if (crop && !crop.isEmpty()) {
+        item.icon = crop.resize({ width: 36, height: 36 }).toDataURL();
+        trayIconByName.set(item.name, item.icon);
+      }
     }
   } catch {
     /* no capture rights: the tray falls back to tooltips only */
@@ -6626,7 +6634,9 @@ async function refreshTray(force) {
       const [index, x, y, w, h, cls, ...rest] = String(line).split('\t');
       const name = rest.join(' ').trim();
       if (cls === 'SystemTray.OmniButton') {
-        clockLeft = Number(x);
+        // The chevron's own place marks the clock; with the bar hidden it has no
+        // place, and guessing one would make every icon look like the battery.
+        if (Number(w) > 0 && Number(h) > 0) clockLeft = Number(x);
         continue;
       }
       if (cls === 'SystemTray.ShowDesktopButton') continue;
@@ -6658,7 +6668,10 @@ async function refreshTray(force) {
     }
     trayItems = rows
       .filter((row) => !power.includes(row))
-      .map((row) => ({ ...row, icon: previous.get(`${row.name}|${row.x}|${row.y}`) || null }));
+      .map((row) => ({
+        ...row,
+        icon: previous.get(`${row.name}|${row.x}|${row.y}`) || trayIconByName.get(row.name) || null,
+      }));
     // The charge comes from the battery icon's tooltip, so it belongs in the
     // signature: the chip has to change when the percentage does.
     const signature = `${trayBattery}|${trayItems.map((row) => `${row.i}:${row.x}:${row.name}`).join('|')}`;
@@ -7088,10 +7101,22 @@ function nativeTaskbarWanted() {
   return isWin && !gameMode && taskbarOn() && !!prefs.settings.hideWinTaskbar;
 }
 
-function sendNativeTaskbarState(force = false) {
+async function sendNativeTaskbarState(force = false) {
   const want = nativeTaskbarWanted();
   if (!force && want === nativeTaskbarHidden) return;
   if (!hookProc || !hookProc.stdin || hookProc.stdin.destroyed) return;
+  // The notification area's icons are pixels on Windows' own bar, so once it is
+  // hidden there is nothing to photograph. Take the pictures first, while they
+  // are still on screen, and the tray Notch draws keeps them.
+  if (want && !nativeTaskbarHidden && !trayBusy && !trayItems.some((row) => row.icon)) {
+    try {
+      traySignature = '';
+      await refreshTray(true);
+    } catch {
+      /* no answer: the tray falls back to names and dots */
+    }
+    if (!hookProc || !hookProc.stdin || hookProc.stdin.destroyed) return;
+  }
   try {
     hookProc.stdin.write(want ? 'taskbarhide\n' : 'taskbarshow\n');
     nativeTaskbarHidden = want;
@@ -7272,7 +7297,7 @@ ipcMain.on('taskbar:group', (_event, key) => {
   const app = findTaskbarApp(key);
   if (!app) return;
   hideFlyout();
-  if (app.windows.length) focusTaskbarWindow(app.windows[0].hwnd);
+  if (app.windows.length) pressTaskbarWindows(app.windows.map((row) => row.hwnd));
   else if (app.pin) launchTarget(app.pin.target);
 });
 
@@ -7363,7 +7388,7 @@ ipcMain.on('taskbar:overflow', () => {
 
 ipcMain.on('flyout:pick', (_event, hwnd) => {
   hideFlyout();
-  focusTaskbarWindow(Number(hwnd));
+  activateTaskbarWindow(Number(hwnd));
 });
 
 ipcMain.on('flyout:ready', () => {
@@ -7395,6 +7420,41 @@ function focusTaskbarWindow(hwnd) {
 
 ipcMain.on('taskbar:focus', (_event, handle) => focusTaskbarWindow(Number(handle)));
 
+// One press on a taskbar button, the way Windows reads it: the app in front is
+// put away, an app behind comes forward, and a group moves through its windows
+// before any of them is minimised. The helper owns the foreground, so it is the
+// one that decides.
+function pressTaskbarWindows(handles) {
+  const list = (Array.isArray(handles) ? handles : [])
+    .map((value) => Number(value) || 0)
+    .filter((value) => value > 0);
+  if (!list.length) return;
+  if (hookProc && hookProc.stdin && !hookProc.stdin.destroyed) {
+    try {
+      hookProc.stdin.write(`group ${list.join(' ')}\n`);
+      return;
+    } catch {
+      /* fall through to the helper process below */
+    }
+  }
+  focusTaskbarWindow(list[0]);
+}
+
+// Picking a window out of the list is a choice, not a second press: it comes
+// forward, it is never put away.
+function activateTaskbarWindow(hwnd) {
+  if (!Number.isFinite(hwnd) || hwnd <= 0) return;
+  if (hookProc && hookProc.stdin && !hookProc.stdin.destroyed) {
+    try {
+      hookProc.stdin.write(`activate ${Math.trunc(hwnd)}\n`);
+      return;
+    } catch {
+      /* fall through to the helper process below */
+    }
+  }
+  focusTaskbarWindow(hwnd);
+}
+
 // Win+<number> opens whatever the bar shows under that number: pins first, then
 // running windows, exactly like the buttons left to right.
 function activateTaskbarSlot(slot) {
@@ -7402,7 +7462,7 @@ function activateTaskbarSlot(slot) {
   const app = groupTaskbarApps(taskbarOpenItems(), taskbarPinned())[slot - 1];
   if (!app) return;
   hideLauncher();
-  if (app.windows.length) focusTaskbarWindow(app.windows[0].hwnd);
+  if (app.windows.length) pressTaskbarWindows(app.windows.map((row) => row.hwnd));
   else if (app.pin) launchTarget(app.pin.target);
 }
 

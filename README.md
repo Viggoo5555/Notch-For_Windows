@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.37.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.37/Notch-Setup-1.2.37.exe)**
+**[Notch-Setup-1.2.38.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.38/Notch-Setup-1.2.38.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -363,6 +363,20 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.38** — the bar behaves like the one it replaces. A press on an app's
+button now does what Windows does with it: the app in front is put away, an app
+behind comes forward, and a button holding several windows moves through them
+before any of them is minimised, instead of always reaching for the first one.
+The same press is what `Win+1`…`Win+0` use, and picking a window out of the list
+over a grouped button brings it forward without putting anything away. The
+notification area works from the bar too: a click asks the icon for its own
+Invoke or default action before falling back to a physical click, and while the
+Windows bar is hidden for Notch's it is put back just long enough for that click
+to land, then hidden again. Tray icons are still listed with the bar hidden —
+they have no pixels to photograph then, so each keeps the picture it was last
+seen with, and the pictures are taken before the bar is hidden in the first
+place.
 
 **v1.2.37** — Notch's bar can take the Windows taskbar's place. A new **Hide
 Windows taskbar** switch (Settings → Taskbar, on by default) takes the shell's bar
