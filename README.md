@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.41.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.41/Notch-Setup-1.2.41.exe)**
+**[Notch-Setup-1.2.42.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.42/Notch-Setup-1.2.42.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -49,14 +49,19 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   opacity and transform only, so it is taking keys while it is still moving. It closes
   the same way — Esc, the Esc button, opening an app, clicking away and a second press
   of the key all play the fall out upwards before the window goes. It indexes your
-  Start-menu apps, filters as you type, and opens with ↑ ↓ ↵ or a click. Pinned apps
-  sit in their own row.
+  Start-menu apps,   filters as you type, and opens with ↑ ↓ ↵ or a click. Pinned apps
+  sit in their own row, **Recent** under it is the six it opened last, and the same
+  box answers more than app names: type a sum — `12*8`, `(4+6)/2`, `50%` — and the
+  answer is the first row, ↵ copies it; type a web address and ↵ opens it; when
+  nothing on the machine matches, the last row is a web search. No prefix, no mode
+  to switch into: whatever is typed is read for what it is.
 - **Taskbar** — two glass islands: the apps in the middle of the screen, the tray,
   battery and clock against the right edge. One button per app with its real icon —
   read from the executable itself, so apps Chromium cannot name still show their
   own mark — and one unbroken line under the icon however many windows the app has.
   Hover a button with several windows and a list of them opens above the bar. Click
-  a button to bring that app forward (again to put it away). `Win+1` … `Win+0`
+  a button to bring that app forward (again to put it away), and a middle click
+  closes its windows, the way the taskbar it replaces does. `Win+1` … `Win+0`
   focus the first ten buttons. Optional auto-hide keeps the bar off-screen until you
   touch the bottom edge or open the launcher. Attached is one bar along the whole
   bottom edge: the apps stay centred on the screen while the notification tray,   the battery and the clock hold the right edge, the way a taskbar should, and a click on
@@ -119,6 +124,10 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   megabytes of weights in the listening window, and the only way to give those back
   is to let go of the model entirely — which then has to be loaded again (about ten
   seconds) before the wake word works.
+- **Keep the screen awake** — one switch in the notch menu (the ⚙ button on the
+  panel), for a long download, a video or a game on the second screen. It holds the
+  display on until it is switched off, survives a restart, and *Jarvis, keep the
+  screen awake* does the same; saying it again lets the screen sleep.
 - **Widget** — drag the panel away from the notch and it becomes a floating card you
   can drop anywhere and keep open.
 - **Performance overlay** — pull the System tile out of the panel and the card you
@@ -363,6 +372,17 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.42** — four small things, each in a place that was already there. The
+**launcher answers**: a sum typed into it comes back worked out as the first row
+(↵ copies it), a web address opens in the browser, and a search with no app match
+offers the web — no prefix or extra mode, because the box was already the place
+where typing happens. It also keeps a **Recent** row of the six apps it opened
+last, above the full list and gone the moment you start typing. **Keep the screen
+awake** is a switch in the notch menu, held across restarts, and Jarvis can flip
+it too. And a **middle click** on a taskbar button closes that app's windows, the
+way the real taskbar does — one `WM_CLOSE` per window, so anything with unsaved
+work still asks.
 
 **v1.2.41** — the Windows key is Notch's, not Windows'. The hook used to let the
 press through and take only the release, which left the shell already told about

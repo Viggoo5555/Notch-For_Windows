@@ -14,6 +14,8 @@ const els = {
   body: $('body'),
   pinnedSection: $('pinnedSection'),
   pinned: $('pinned'),
+  recentSection: $('recentSection'),
+  recent: $('recent'),
   appsSection: $('appsSection'),
   appsTitle: $('appsTitle'),
   results: $('results'),
@@ -25,6 +27,7 @@ const els = {
 const state = {
   index: [],
   pinned: [],
+  recent: [],
   rows: [],
   active: -1,
   icons: {},
@@ -203,6 +206,115 @@ function filter(query) {
   return hits.slice(0, 40).map((hit) => hit.entry);
 }
 
+// -------------------------------------------------------------- not just apps
+// A search box is the one place a user expects everything: it finds apps, but a
+// sum in it should come back worked out and a web address should open. Nothing
+// new to learn or to find — it all happens where typing already happens.
+
+function calcValue(text) {
+  const source = String(text || '')
+    .replace(/[×✕]/g, '*')
+    .replace(/[÷]/g, '/')
+    .replace(/,/g, '.')
+    .replace(/\s+/g, '');
+  if (!source || !/[0-9]/.test(source)) return null;
+  if (!/^[0-9.+\-*/()%]+$/.test(source)) return null;
+  let at = 0;
+  const number = () => {
+    const match = /^(?:\d+(?:\.\d*)?|\.\d+)/.exec(source.slice(at));
+    if (!match) throw new Error('number');
+    at += match[0].length;
+    return Number(match[0]);
+  };
+  const factor = () => {
+    let sign = 1;
+    while (source[at] === '-' || source[at] === '+') {
+      if (source[at] === '-') sign = -sign;
+      at += 1;
+    }
+    let value;
+    if (source[at] === '(') {
+      at += 1;
+      value = sum();
+      if (source[at] !== ')') throw new Error('bracket');
+      at += 1;
+    } else {
+      value = number();
+    }
+    let percent = false;
+    while (source[at] === '%') {
+      at += 1;
+      percent = true;
+    }
+    return sign * (percent ? value / 100 : value);
+  };
+  const product = () => {
+    let value = factor();
+    while (source[at] === '*' || source[at] === '/') {
+      const op = source[at];
+      at += 1;
+      const right = factor();
+      value = op === '*' ? value * right : value / right;
+    }
+    return value;
+  };
+  const sum = () => {
+    let value = product();
+    while (source[at] === '+' || source[at] === '-') {
+      const op = source[at];
+      at += 1;
+      const right = product();
+      value = op === '+' ? value + right : value - right;
+    }
+    return value;
+  };
+  try {
+    const value = sum();
+    if (at !== source.length || !Number.isFinite(value)) return null;
+    // Long decimals are noise in a launcher, not information.
+    return String(Math.round(value * 1e10) / 1e10);
+  } catch {
+    return null;
+  }
+}
+
+function quickRows(query) {
+  const text = query.trim();
+  if (!text) return [];
+  const rows = [];
+  const sum = calcValue(text);
+  if (sum !== null) {
+    rows.push({
+      kind: 'calc',
+      glyph: '=',
+      name: sum,
+      sub: 'Enter copies it',
+      action: () => {
+        api.copy(sum);
+        api.hide();
+      },
+    });
+  }
+  // A host name with a dot in it is a place, not an app name.
+  if (
+    !/\s/.test(text) &&
+    /^(?:[a-z][a-z0-9-]*:\/\/)?[^\s/]+\.[a-z]{2,}(?::\d+)?(?:[/?#]\S*)?$/i.test(text)
+  ) {
+    const url = /^[a-z][a-z0-9-]*:\/\//i.test(text) ? text : `https://${text}`;
+    rows.push({
+      kind: 'url',
+      glyph: '\u2197',
+      name: `Open ${text.replace(/^https?:\/\//i, '')}`,
+      sub: 'in your browser',
+      action: () => {
+        api.open(url);
+        api.hide();
+      },
+    });
+  }
+  return rows;
+}
+
 // ----------------------------------------------------------------- rendering
 
 function iconNode(target, name, size) {
@@ -282,15 +394,30 @@ function renderPinned() {
   }
 }
 
+function glyphNode(symbol) {
+  const node = document.createElement('span');
+  node.className = 'letter glyph';
+  node.textContent = symbol;
+  node.style.width = '22px';
+  node.style.height = '22px';
+  return node;
+}
+
+function runRow(entry) {
+  if (typeof entry.action === 'function') entry.action();
+  else api.launch(entry.target);
+}
+
 function renderRows(entries) {
   els.results.replaceChildren();
   state.rows = entries;
   state.active = entries.length ? 0 : -1;
   entries.forEach((entry, index) => {
     const row = document.createElement('div');
-    row.className = `row${index === state.active ? ' active' : ''}`;
+    row.className = `row${index === state.active ? ' active' : ''}${entry.kind ? ` row-${entry.kind}` : ''}`;
     row.dataset.index = String(index);
-    row.appendChild(iconNode(entry.target, entry.name, 22));
+    // An answer row is not an app, so it carries a mark instead of an icon.
+    row.appendChild(entry.glyph ? glyphNode(entry.glyph) : iconNode(entry.target, entry.name, 22));
 
     const meta = document.createElement('div');
     meta.className = 'meta';
@@ -299,27 +426,67 @@ function renderRows(entries) {
     name.textContent = entry.name;
     const sub = document.createElement('span');
     sub.className = 'sub';
-    sub.textContent = entry.sub || (entry.target.startsWith('uwp:') ? 'Windows app' : entry.target);
+    sub.textContent =
+      entry.sub ||
+      (String(entry.target || '').startsWith('uwp:') ? 'Windows app' : entry.target || '');
     meta.append(name, sub);
     row.appendChild(meta);
 
-    buildPinButton(row, entry);
-    row.addEventListener('click', () => api.launch(entry.target));
+    if (entry.target) buildPinButton(row, entry);
+    row.addEventListener('click', () => runRow(entry));
     row.addEventListener('mousemove', () => setActive(index, false));
     els.results.appendChild(row);
   });
   els.empty.hidden = entries.length > 0;
 }
 
+function renderRecent(searching) {
+  els.recent.replaceChildren();
+  els.recentSection.hidden = searching || state.recent.length === 0;
+  if (searching) return;
+  for (const entry of state.recent) {
+    const tile = document.createElement('div');
+    tile.className = 'pin-tile';
+    tile.title = entry.name;
+    tile.appendChild(iconNode(entry.target, entry.name, 26));
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = entry.name;
+    tile.appendChild(label);
+    tile.addEventListener('click', () => api.launch(entry.target));
+    els.recent.appendChild(tile);
+  }
+}
+
 function render() {
   const query = els.query.value || '';
+  const searched = query.trim();
+  const searching = searched.length > 0;
   const results = filter(query);
-  const searching = query.trim().length > 0;
+  const quick = quickRows(query);
+  // Only when nothing here answers it: a web search is the last resort, not a
+  // banner across every search.
+  const web =
+    searching && searched.length >= 2 && !results.length
+      ? [
+          {
+            kind: 'web',
+            glyph: '\u2315',
+            name: `Search the web for “${searched}”`,
+            sub: 'Google',
+            action: () => {
+              api.open(`https://www.google.com/search?q=${encodeURIComponent(searched)}`);
+              api.hide();
+            },
+          },
+        ]
+      : [];
 
   renderPinned();
+  renderRecent(searching);
   els.pinnedSection.hidden = searching || state.pinned.length === 0;
   els.appsTitle.textContent = searching ? 'Best matches' : 'All apps';
-  renderRows(results);
+  renderRows([...quick, ...results, ...web]);
   els.count.textContent = `${results.length}${searching ? '' : ` of ${state.index.length}`} apps`;
   requestIcons();
 }
@@ -340,6 +507,9 @@ function requestIcons() {
   const targets = [];
   for (const pin of state.pinned.slice(0, 12)) {
     if (!state.icons[pin.target]) targets.push(pin.target);
+  }
+  for (const entry of state.recent.slice(0, 8)) {
+    if (entry.target && !state.icons[entry.target]) targets.push(entry.target);
   }
   for (const entry of state.rows.slice(0, 24)) {
     if (!state.icons[entry.target]) targets.push(entry.target);
@@ -394,7 +564,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
     const entry = state.rows[state.active];
-    if (entry) api.launch(entry.target);
+    if (entry) runRow(entry);
   }
 });
 
@@ -405,6 +575,7 @@ async function boot() {
   if (!data) return;
   state.index = Array.isArray(data.index) ? data.index : [];
   state.pinned = Array.isArray(data.pinned) ? data.pinned : [];
+  state.recent = Array.isArray(data.recent) ? data.recent : [];
   if (data.settings && data.settings.animations) {
     animations = data.settings.animations === 'always' ? 'always' : 'system';
     applyMotion();
@@ -415,6 +586,14 @@ async function boot() {
 api.onShow(() => {
   els.query.value = '';
   els.body.scrollTop = 0;
+  // What was opened last is likely what is wanted next, so it is asked again on
+  // every show rather than only when the window loaded.
+  if (api.recent) {
+    api.recent().then((list) => {
+      state.recent = Array.isArray(list) ? list : [];
+      render();
+    });
+  }
   render();
   els.query.focus();
   // The window can take focus a beat after the show message.

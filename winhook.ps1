@@ -41,6 +41,8 @@ public class JarvisWinHook
     private static extern IntPtr DispatchMessage(ref MSG lpMsg);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")]
@@ -967,6 +969,16 @@ public class JarvisWinHook
                     {
                         ShowWindow((IntPtr)value, 9); // SW_RESTORE
                         FocusWindow((IntPtr)value);
+                    }
+                }
+                else if (text.StartsWith("close "))
+                {
+                    long value;
+                    if (long.TryParse(text.Substring(6), out value))
+                    {
+                        // Exactly what the window's own close button does, so an app
+                        // with unsaved work still gets to ask about it.
+                        PostMessage((IntPtr)value, 0x0010, IntPtr.Zero, IntPtr.Zero); // WM_CLOSE
                     }
                 }
             }

@@ -347,6 +347,12 @@ function buildApps() {
     button.addEventListener('click', () => {
       if (api) api.group(app.key);
     });
+    // Middle click closes, as it does on the taskbar this replaces.
+    button.addEventListener('auxclick', (event) => {
+      if (!api || event.button !== 1 || !open) return;
+      event.preventDefault();
+      api.close(app.key);
+    });
     button.addEventListener('mouseenter', () => {
       if (!api || app.windows.length < 2) return;
       clearTimeout(hoverTimer);

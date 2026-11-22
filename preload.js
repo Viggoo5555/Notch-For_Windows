@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('notchAPI', {
   focus: () => ipcRenderer.send('notch:focus'),
   quit: () => ipcRenderer.send('notch:quit'),
   setLogin: (value) => ipcRenderer.invoke('notch:login', !!value),
+  keepAwake: (value) => ipcRenderer.invoke('notch:awake', !!value),
   rescan: () => ipcRenderer.invoke('notch:rescan'),
   // The store pages through Steam's search: one answer per screenful.
   storePage: (options) => ipcRenderer.invoke('notch:store-page', options || {}),

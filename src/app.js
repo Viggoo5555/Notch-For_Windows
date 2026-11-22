@@ -91,6 +91,7 @@ const state = {
     taskbarAutoHide: false,
     hideWinTaskbar: true,
     windowsKey: true,
+    keepAwake: false,
   },
   filter: '',
   clips: [],
@@ -2462,6 +2463,13 @@ function bindEvents() {
     toast(state.login ? 'Notch will start with Windows' : 'Removed from startup');
   });
 
+  $('#awakeToggle').addEventListener('change', async (event) => {
+    const on = await api.keepAwake(event.target.checked);
+    // The main process is the one that holds the blocker, so it says what it got.
+    event.target.checked = !!on;
+    toast(on ? 'The screen stays awake' : 'The screen can sleep again');
+  });
+
   $('#rescan').addEventListener('click', rescanLibraries);
   $('#addGame').addEventListener('click', addGame);
   $('#steamdb').addEventListener('click', openStore);
@@ -2639,6 +2647,7 @@ async function boot() {
     if (Array.isArray(data.clips)) state.clips = data.clips;
     state.login = !!data.login;
     $('#loginToggle').checked = state.login;
+    if ($('#awakeToggle')) $('#awakeToggle').checked = !!state.settings.keepAwake;
   } catch {
     toast('Could not read system data');
   }

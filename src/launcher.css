@@ -297,6 +297,22 @@ body {
   gap: 1px;
 }
 
+/* An answer, not an app: the sum, the address, the search — same row, marked
+   with a symbol instead of an icon, and a slightly brighter line so it reads as
+   the reply to what was typed. */
+.row .letter.glyph {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(238, 241, 248, 0.95);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.07));
+}
+
+.row-calc .name {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
 .row .name {
   font-size: 13px;
   color: rgba(238, 241, 248, 0.94);

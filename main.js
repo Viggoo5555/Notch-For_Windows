@@ -113,6 +113,9 @@ const DEFAULT_SETTINGS = {
   // out of the way. Only ever applied with Notch's bar showing.
   hideWinTaskbar: true,
   windowsKey: true,
+  // Long downloads, a video, a game on the second screen: the display normally
+  // goes to sleep on its own, and this is the switch that says not to.
+  keepAwake: false,
 };
 
 let prefs = { login: false, customGames: [], settings: { ...DEFAULT_SETTINGS } };
@@ -128,6 +131,7 @@ function loadPrefs() {
   prefs.settings = { ...DEFAULT_SETTINGS, ...stored };
   prefs.settings.assistant = { ...ASSISTANT_DEFAULTS, ...(stored.assistant || {}) };
   if (!Array.isArray(prefs.pinned)) prefs.pinned = [];
+  if (!Array.isArray(prefs.recent)) prefs.recent = [];
   // Older builds stored a live-glass on/off switch; carry the choice over.
   if (stored.backdrop == null && stored.liveBackdrop === false) prefs.settings.backdrop = 'wallpaper';
   delete prefs.settings.liveBackdrop;
@@ -2089,6 +2093,7 @@ async function runNotchAction(raw) {
     toggle(/\btaskbar\b|joblinje/, 'taskbar', yes('Taskbar on.', 'Joblinje til.'), yes('Taskbar off.', 'Joblinje fra.')) ||
     toggle(/\bglow\b|glød/, 'glow', yes('Glow on.', 'Glød til.'), yes('Glow off.', 'Glød fra.')) ||
     toggle(/\bgrain\b|\bnoise\b|korn/, 'grain', yes('Grain on.', 'Korn til.'), yes('Grain off.', 'Korn fra.')) ||
+    toggle(/\bkeep (the )?(screen|display|monitor|pc|computer|laptop)\b.*\bawake\b|\bkeep awake\b|\bstay awake\b/, 'keepAwake', yes('The screen stays awake.', 'Skærmen bliver vågen.'), yes('The screen can sleep again.', 'Skærmen må sove igen.')) ||
     toggle(/\bwindows key\b|\bwin key\b|\bstart menu key\b/, 'windowsKey', yes('The Windows key opens Notch.', 'Windows-tasten åbner Notch.'), yes('The Windows key is yours again.', 'Windows-tasten er din igen.'));
   if (flipped) return flipped;
 
@@ -4556,11 +4561,39 @@ function winHookStatus() {
 
 ipcMain.handle('notch:winhook', () => winHookStatus());
 
+// The launcher's Recent row: the apps it opened last, newest first, so the thing
+// you need twice a day is one key and one Enter away instead of a search.
+const RECENT_MAX = 6;
+
+function recentEntries() {
+  return (Array.isArray(prefs.recent) ? prefs.recent : []).slice(0, RECENT_MAX);
+}
+
+function rememberRecent(target) {
+  const key = String(target || '');
+  if (!key) return;
+  const row = Array.isArray(appIndex) ? appIndex.find((entry) => entry.target === key) : null;
+  const entry = {
+    id: (row && row.id) || key,
+    name: (row && row.name) || path.basename(key).replace(/\.lnk$/i, '') || key,
+    target: key,
+  };
+  const list = (Array.isArray(prefs.recent) ? prefs.recent : []).filter(
+    (item) => item.target !== key,
+  );
+  list.unshift(entry);
+  prefs.recent = list.slice(0, RECENT_MAX);
+  savePrefs();
+}
+
 ipcMain.handle('launcher:boot', async () => ({
   index: await buildAppIndex(),
   pinned: pinnedEntries(),
+  recent: recentEntries(),
   settings: { windowsKey: !!prefs.settings.windowsKey, animations: prefs.settings.animations },
 }));
+
+ipcMain.handle('launcher:recent', () => recentEntries());
 
 ipcMain.handle('launcher:icons', async (_event, targets) => {
   const list = Array.isArray(targets) ? targets.slice(0, 24) : [];
@@ -4573,8 +4606,28 @@ ipcMain.handle('launcher:icons', async (_event, targets) => {
 
 ipcMain.handle('launcher:launch', (_event, target) => {
   const result = launchTarget(target);
-  if (result.ok) hideLauncher();
+  if (result.ok) {
+    rememberRecent(target);
+    hideLauncher();
+  }
   return result;
+});
+
+// The launcher also answers what it is asked instead of only finding apps: a sum
+// is copied, and a site or a search is opened in the real browser.
+ipcMain.handle('launcher:copy', (_event, text) => {
+  const value = String(text || '').slice(0, 4000);
+  if (!value) return false;
+  clipboard.writeText(value);
+  return true;
+});
+
+ipcMain.handle('launcher:open', (_event, url) => {
+  const value = String(url || '');
+  // Only a web address can come out of a search box.
+  if (!/^https?:\/\//i.test(value)) return false;
+  shell.openExternal(value).catch(() => {});
+  return true;
 });
 
 ipcMain.handle('launcher:pin', async (_event, entry) => {
@@ -5540,6 +5593,7 @@ function applySettingsPatch(patch) {
   syncDesktopSampling();
   sendWidgetSurface();
   syncWinHook();
+  syncKeepAwake();
   if (win && !win.isDestroyed()) win.webContents.send('notch:settings', prefs.settings);
   // The renderer applies the patch when the message arrives; ask for the frame
   // once it has, so a new accent is drawn instead of the one the cached frame
@@ -5549,6 +5603,34 @@ function applySettingsPatch(patch) {
 }
 
 ipcMain.handle('notch:set-settings', (_event, patch) => applySettingsPatch(patch));
+
+// Keep the display awake while the setting is on, and let it go the moment it is
+// off: one blocker, held for exactly as long as the switch says.
+let awakeBlocker = null;
+
+function syncKeepAwake() {
+  const want = !!prefs.settings.keepAwake;
+  if (want && awakeBlocker === null) {
+    try {
+      awakeBlocker = powerSaveBlocker.start('prevent-display-sleep');
+    } catch {
+      awakeBlocker = null;
+    }
+  } else if (!want && awakeBlocker !== null) {
+    try {
+      powerSaveBlocker.stop(awakeBlocker);
+    } catch {
+      /* already released */
+    }
+    awakeBlocker = null;
+  }
+  return want && awakeBlocker !== null;
+}
+
+ipcMain.handle('notch:awake', (_event, value) => {
+  applySettingsPatch({ keepAwake: !!value });
+  return syncKeepAwake();
+});
 
 // Pick an image to sit behind the notch permanently. The file is copied into
 // userData so moving or deleting the original does not break the backdrop.
@@ -7530,6 +7612,22 @@ ipcMain.on('taskbar:group', (_event, key) => {
   else if (app.pin) launchTarget(app.pin.target);
 });
 
+// A middle click on a taskbar button is the button's own close, the way the real
+// taskbar has always done it.
+ipcMain.on('taskbar:close', (_event, key) => {
+  const app = findTaskbarApp(key);
+  if (!app || !app.windows.length) return;
+  hideFlyout();
+  if (!hookProc || !hookProc.stdin || hookProc.stdin.destroyed) return;
+  for (const row of app.windows) {
+    try {
+      hookProc.stdin.write(`close ${row.hwnd}\n`);
+    } catch {
+      /* the helper is gone */
+    }
+  }
+});
+
 ipcMain.on('taskbar:tray', (_event, index) => {
   if (!hookProc || !hookProc.stdin || hookProc.stdin.destroyed) return;
   try {
@@ -8170,6 +8268,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     loadPrefs();
+    syncKeepAwake();
     // Built while the desktop is not being captured, then simply shown on a drag.
     setTimeout(warmWidgetWindows, 6000);
     // The assistant listens through the microphone; Chromium asks us first.
