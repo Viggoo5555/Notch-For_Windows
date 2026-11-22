@@ -50,14 +50,22 @@ jobs:
           # this step's: the runner would otherwise fail the job on it.
           exit 0
 
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.exists != 'true'
+        with:
+          node-version: 20
+          cache: npm
+
       # Cheap and offline: every preload bridge the pages call is answered, every
       # channel a preload sends is heard, every element a page looks for is in it,
       # and the launcher's ranking and calculator still give their answers. A
       # release should not be the first place a dead button is found.
       #
-      # Its findings are written onto the run as annotations and the installer is
-      # still built: a check that disagrees with one runner's Node should be seen
-      # and fixed, not cost a version its download.
+      # It runs after the pinned Node is in place and finds its own test files, so
+      # it does not depend on what the image happens to carry. Its findings are
+      # written onto the run as annotations and the installer is still built: a
+      # check that disagrees with one runner should be seen and fixed, not cost a
+      # version its download.
       - name: Check the wiring and the logic
         if: steps.check.outputs.exists != 'true'
         continue-on-error: true
@@ -68,7 +76,7 @@ jobs:
           node scripts/check.js *> wiring.log
           if ($LASTEXITCODE -ne 0) { $bad = 1 }
 
-          node --test test *> tests.log
+          node --test *> tests.log
           if ($LASTEXITCODE -ne 0) { $bad = 1 }
 
           foreach ($file in 'wiring.log', 'tests.log') {
@@ -79,12 +87,6 @@ jobs:
           }
 
           exit $bad
-
-      - uses: actions/setup-node@v4
-        if: steps.check.outputs.exists != 'true'
-        with:
-          node-version: 20
-          cache: npm
 
       - name: Install
         if: steps.check.outputs.exists != 'true'
