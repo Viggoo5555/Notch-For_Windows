@@ -419,10 +419,10 @@ async function launchGame(game) {
   }
 }
 
-async function rescanLibraries() {
-  const button = $('#rescan');
-  if (button.classList.contains('spin')) return;
-  button.classList.add('spin');
+async function rescanLibraries(trigger) {
+  const button = trigger || $('#rescan');
+  if (button && button.classList.contains('spin')) return;
+  if (button) button.classList.add('spin');
   try {
     const games = await api.rescan();
     if (Array.isArray(games)) {
@@ -432,7 +432,7 @@ async function rescanLibraries() {
       toast(games.length ? `${games.length} games found` : 'No games found');
     }
   } finally {
-    button.classList.remove('spin');
+    if (button) button.classList.remove('spin');
   }
 }
 
@@ -1562,7 +1562,29 @@ function emptyBlock(title, hint) {
   return wrap;
 }
 
+// The Library's own controls: in the card they were four small icons that made
+// that head nothing like the other three, and here they are named.
+function libraryActions() {
+  const row = document.createElement('div');
+  row.className = 'detail-actions';
+  const action = (label, title, run) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'detail-action';
+    button.textContent = label;
+    button.title = title;
+    button.addEventListener('click', () => run(button));
+    return button;
+  };
+  row.appendChild(action('Add a game', 'Pick a shortcut or an executable', () => addGame()));
+  row.appendChild(action('Rescan', 'Scan Steam and Epic again', (button) => rescanLibraries(button)));
+  row.appendChild(action('Store', 'Steam, best reviewed first', () => openStore()));
+  return row;
+}
+
 function renderDetailLibrary(body) {
+  // A browser demo has no libraries to scan or add to.
+  if (!isDemo) body.appendChild(libraryActions());
   if (!state.games.length) {
     body.appendChild(
       emptyBlock(
@@ -2444,6 +2466,11 @@ function bindEvents() {
     });
   });
   for (const tile of document.querySelectorAll('.tile')) {
+    // The same promise on every card, said once on hover: press it to open it,
+    // drag it to keep it on the desktop. Before this only some of them could be
+    // opened at all without hunting for a control.
+    const title = tile.querySelector('.tile-title');
+    tile.title = `${title ? title.textContent : 'Card'} — click to open, drag out to keep on the desktop`;
     tile.addEventListener('click', (event) => {
       if (tile.dataset.dragged) {
         delete tile.dataset.dragged;
@@ -2474,9 +2501,8 @@ function bindEvents() {
     toast(on ? 'The screen stays awake' : 'The screen can sleep again');
   });
 
-  $('#rescan').addEventListener('click', rescanLibraries);
-  $('#addGame').addEventListener('click', addGame);
-  $('#steamdb').addEventListener('click', openStore);
+  // Library's own actions live in its full view now, so every card head is the
+  // same two things: what the card is, and one chevron that opens it.
 
   const search = $('#gameSearch');
   search.addEventListener('input', () => {
@@ -2674,8 +2700,6 @@ async function boot() {
   }
 
   if (isDemo) {
-    $('#addGame').hidden = true;
-    $('#rescan').hidden = true;
     $('#quitBtn').hidden = true;
     $('#loginToggle').closest('.menu-row').hidden = true;
   }

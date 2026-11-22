@@ -1947,6 +1947,34 @@ html.demo .glass-backdrop {
   min-height: 0;
 }
 
+/* What a card can do, named, at the top of its full view. */
+.detail-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-bottom: 10px;
+}
+
+.detail-action {
+  height: 26px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.detail-action:hover {
+  background: var(--surface-hover);
+}
+
+.detail-action:active {
+  transform: scale(0.97);
+}
+
 .open-btn svg {
   fill: none;
   stroke: currentColor;

@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.43.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.43/Notch-Setup-1.2.43.exe)**
+**[Notch-Setup-1.2.44.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.44/Notch-Setup-1.2.44.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -73,7 +73,7 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   the cover art, and launches a game with a click; add a shortcut by hand if a
   launcher keeps it hidden, and a hovered card has a small cross that takes a game
   out of the library for good (a rescan will not bring it back). The bag icon beside
-  those buttons opens **Store** inside
+  three named buttons at the top of that view opens **Store** inside
   the panel: the top of Steam's whole catalogue, best reviewed first, with what players
   said about each game on the row ("Overwhelmingly Positive · 99%"), today's discounts,
   its own search, discount chips (−25 / −50 / −75 %), price ceilings and sorting by
@@ -372,6 +372,15 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.44** — the cards in the panel all work the same way now. Before, the Library
+had four little icons in its head, the other three had a chevron that sat *before*
+their count, and which parts of a card did something was anyone's guess. Every head
+is one shape — name, count, then a single chevron against the right edge — and a
+press anywhere on a card that is not a control opens it. Library's `+`, rescan and
+store icons became three named buttons at the top of its full view (*Add a game*,
+*Rescan*, *Store*), where there is room to say what they do. Hovering a card says
+the third way to use it, once: click to open, drag out to keep it on the desktop.
 
 **v1.2.43** — the helper that takes the Windows key was only allowed to exist
 while *Windows key opens it* was on, and it carried the tray, the window list, the

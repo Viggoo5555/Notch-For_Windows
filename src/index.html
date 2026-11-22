@@ -123,23 +123,8 @@
               <span class="tile-title">Library</span>
               <span class="tile-count" id="gameCount"></span>
               <span class="spacer"></span>
-              <button class="mini-btn open-btn" data-detail="library" type="button" aria-label="Open Library details" title="Open details">
+              <button class="mini-btn open-btn" data-detail="library" type="button" aria-label="Open Library" title="Open Library">
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3.4 10.8 8l-4.6 4.6" /></svg>
-              </button>
-              <button class="mini-btn" id="addGame" type="button" aria-label="Add a game" title="Add a game">
-                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6" /></svg>
-              </button>
-              <button class="mini-btn" id="rescan" type="button" aria-label="Rescan libraries" title="Rescan Steam and Epic">
-                <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M13 8a5 5 0 1 1-1.6-3.7" />
-                  <path d="M13.2 2.4v2.6h-2.6" />
-                </svg>
-              </button>
-              <button class="mini-btn" id="steamdb" type="button" aria-label="Open SteamDB" title="SteamDB — what to play next, on sale">
-                <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M4.6 5.4h6.8l.8 7.3a.9.9 0 0 1-.9 1H4.7a.9.9 0 0 1-.9-1Z" />
-                  <path d="M6.1 5.4V4.3a1.9 1.9 0 0 1 3.8 0v1.1" />
-                </svg>
               </button>
             </div>
             <label class="search">
@@ -159,11 +144,11 @@
           <section class="tile tile-focus" style="--i: 1" data-detail="focus">
             <div class="tile-head">
               <span class="tile-title">Focus</span>
+              <span class="tile-meta" id="focusState">25 min</span>
               <span class="spacer"></span>
-              <button class="mini-btn open-btn" data-detail="focus" type="button" aria-label="Open Focus details" title="Open details">
+              <button class="mini-btn open-btn" data-detail="focus" type="button" aria-label="Open Focus" title="Open Focus">
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3.4 10.8 8l-4.6 4.6" /></svg>
               </button>
-              <span class="tile-meta" id="focusState">25 min</span>
             </div>
             <div class="focus-body">
               <div class="dial">
@@ -196,11 +181,11 @@
           <section class="tile tile-system" style="--i: 2" data-detail="system">
             <div class="tile-head">
               <span class="tile-title">System</span>
+              <span class="tile-meta" id="uptime">—</span>
               <span class="spacer"></span>
-              <button class="mini-btn open-btn" data-detail="system" type="button" aria-label="Open System details" title="Open details">
+              <button class="mini-btn open-btn" data-detail="system" type="button" aria-label="Open System" title="Open System">
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3.4 10.8 8l-4.6 4.6" /></svg>
               </button>
-              <span class="tile-meta" id="uptime">—</span>
             </div>
             <div class="meters">
               <div class="meter">
@@ -224,11 +209,11 @@
           <section class="tile tile-clip" style="--i: 3" data-detail="clip">
             <div class="tile-head">
               <span class="tile-title">Clipboard</span>
+              <span class="tile-meta" id="clipMeta"></span>
               <span class="spacer"></span>
-              <button class="mini-btn open-btn" data-detail="clip" type="button" aria-label="Open Clipboard details" title="Open details">
+              <button class="mini-btn open-btn" data-detail="clip" type="button" aria-label="Open Clipboard" title="Open Clipboard">
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3.4 10.8 8l-4.6 4.6" /></svg>
               </button>
-              <span class="tile-meta" id="clipMeta"></span>
             </div>
             <div class="clips" id="clips"></div>
           </section>
