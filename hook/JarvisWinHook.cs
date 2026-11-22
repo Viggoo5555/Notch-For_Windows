@@ -947,6 +947,10 @@ public class JarvisWinHook
                 else if (text.StartsWith("group "))
                 {
                     GroupClick(text.Substring(6).Trim());
+                    // The app logs this: without it, a press that reached no
+                    // window and one that was never read look the same.
+                    Console.WriteLine("pressed group");
+                    Console.Out.Flush();
                 }
                 else if (text.StartsWith("activate "))
                 {
@@ -956,6 +960,8 @@ public class JarvisWinHook
                         ShowWindow((IntPtr)value, 9); // SW_RESTORE
                         FocusWindow((IntPtr)value);
                     }
+                    Console.WriteLine("pressed activate");
+                    Console.Out.Flush();
                 }
                 else if (text == "winkey on")
                 {

@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('taskbarAPI', {
   focus: (pid) => ipcRenderer.send('taskbar:focus', pid),
   launch: (target) => ipcRenderer.send('taskbar:launch', target),
   group: (key) => ipcRenderer.send('taskbar:group', key),
+  // A press carries the button itself: its windows and the pin behind it, so
+  // main never has to agree with a stale snapshot to open something.
+  press: (payload) => ipcRenderer.send('taskbar:press', payload),
   close: (key) => ipcRenderer.send('taskbar:close', key),
   context: (key) => ipcRenderer.send('taskbar:context', { key }),
   reorder: (payload) => ipcRenderer.send('taskbar:reorder', payload),

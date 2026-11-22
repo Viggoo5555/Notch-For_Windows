@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.49.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.49/Notch-Setup-1.2.49.exe)**
+**[Notch-Setup-1.2.50.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.50/Notch-Setup-1.2.50.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -373,6 +373,19 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.50** — pressing an app on the bar now does what the button says. A press
+carries the button's own windows and the shortcut behind it, so opening no longer
+depends on the app's snapshot still agreeing with the bar; a pin Windows' shortcut
+will not open directly falls back to the executable it names, then to its shell
+target. A press that has to bring a window forward no longer writes to a helper
+that has not reported `ready` yet — a helper still compiling swallowed the command
+and the press looked like nothing at all — so the PowerShell fallback runs
+instead. Pin dragging moved off HTML's `draggable`, where a press that slid a
+pixel became a drag and a drag has no click, onto pointer events: a press stays a
+press until the pointer has really moved. Every press is written to the hook log
+(Settings → Start menu → Hook log → Copy) as `press …`, and the helper answers
+`pressed group`.
 
 **v1.2.49** — the launcher and the taskbar now wear the same surface as the
 panel. Liquid is the ybouane liquid-glass lens, unchanged; Frosted is the blurred

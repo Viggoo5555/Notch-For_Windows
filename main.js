@@ -4648,6 +4648,7 @@ function startWinHook() {
         windowListBuffer = [];
       } else if (text === 'win') onWinKey();
       else if (text.startsWith('slot ')) activateTaskbarSlot(Number(text.slice(5)));
+      else if (text.startsWith('pressed ')) hookLogNote(text);
       else if (text === 'windown' || text === 'winup' || text === 'chord') hookLogNote(text);
       else if (text === 'ready') {
         hookFailures = 0;
@@ -7183,6 +7184,75 @@ function findTaskbarApp(key) {
   return taskbarApps.find((app) => app.key === key) || null;
 }
 
+// A press from the bar, answered with the button's own contents: the windows it
+// showed and the target behind it. The bar used to send a key and have it looked
+// up in a snapshot kept here, so a press on a button the snapshot no longer knew
+// about did nothing at all.
+function taskbarPress(payload) {
+  const data = payload && typeof payload === 'object' ? payload : { key: payload };
+  const key = String(data.key || '');
+  const app = findTaskbarApp(key);
+  const handles = Array.isArray(data.windows)
+    ? data.windows.map((value) => Number(value) || 0).filter((value) => value > 0)
+    : app
+      ? app.windows.map((row) => row.hwnd)
+      : [];
+  const target = String(data.target || (app && app.pin && app.pin.target) || '');
+  const exe = String(data.exe || (app && app.pin && app.pin.exe) || '');
+  hideFlyout();
+  if (handles.length) {
+    hookLogNote(`press ${key || '?'} (${handles.length} window${handles.length === 1 ? '' : 's'})`);
+    pressTaskbarWindows(handles);
+    return;
+  }
+  if (!target) {
+    hookLogNote(`press ${key || '?'}: no window and no target`);
+    return;
+  }
+  if (launchPinnedTarget(target, exe)) hookLogNote(`press ${key || '?'}: launched ${target}`);
+  else hookLogNote(`press ${key || '?'}: could not launch ${target}`);
+}
+
+// A pin is a shortcut, and a shortcut is what Windows opens: its own target is
+// tried first, then the executable it names, then a shell target for a packaged
+// app. One of the three opens every pin the bar can draw.
+function launchPinnedTarget(target, exe) {
+  const value = String(target || '');
+  if (!value) return false;
+  const binary = String(exe || '');
+  const viaBinary = () => {
+    if (!fs.existsSync(binary)) return false;
+    try {
+      spawn(binary, [], { detached: true, stdio: 'ignore' }).unref();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (value.startsWith('uwp:')) return launchTarget(value).ok;
+  // A packaged app is a shell target, not a file. A drive letter is not a scheme.
+  if (!/^[a-z]:[\\/]/i.test(value) && /^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    try {
+      shell.openExternal(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  if (!fs.existsSync(value)) return viaBinary();
+  // Windows opens the shortcut. One that refuses hands back an error, and the
+  // executable it names is always what the user meant anyway.
+  const opened = shell.openPath(value);
+  if (opened && typeof opened.then === 'function') {
+    opened.then((error) => {
+      if (error) viaBinary();
+    });
+  }
+  return true;
+}
+
+ipcMain.on('taskbar:press', (_event, payload) => taskbarPress(payload));
+
 function createFlyout() {
   if (flyoutWin && !flyoutWin.isDestroyed()) return flyoutWin;
   flyoutWin = new BrowserWindow({
@@ -7810,13 +7880,7 @@ ipcMain.on('taskbar:hover', (_event, payload) => {
 // it once the pointer is really away, or over a different button.
 ipcMain.on('taskbar:hover-end', () => {});
 
-ipcMain.on('taskbar:group', (_event, key) => {
-  const app = findTaskbarApp(key);
-  if (!app) return;
-  hideFlyout();
-  if (app.windows.length) pressTaskbarWindows(app.windows.map((row) => row.hwnd));
-  else if (app.pin) launchTarget(app.pin.target);
-});
+ipcMain.on('taskbar:group', (_event, key) => taskbarPress({ key }));
 
 // A middle click on a taskbar button is the button's own close, the way the real
 // taskbar has always done it.
@@ -7937,7 +8001,9 @@ ipcMain.on('flyout:ready', () => {
 // Bring a window forward: restore it if minimised, then focus it.
 function focusTaskbarWindow(hwnd) {
   if (!Number.isFinite(hwnd) || hwnd <= 0) return;
-  if (hookProc && hookProc.stdin && !hookProc.stdin.destroyed) {
+  // Only a helper that has reported `ready` is reading: one still compiling
+  // would swallow the command, and the press would look like nothing at all.
+  if (hookProc && hookReady && hookProc.stdin && !hookProc.stdin.destroyed) {
     try {
       // The hook knows what is in front: the click that brings an app up also
       // puts it away again, the way the Windows taskbar behaves.
@@ -7965,7 +8031,7 @@ function pressTaskbarWindows(handles) {
     .map((value) => Number(value) || 0)
     .filter((value) => value > 0);
   if (!list.length) return;
-  if (hookProc && hookProc.stdin && !hookProc.stdin.destroyed) {
+  if (hookProc && hookReady && hookProc.stdin && !hookProc.stdin.destroyed) {
     try {
       hookProc.stdin.write(`group ${list.join(' ')}\n`);
       return;
@@ -7973,6 +8039,9 @@ function pressTaskbarWindows(handles) {
       /* fall through to the helper process below */
     }
   }
+  // No helper: the window still comes back and is asked to come forward, which
+  // is the best a process of ours can do without it.
+  hookLogNote('press: no hook, using the PowerShell fallback');
   focusTaskbarWindow(list[0]);
 }
 
@@ -7980,7 +8049,7 @@ function pressTaskbarWindows(handles) {
 // forward, it is never put away.
 function activateTaskbarWindow(hwnd) {
   if (!Number.isFinite(hwnd) || hwnd <= 0) return;
-  if (hookProc && hookProc.stdin && !hookProc.stdin.destroyed) {
+  if (hookProc && hookReady && hookProc.stdin && !hookProc.stdin.destroyed) {
     try {
       hookProc.stdin.write(`activate ${Math.trunc(hwnd)}\n`);
       return;

@@ -195,7 +195,17 @@ function iconOrLetters(node, item) {
 // are held in the order the bar draws them, so dragging one drops it into that
 // array and the bar keeps the new order from then on.
 
-const drag = { id: '', mark: null };
+const drag = { id: '', mark: null, pointer: 0, startX: 0, startY: 0, moved: false };
+
+// Every press starts clean, whichever button it lands on: a drag that ended
+// without a click must not swallow the next press on another app.
+root.addEventListener(
+  'pointerdown',
+  () => {
+    drag.moved = false;
+  },
+  true,
+);
 
 function pinnedOrder() {
   return apps.filter((app) => app.pin).map((app) => app.pin.id);
@@ -221,88 +231,97 @@ function movePin(id, before) {
   if (api) api.reorder({ order });
 }
 
+// What the pointer is over, while a pin is being carried: the half of the button
+// under it decides which side of it the pin lands on, as it does on Windows.
+// Anywhere that is not a pin means the end of the row.
+function hoverDrop(x, y, held) {
+  let mark = null;
+  let after = false;
+  for (const node of appsEl.querySelectorAll('.tb-item[data-pin]')) {
+    const box = node.getBoundingClientRect();
+    if (x < box.left || x > box.right || y < box.top || y > box.bottom) continue;
+    mark = node;
+    if (node.dataset.pin !== held) after = x > box.left + box.width / 2;
+    break;
+  }
+  if (drag.mark !== mark) {
+    clearDropMarks();
+    drag.mark = mark;
+  }
+  if (!mark) return;
+  const own = mark.dataset.pin === held;
+  mark.classList.toggle('tb-drop-before', !own && !after);
+  mark.classList.toggle('tb-drop-after', !own && after);
+}
+
 function wirePinControls(button, app) {
   button.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     if (api) api.context(app.key);
   });
-  // A pin dropped on a running app's button goes to the end of the row: open
-  // apps always follow the pins, so there is nowhere else for it to land.
-  if (!app.pin) {
-    button.addEventListener('dragover', (event) => {
-      if (!drag.id) return;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-      clearDropMarks();
-    });
-    button.addEventListener('drop', (event) => {
-      if (!drag.id) return;
-      event.preventDefault();
-      const id = drag.id;
-      drag.id = '';
-      clearDropMarks();
-      movePin(id, '');
-    });
-    return;
-  }
   // Only a pin can be dragged: an open app sits where its group put it until it
   // is pinned, and moving it would move nothing that outlives the window.
-  button.draggable = true;
-  button.addEventListener('dragstart', (event) => {
+  if (!app.pin) return;
+  // Dragging runs on pointer events, not on HTML's draggable attribute: a
+  // draggable button turns a press that slid a pixel into a drag, and a drag has
+  // no click, so the app never opened. Here a press stays a press until the
+  // pointer has really moved.
+  button.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
     drag.id = app.pin.id;
-    button.classList.add('tb-dragging');
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', app.key);
+    drag.pointer = event.pointerId;
+    drag.startX = event.clientX;
+    drag.startY = event.clientY;
+    drag.moved = false;
+    try {
+      button.setPointerCapture(event.pointerId);
+    } catch {
+      /* capture is a nicety; the moves still arrive over the bar */
     }
   });
-  button.addEventListener('dragend', () => {
+  button.addEventListener('pointermove', (event) => {
+    if (!drag.id || event.pointerId !== drag.pointer) return;
+    if (!drag.moved) {
+      const slide = Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY);
+      if (slide < 6) return;
+      drag.moved = true;
+      button.classList.add('tb-dragging');
+    }
+    hoverDrop(event.clientX, event.clientY, app.pin.id);
+  });
+  const finish = (event) => {
+    if (!drag.id || event.pointerId !== drag.pointer) return;
+    const id = drag.id;
+    const moved = drag.moved;
+    const mark = drag.mark;
+    const after = mark ? mark.classList.contains('tb-drop-after') : false;
     drag.id = '';
+    drag.pointer = 0;
+    button.classList.remove('tb-dragging');
+    try {
+      button.releasePointerCapture(event.pointerId);
+    } catch {
+      /* already released */
+    }
+    if (!moved) return; // a press, not a drag: the click below opens the app
+    const onto = mark && mark.dataset.pin;
+    clearDropMarks();
+    if (!onto) movePin(id, '');
+    else {
+      const order = pinnedOrder();
+      const at = order.indexOf(onto);
+      movePin(id, after ? order[at + 1] || '' : onto);
+    }
+  };
+  button.addEventListener('pointerup', finish);
+  button.addEventListener('pointercancel', () => {
+    drag.id = '';
+    drag.pointer = 0;
+    drag.moved = false;
     button.classList.remove('tb-dragging');
     clearDropMarks();
   });
-  button.addEventListener('dragover', (event) => {
-    if (!drag.id || drag.id === app.pin.id) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    // The half of the button the pointer is over decides which side of it the
-    // pin lands on, as it does on Windows.
-    const box = button.getBoundingClientRect();
-    const after = event.clientX > box.left + box.width / 2;
-    if (drag.mark !== button) {
-      clearDropMarks();
-      drag.mark = button;
-    }
-    button.classList.toggle('tb-drop-before', !after);
-    button.classList.toggle('tb-drop-after', after);
-  });
-  button.addEventListener('drop', (event) => {
-    if (!drag.id) return;
-    event.preventDefault();
-    const id = drag.id;
-    const after = button.classList.contains('tb-drop-after');
-    drag.id = '';
-    clearDropMarks();
-    const order = pinnedOrder();
-    const at = order.indexOf(app.pin.id);
-    movePin(id, after ? order[at + 1] || '' : app.pin.id);
-  });
 }
-
-// Dropping past the last button, anywhere on the row (the empty end of the apps
-// island or the tray side), puts the pin at the end of the row.
-row.addEventListener('dragover', (event) => {
-  if (!drag.id) return;
-  event.preventDefault();
-});
-row.addEventListener('drop', (event) => {
-  if (!drag.id) return;
-  event.preventDefault();
-  const id = drag.id;
-  drag.id = '';
-  clearDropMarks();
-  movePin(id, '');
-});
 
 // The Start button is the launcher's list of everything installed, and it sits
 // where Windows keeps its Start: immediately left of the pins.
@@ -337,6 +356,7 @@ function buildApps() {
     button.type = 'button';
     button.className = 'tb-item';
     button.dataset.key = app.key;
+    if (app.pin) button.dataset.pin = app.pin.id;
     const open = app.windows.length > 0;
     button.classList.toggle('tb-pin', !open);
     button.classList.toggle('tb-running', open);
@@ -346,7 +366,18 @@ function buildApps() {
     iconOrLetters(button, app);
     wirePinControls(button, app);
     button.addEventListener('click', () => {
-      if (api) api.group(app.key);
+      // A drag ends here too; it moved the pin, it was not a press.
+      if (drag.moved) {
+        drag.moved = false;
+        return;
+      }
+      if (!api) return;
+      api.press({
+        key: app.key,
+        windows: app.windows.map((row) => row.hwnd),
+        target: app.pin ? app.pin.target : '',
+        exe: app.pin ? app.pin.exe : '',
+      });
     });
     // Middle click closes, as it does on the taskbar this replaces.
     button.addEventListener('auxclick', (event) => {
