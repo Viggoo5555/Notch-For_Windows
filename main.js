@@ -8046,7 +8046,15 @@ ipcMain.on('taskbar:tray', (_event, index) => pressTrayIcon(index));
 ipcMain.on('taskbar:context', (event, payload) => {
   const app = findTaskbarApp(payload && payload.key);
   if (!app) return;
-  const template = [];
+  // The menu the real taskbar opens on a right-click: the app's name at the top,
+  // its pin, its windows when there are several, and what can be done with them.
+  // A label is text from the machine — a window title can hold an ampersand,
+  // and an ampersand in an Electron menu draws an underline — so they are escaped.
+  const plain = (text) => String(text || '').replace(/&/g, '&&');
+  const template = [
+    { label: plain(app.name || 'App'), enabled: false },
+    { type: 'separator' },
+  ];
   if (app.pin) {
     template.push({
       label: 'Unpin from taskbar',
@@ -8065,7 +8073,33 @@ ipcMain.on('taskbar:context', (event, payload) => {
         }),
     });
   }
-  if (!template.length) return;
+  if (!app.windows.length) {
+    // A pin that is not running has no windows to act on, so its one useful
+    // entry is what a press on the button does anyway.
+    template.push({ label: 'Open', click: () => taskbarPress({ key: app.key }) });
+  } else {
+    if (app.windows.length > 1) {
+      // Several windows: each is named, and picking one brings it forward, the
+      // way the list under Windows' own menu does.
+      for (const row of app.windows.slice(0, 8)) {
+        template.push({
+          label: plain(row.title || app.name || 'Window'),
+          click: () => activateTaskbarWindow(row.hwnd),
+        });
+      }
+      template.push({ type: 'separator' });
+    }
+    template.push({
+      label: 'Minimize',
+      click: () => minimizeTaskbarWindows(app.windows.map((row) => row.hwnd)),
+    });
+    template.push({
+      label: app.windows.length > 1 ? `Close all ${app.windows.length} windows` : 'Close window',
+      click: () => {
+        for (const row of app.windows) sendHookCommand(`close ${row.hwnd}`);
+      },
+    });
+  }
   const win = BrowserWindow.fromWebContents(event.sender);
   // Auto-hide stands down while the menu is up, or the poll would slide the bar
   // (and the menu's anchor) off the screen as the pointer leaves the bar.
@@ -8175,6 +8209,17 @@ function pressTaskbarWindows(handles) {
   // is the best a process of ours can do without it.
   hookLogNote('press: no hook, using the PowerShell fallback');
   focusTaskbarWindow(list[0]);
+}
+
+// Every window of one app put away at once, which is what the real taskbar's
+// menu does with "Minimize".
+function minimizeTaskbarWindows(handles) {
+  const list = (Array.isArray(handles) ? handles : [])
+    .map((value) => Number(value) || 0)
+    .filter((value) => value > 0);
+  if (!list.length) return;
+  if (sendHookCommand(`minimize ${list.join(' ')}`)) return;
+  hookLogNote('minimize: no hook');
 }
 
 // Picking a window out of the list is a choice, not a second press: it comes

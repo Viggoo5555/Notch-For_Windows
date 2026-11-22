@@ -1098,6 +1098,19 @@ public class JarvisWinHook
         }
     }
 
+    // A whole group put away at once, which is what the taskbar's own menu does
+    // with "Minimize".
+    private static void MinimizeAll(string list)
+    {
+        foreach (string part in list.Split(' '))
+        {
+            long value;
+            if (!long.TryParse(part, out value) || value == 0) continue;
+            IntPtr hwnd = (IntPtr)value;
+            if (IsWindow(hwnd)) ShowWindow(hwnd, 6); // SW_MINIMIZE
+        }
+    }
+
     // The app talks to us on stdin: "focus <hwnd>".
     private static void ReadCommands()
     {
@@ -1155,6 +1168,10 @@ public class JarvisWinHook
                 else if (text == "winkey off")
                 {
                     WatchWin = false;
+                }
+                else if (text.StartsWith("minimize "))
+                {
+                    MinimizeAll(text.Substring(9).Trim());
                 }
                 else if (text.StartsWith("close "))
                 {

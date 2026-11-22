@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.54.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.54/Notch-Setup-1.2.54.exe)**
+**[Notch-Setup-1.2.55.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.55/Notch-Setup-1.2.55.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -70,8 +70,11 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   the ones on the bar and the ones the shell keeps in its overflow flyout — in one
   glass list above the bar, each named, each one pressed through the same helper the
   bar's own icons use. A second press on the chevron, or moving away, closes it.
-  Right-click a button to pin it to the bar or take it off again, and drag a pin to
-  put it where you want it — the order is kept between restarts.
+  Right-click a button and you get the menu the real taskbar gives you: the app's
+  name, pin it to the bar or take it off again, the list of its windows when it has
+  several (picking one brings it forward), Minimize, and Close window / Close all
+  windows; a pin that is not running offers Open instead. Drag a pin to put it where
+  you want it — the order is kept between restarts.
 - **Library and store** — the library scans Steam, Epic and your own shortcuts, shows
   the cover art, and launches a game with a click; add a shortcut by hand if a
   launcher keeps it hidden, and a hovered card has a small cross that takes a game
@@ -377,6 +380,15 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.55** — right-clicking a taskbar button opens the menu the real taskbar opens.
+It used to offer the pin and nothing else; now it carries the app's name, pin/unpin,
+the list of its windows when there are several (picking one brings that window
+forward), **Minimize** for the whole group, and **Close window** / **Close all N
+windows**. A pin that is not running offers **Open**, which is what a press on it
+does anyway. Minimizing is one command to the helper for every window in the group,
+and a title's ampersands are escaped, so a window called *Copy & Paste* no longer
+comes out with an underlined letter.
 
 **v1.2.54** — the notification area is Notch's own now. A press on the chevron no
 longer falls through to Windows' overflow flyout: it opens a liquid-glass panel
