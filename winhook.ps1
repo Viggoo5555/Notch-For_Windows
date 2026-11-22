@@ -57,6 +57,8 @@ public class JarvisWinHook
     private static extern bool IsWindow(IntPtr hWnd);
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int command);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string className, string windowName);
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc proc, IntPtr lParam);
     [DllImport("user32.dll")]
@@ -754,6 +756,25 @@ public class JarvisWinHook
         FocusWindow(hWnd);
     }
 
+    // Notch's bar replaces the taskbar, so the real one can be taken out of the
+    // way. Its window is only hidden, never removed: bringing it back is one
+    // call, and SW_SHOWNOACTIVATE does it without taking the focus away from
+    // whatever is in front.
+    public static string ShellBar(int hide)
+    {
+        try
+        {
+            IntPtr bar = FindWindow("Shell_TrayWnd", null);
+            if (bar == IntPtr.Zero) return "missing";
+            ShowWindow(bar, hide != 0 ? 0 : 4); // SW_HIDE / SW_SHOWNOACTIVATE
+            return hide != 0 ? "hidden" : "shown";
+        }
+        catch
+        {
+            return "missing";
+        }
+    }
+
     // The app talks to us on stdin: "focus <hwnd>".
     private static void ReadCommands()
     {
@@ -834,6 +855,16 @@ public class JarvisWinHook
                 {
                     Console.WriteLine("GPU\t" + GpuLoad());
                     Console.Out.Flush();
+                }
+                // Silent on purpose: the app's reader treats every tabbed line
+                // as a row of a list it is collecting, and this is not one.
+                else if (text == "taskbarhide")
+                {
+                    ShellBar(1);
+                }
+                else if (text == "taskbarshow")
+                {
+                    ShellBar(0);
                 }
                 else if (text.StartsWith("activate "))
                 {

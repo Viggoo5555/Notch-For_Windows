@@ -87,6 +87,7 @@ const state = {
     taskbarShape: 'islands',
     taskbarShow: 'both',
     taskbarAutoHide: false,
+    hideWinTaskbar: true,
     windowsKey: true,
   },
   filter: '',
@@ -745,6 +746,7 @@ const SETTINGS_SCHEMA = [
   },
   { group: 'Taskbar' },
   { key: 'taskbar', label: 'Show taskbar', type: 'toggle' },
+  { key: 'hideWinTaskbar', label: 'Hide Windows taskbar', type: 'toggle' },
   {
     key: 'taskbarStyle',
     label: 'Surface',

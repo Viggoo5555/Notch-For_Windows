@@ -108,6 +108,9 @@ const DEFAULT_SETTINGS = {
   taskbarShape: 'islands',
   taskbarShow: 'both',
   taskbarAutoHide: false,
+  // Notch's bar replaces the taskbar: while it is on, the real one can be taken
+  // out of the way. Only ever applied with Notch's bar showing.
+  hideWinTaskbar: true,
   windowsKey: true,
 };
 
@@ -625,6 +628,10 @@ function shellSurfaces() {
 function setGameMode(on) {
   if (gameMode === on) return;
   gameMode = on;
+  // A game takes the whole machine, including the bar Notch was drawing: the
+  // real taskbar comes back for the duration instead of staying hidden behind a
+  // shell that has stepped aside.
+  sendNativeTaskbarState();
   // Told first, before its window is hidden and parked: a parked renderer is a
   // poor listener, and this is what makes it let go of the microphone and the
   // speech model.
@@ -4065,6 +4072,17 @@ function sendLauncherState() {
   const window = launcherWin;
   if (!window || window.isDestroyed() || !window.isVisible()) return;
   window.webContents.send('launcher:show');
+  // The sheet is drawn into a window that spends its life hidden, and a
+  // transparent window can hand back the frame it had before: ask for the whole
+  // frame now, and once more after the sheet has dropped in, so the first press
+  // cannot open an invisible sheet.
+  if (typeof window.webContents.invalidate === 'function') window.webContents.invalidate();
+  setTimeout(() => {
+    if (!launcherWin || launcherWin.isDestroyed() || !launcherWin.isVisible()) return;
+    if (typeof launcherWin.webContents.invalidate === 'function') {
+      launcherWin.webContents.invalidate();
+    }
+  }, 170);
   const display = screen.getPrimaryDisplay();
   const held = launcherBackdrop ? launcherBackdrop.payload : null;
   const payload =
@@ -4274,6 +4292,7 @@ function startWinHook() {
     hookReady = false;
     hookFailures += 1;
     hookNeedsBlock = true;
+    nativeTaskbarHidden = false;
     if (watchdog) clearTimeout(watchdog);
     watchdog = null;
     scheduleWinHookRetry();
@@ -4337,6 +4356,10 @@ function startWinHook() {
         hookReady = true;
         if (watchdog) clearTimeout(watchdog);
         watchdog = null;
+        // A helper that has just come up knows nothing about the shell's bar:
+        // say what it should be, so one left hidden by an earlier helper — or by
+        // an explorer restart — is put back or taken away as the setting says.
+        sendNativeTaskbarState(true);
       } else if (text.startsWith('fail')) {
         hookFailures += 1;
         stopWinHook();
@@ -4353,6 +4376,7 @@ function startWinHook() {
     if (hookProc !== proc || hookReady) return;
     hookFailures += 1;
     hookProc = null;
+    nativeTaskbarHidden = false;
     try {
       proc.kill();
     } catch {
@@ -4365,6 +4389,7 @@ function startWinHook() {
     hookProc = null;
     hookReady = false;
     hookFailures += 1;
+    nativeTaskbarHidden = false;
     // It went away without reporting `ready`, so how it was started is the first
     // thing to change: the next attempt runs the file as a script block.
     hookNeedsBlock = true;
@@ -7051,7 +7076,32 @@ function destroyTaskbar() {
   stopTaskbarBackdropLoop();
 }
 
+// Notch's bar is meant to be the taskbar, so the real one can be taken out of
+// the way while it is on. The shell's bar is only hidden, never removed, and it
+// is put back on every way out: the setting off, Notch's bar off, a game taking
+// the screen, or the app quitting. A helper that dies leaves the bar where it
+// was, so the next one is told the wanted state the moment it reports ready.
+let nativeTaskbarHidden = false;
+let quitBarRestored = false;
+
+function nativeTaskbarWanted() {
+  return isWin && !gameMode && taskbarOn() && !!prefs.settings.hideWinTaskbar;
+}
+
+function sendNativeTaskbarState(force = false) {
+  const want = nativeTaskbarWanted();
+  if (!force && want === nativeTaskbarHidden) return;
+  if (!hookProc || !hookProc.stdin || hookProc.stdin.destroyed) return;
+  try {
+    hookProc.stdin.write(want ? 'taskbarhide\n' : 'taskbarshow\n');
+    nativeTaskbarHidden = want;
+  } catch {
+    /* the next helper is told again when it reports ready */
+  }
+}
+
 function refreshTaskbar() {
+  sendNativeTaskbarState();
   if (!taskbarOn()) {
     destroyTaskbar();
     return;
@@ -7895,14 +7945,41 @@ if (!app.requestSingleInstanceLock()) {
     globalShortcut.register('Control+Alt+S', () => takeScreenshot());
 
     setInterval(readBattery, 15 * 60 * 1000);
+    // The shell can come back on its own — an explorer restart makes a fresh,
+    // visible taskbar — so the wanted state is asked for on a slow beat while it
+    // is meant to be away.
+    setInterval(() => {
+      if (nativeTaskbarWanted()) sendNativeTaskbarState(true);
+    }, 20000);
     // The update check runs by itself: shortly after the panel is up, and every
     // six hours after that. Nothing has to be opened for the answer to exist.
     setTimeout(checkForUpdates, 5000);
     setInterval(checkForUpdates, UPDATE_EVERY_MS);
   });
 
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
     app.isQuitting = true;
+    // The shell's bar is put back before the helper that hid it goes away: a
+    // hidden Windows taskbar with no app left to bring it back is a machine with
+    // no taskbar at all. The quit is held for the moment that write needs.
+    if (
+      nativeTaskbarHidden &&
+      !quitBarRestored &&
+      hookProc &&
+      hookProc.stdin &&
+      !hookProc.stdin.destroyed
+    ) {
+      quitBarRestored = true;
+      nativeTaskbarHidden = false;
+      try {
+        hookProc.stdin.write('taskbarshow\n');
+      } catch {
+        /* already gone: nothing left to hold the bar */
+      }
+      event.preventDefault();
+      setTimeout(() => app.quit(), 260);
+      return;
+    }
     stopWinHook();
     stopPiper();
   });

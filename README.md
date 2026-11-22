@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.36.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.36/Notch-Setup-1.2.36.exe)**
+**[Notch-Setup-1.2.37.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.37/Notch-Setup-1.2.37.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -275,7 +275,8 @@ Panel → menu (the sliders icon) → Settings. Everything is stored in
 - **Backdrop** — follow the live desktop or pin a wallpaper image, and what the
   glass ended up doing (`WebGL`, `flat — no WebGL`, `flat — no image`)
 - **Taskbar** — show it, glass or invisible surface, attached or island layout,
-  items (both, open windows only, pins only), auto-hide
+  items (both, open windows only, pins only), auto-hide, and whether the real
+  Windows taskbar steps aside while it is on
 - **Voice** — speak replies, language (match what I write, Danish, English), the
   voice itself (studio, fast, or a Windows voice), speed, test button, and the
   "Hey Jarvis" wake word
@@ -362,6 +363,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.37** — Notch's bar can take the Windows taskbar's place. A new **Hide
+Windows taskbar** switch (Settings → Taskbar, on by default) takes the shell's bar
+out of the way while Notch's bar is on, so there is one taskbar on screen instead
+of two. It is only applied while Notch's bar is showing, and the real one is put
+back when that switch is turned off, when Notch's bar is turned off, while a
+fullscreen game has the screen, and when the app quits — the pause on quit is the
+moment the helper needs to show it again. The bar is hidden, never removed, so
+nothing is lost and the shell can restore it at any time. The search sheet also
+asks for its frame as it opens and again once it has dropped in: it lives in a
+window that is hidden between presses, and a transparent window can hand back the
+frame it had before, which made the first press open an invisible sheet.
 
 **v1.2.36** — the Windows key gets the search sheet back on machines that were
 refusing it. The key is watched by a small PowerShell helper, and the way it was
