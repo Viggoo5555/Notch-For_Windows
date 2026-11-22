@@ -4602,7 +4602,9 @@ function startWinHook() {
     while (line >= 0) {
       const text = buffer.slice(0, line).trim();
       buffer = buffer.slice(line + 1);
-      if (gpuRequest && text.startsWith('GPU\t')) {
+      if (consumeQuickLine(text)) {
+        // A reading the quick panel asked for: already handed to whoever asked.
+      } else if (gpuRequest && text.startsWith('GPU\t')) {
         const pending = gpuRequest;
         gpuRequest = null;
         gpuBusy = false;
@@ -7464,6 +7466,107 @@ function refreshTrayPanel() {
   showTrayPanel(flyoutLeft);
 }
 
+// ------------------------------------------------------------ quick settings
+
+// The volume, the backlight and the radio are asked of the helper, each with its
+// own prefix, so three of them can be in flight at once.
+const quickRequests = new Map();
+
+function requestQuick(command, prefix, timeout = 1400) {
+  const proc = hookProc;
+  if (!proc || proc.killed || !proc.stdin || proc.stdin.destroyed) return Promise.resolve('');
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      quickRequests.delete(prefix);
+      resolve('');
+    }, timeout);
+    quickRequests.set(prefix, (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    });
+    try {
+      proc.stdin.write(`${command}\n`);
+    } catch {
+      quickRequests.delete(prefix);
+      clearTimeout(timer);
+      resolve('');
+    }
+  });
+}
+
+function consumeQuickLine(text) {
+  for (const [prefix, finish] of quickRequests) {
+    if (!text.startsWith(prefix)) continue;
+    quickRequests.delete(prefix);
+    finish(text.slice(prefix.length).trim());
+    return true;
+  }
+  return false;
+}
+
+// The notification area's own buttons open flyouts of Windows' shell, and with
+// that bar hidden they open nothing at all. The three everyone reaches for are
+// answered by Notch instead, by what the icon calls itself.
+const QUICK_ICONS = [
+  { what: 'wifi', test: /wi-?fi|wlan|wireless|network|netzwerk|netvaerk|netværk/i },
+  { what: 'volume', test: /volume|sound|audio|lautst|lydstyrke|højttaler|hoejttaler|speaker/i },
+  { what: 'brightness', test: /brightness|helligkeit|lysstyrke|skjermlys|skærmlys/i },
+];
+
+function quickFor(name) {
+  const text = String(name || '');
+  for (const icon of QUICK_ICONS) if (icon.test.test(text)) return icon.what;
+  return '';
+}
+
+function trayName(index) {
+  const row = trayAll.find((item) => item.i === index) || trayItems.find((item) => item.i === index);
+  return row ? row.name : '';
+}
+
+// Notch's own volume, backlight and Wi-Fi panel: the three readings first, then a
+// sheet with the sliders the real shell keeps in its quick settings.
+async function showQuickPanel(left) {
+  if (!taskbarWin || taskbarWin.isDestroyed()) return;
+  const bar = taskbarWin.getBounds();
+  const [audio, bright, wifi] = await Promise.all([
+    requestQuick('audio', 'AUDIO\t'),
+    requestQuick('brightness', 'BRIGHT\t'),
+    requestQuick('wifi', 'WIFI\t'),
+  ]);
+  if (!taskbarWin || taskbarWin.isDestroyed()) return;
+  const parts = String(audio || '').split('\t');
+  const level = Number(parts[0]);
+  const brightText = String(bright || '').trim();
+  const net = String(wifi || '').split('\t');
+  const data = {
+    volume: Number.isFinite(level) && level >= 0 ? Math.round(level) : null,
+    mute: parts[1] === '1',
+    brightness: brightText === '' ? null : Number(brightText) >= 0 ? Number(brightText) : null,
+    wifi: Number(net[0]) === 1 ? 'on' : Number(net[0]) === 0 ? 'off' : 'none',
+    ssid: String(net[1] || ''),
+  };
+  const width = 272;
+  // No backlight to offer (a desktop monitor): the block is left out rather than
+  // drawn dead.
+  const height = data.brightness === null ? 176 : 236;
+  const x = Math.round(
+    Math.min(Math.max(bar.x + left - width / 2, bar.x + 8), bar.x + bar.width - width - 8),
+  );
+  const y = Math.round(bar.y - height - 6);
+  const win = createFlyout();
+  flyoutBounds = { x, y, width, height };
+  flyoutKey = null;
+  flyoutKind = 'quick';
+  flyoutLeft = left;
+  win.setBounds({ x, y, width, height }, false);
+  if (!win.isVisible()) win.showInactive();
+  const mode = taskbarMode();
+  win.webContents.send('flyout:rows', { kind: 'quick', quick: data, width, height, style: mode.style });
+  if (mode.style === 'glass') sendRegionShot(win, 'flyout:backdrop');
+  startFlyoutPoll();
+}
+
 // A pin and a running app are one button, and several windows of the same app
 // are one button with a list, exactly like the Windows taskbar.
 function appLabel(item) {
@@ -7596,7 +7699,7 @@ function sendTaskbarUpdate() {
   // island keeps the clock, and the attached bar holds both.
   // An empty bar takes its window list away with it; the notification panel is
   // not the bar's to close, so it stays.
-  if (!taskbarApps.length && flyoutKind !== 'tray') hideFlyout();
+  if (!taskbarApps.length && flyoutKind === 'windows') hideFlyout();
   if (!taskbarWin.isVisible()) {
     taskbarWin.showInactive();
     sendTaskbarBackdrop();
@@ -8038,7 +8141,17 @@ function pressTrayIcon(index) {
   }, 1100);
 }
 
-ipcMain.on('taskbar:tray', (_event, index) => pressTrayIcon(index));
+ipcMain.on('taskbar:tray', (_event, payload) => {
+  const data = payload && typeof payload === 'object' ? payload : { index: payload };
+  const index = Math.trunc(Number(data.index) || 0);
+  const what = quickFor(data.name || trayName(index));
+  if (what) {
+    // The volume, the radio and the backlight are Notch's to answer.
+    showQuickPanel(Number(data.left) || flyoutLeft || 0);
+    return;
+  }
+  pressTrayIcon(index);
+});
 
 // Right-click on a button is where a pin is made or broken, the way Windows'
 // own bar offers it. A pin takes the executable it was pinned from, so it stays
@@ -8140,16 +8253,54 @@ ipcMain.on('flyout:pick', (_event, hwnd) => {
   activateTaskbarWindow(Number(hwnd));
 });
 
-// A row of the notification panel: the icon is the shell's, so the panel gets out
-// of the way and the helper presses it where it lives.
-ipcMain.on('flyout:tray', (_event, index) => {
+// A row of the notification panel: an icon of the shell's is pressed where it
+// lives, and the three the shell cannot open any more get Notch's own panel.
+ipcMain.on('flyout:tray', (_event, payload) => {
+  const data = payload && typeof payload === 'object' ? payload : { index: payload };
+  const index = Math.trunc(Number(data.index) || 0);
+  const what = quickFor(data.name || trayName(index));
+  const left = Number(data.left);
   hideFlyout();
+  if (what) {
+    showQuickPanel(Number.isFinite(left) ? left : flyoutLeft);
+    return;
+  }
   pressTrayIcon(index);
+});
+
+// The sliders move the real thing: the helper sets the endpoint volume and the
+// display's backlight, so the panel and Windows never disagree about the state.
+ipcMain.on('quick:set', (_event, payload) => {
+  const what = String((payload && payload.what) || '');
+  const value = Math.round(Number(payload && payload.value));
+  if (!Number.isFinite(value)) return;
+  const level = Math.max(0, Math.min(100, value));
+  if (what === 'volume') sendHookCommand(`volume ${level}`);
+  else if (what === 'brightness') sendHookCommand(`brightness set ${level}`);
+});
+
+ipcMain.on('quick:mute', () => sendHookCommand('mute'));
+
+// Joining a network needs a password, which is the one thing this panel cannot
+// ask for: the setting Windows already has opens instead.
+ipcMain.on('quick:open', (_event, what) => {
+  if (String(what) === 'wifi') {
+    try {
+      shell.openExternal('ms-settings:network-wifi');
+    } catch {
+      /* no settings app to open */
+    }
+  }
+  hideFlyout();
 });
 
 ipcMain.on('flyout:ready', () => {
   if (flyoutKind === 'tray') {
     showTrayPanel(flyoutLeft);
+    return;
+  }
+  if (flyoutKind === 'quick') {
+    showQuickPanel(flyoutLeft);
     return;
   }
   if (flyoutKey) {

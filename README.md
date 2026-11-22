@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.55.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.55/Notch-Setup-1.2.55.exe)**
+**[Notch-Setup-1.2.56.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.56/Notch-Setup-1.2.56.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -69,7 +69,11 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   it opens is Notch's own notification panel: every icon the notification area holds —
   the ones on the bar and the ones the shell keeps in its overflow flyout — in one
   glass list above the bar, each named, each one pressed through the same helper the
-  bar's own icons use. A second press on the chevron, or moving away, closes it.
+  bar's own icons use. A second press on the chevron, or moving away, closes it. The
+  volume, Wi-Fi and brightness icons open Notch's own quick panel instead of a flyout
+  of the shell: a volume slider with a mute button, a brightness slider on a display
+  that has a backlight, and the Wi-Fi state with the network's name and a way into
+  Windows' network settings.
   Right-click a button and you get the menu the real taskbar gives you: the app's
   name, pin it to the bar or take it off again, the list of its windows when it has
   several (picking one brings it forward), Minimize, and Close window / Close all
@@ -380,6 +384,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.56** — the three things the notification area is really reached for are
+Notch's own. Pressing the volume, the Wi-Fi or the brightness icon — in the bar or in
+the tray panel — opened a flyout of Windows' shell, and with that bar hidden it
+opened nothing at all, which is why those presses did nothing. They now open a quick
+panel: a **volume** slider with a mute button, driven through the default output's
+own Core Audio endpoint, so the readout is the real level and the slider sets it; a
+**brightness** slider on machines whose backlight answers WMI (on a desktop monitor
+the block is left out rather than drawn dead); and the **Wi-Fi** state with the
+network's name and a button that opens Windows' network settings, because joining a
+network needs a password and that is the one thing this panel cannot ask for.
+Everything else in the tray is still pressed where it lives.
 
 **v1.2.55** — right-clicking a taskbar button opens the menu the real taskbar opens.
 It used to offer the pin and nothing else; now it carries the app's name, pin/unpin,

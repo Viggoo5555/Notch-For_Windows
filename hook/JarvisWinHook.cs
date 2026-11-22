@@ -956,6 +956,228 @@ public class JarvisWinHook
         }
     }
 
+    // ------------------------------------------------------------------ audio
+    // The volume of the default output, asked of Windows' own audio endpoint. The
+    // interfaces are declared in vtable order, which is all COM interop needs: the
+    // members before the ones used here are placeholders that are never called.
+    [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+    private class MMDeviceEnumerator
+    {
+    }
+
+    [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IMMDeviceEnumerator
+    {
+        // PreserveSig everywhere: every call here is checked for S_OK, so the
+        // HRESULT has to arrive as the return value instead of an exception.
+        [PreserveSig]
+        int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr devices);
+        [PreserveSig]
+        int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice device);
+    }
+
+    [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IMMDevice
+    {
+        [PreserveSig]
+        int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object instance);
+    }
+
+    [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAudioEndpointVolume
+    {
+        [PreserveSig]
+        int NotImplRegister();
+        [PreserveSig]
+        int NotImplUnregister();
+        [PreserveSig]
+        int GetChannelCount(out int count);
+        [PreserveSig]
+        int SetMasterVolumeLevel(float level, Guid context);
+        [PreserveSig]
+        int SetMasterVolumeLevelScalar(float level, Guid context);
+        [PreserveSig]
+        int GetMasterVolumeLevel(out float level);
+        [PreserveSig]
+        int GetMasterVolumeLevelScalar(out float level);
+        [PreserveSig]
+        int SetChannelVolumeLevel(uint channel, float level, Guid context);
+        [PreserveSig]
+        int SetChannelVolumeLevelScalar(uint channel, float level, Guid context);
+        [PreserveSig]
+        int GetChannelVolumeLevel(uint channel, out float level);
+        [PreserveSig]
+        int GetChannelVolumeLevelScalar(uint channel, out float level);
+        // A BOOL, not a VARIANT_BOOL: int keeps the marshalling unambiguous.
+        [PreserveSig]
+        int SetMute(int mute, Guid context);
+        [PreserveSig]
+        int GetMute(out int mute);
+    }
+
+    private static IAudioEndpointVolume EndpointVolume()
+    {
+        IMMDeviceEnumerator enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+        IMMDevice device;
+        // eRender, eConsole: the speakers the user hears everything through.
+        if (enumerator.GetDefaultAudioEndpoint(0, 0, out device) != 0 || device == null) return null;
+        Guid iid = typeof(IAudioEndpointVolume).GUID;
+        object instance;
+        if (device.Activate(ref iid, 0, IntPtr.Zero, out instance) != 0 || instance == null) return null;
+        return (IAudioEndpointVolume)instance;
+    }
+
+    // "<percent>\t<muted>", or "-1\t0" when the machine has no endpoint to ask.
+    public static string Audio()
+    {
+        try
+        {
+            IAudioEndpointVolume volume = EndpointVolume();
+            if (volume == null) return "-1\t0";
+            float level;
+            int mute;
+            if (volume.GetMasterVolumeLevelScalar(out level) != 0) return "-1\t0";
+            volume.GetMute(out mute);
+            return ((int)Math.Round(level * 100)) + "\t" + (mute != 0 ? "1" : "0");
+        }
+        catch
+        {
+            return "-1\t0";
+        }
+    }
+
+    public static void SetVolume(int percent)
+    {
+        try
+        {
+            IAudioEndpointVolume volume = EndpointVolume();
+            if (volume == null) return;
+            volume.SetMasterVolumeLevelScalar(Math.Max(0, Math.Min(100, percent)) / 100f, Guid.Empty);
+        }
+        catch
+        {
+            // no endpoint to set: nothing to do
+        }
+    }
+
+    public static void ToggleMute()
+    {
+        try
+        {
+            IAudioEndpointVolume volume = EndpointVolume();
+            if (volume == null) return;
+            int mute;
+            volume.GetMute(out mute);
+            volume.SetMute(mute == 0 ? 1 : 0, Guid.Empty);
+        }
+        catch
+        {
+            // no endpoint to mute
+        }
+    }
+
+    // ------------------------------------------------------------- brightness
+    // A laptop's backlight answers through WMI; a desktop monitor does not, and
+    // then the panel leaves the slider out instead of offering one that does
+    // nothing.
+    public static string Brightness()
+    {
+        try
+        {
+            using (System.Management.ManagementObjectSearcher searcher =
+                new System.Management.ManagementObjectSearcher(
+                    "root\\wmi", "SELECT CurrentBrightness FROM WmiMonitorBrightness"))
+            {
+                foreach (System.Management.ManagementBaseObject row in searcher.Get())
+                {
+                    object value = row["CurrentBrightness"];
+                    if (value != null) return Convert.ToInt32(value).ToString();
+                }
+            }
+        }
+        catch
+        {
+            // no internal display: -1 means the panel hides the slider
+        }
+        return "-1";
+    }
+
+    public static void SetBrightness(int percent)
+    {
+        try
+        {
+            int level = Math.Max(0, Math.Min(100, percent));
+            using (System.Management.ManagementObjectSearcher searcher =
+                new System.Management.ManagementObjectSearcher(
+                    "root\\wmi", "SELECT * FROM WmiMonitorBrightnessMethods"))
+            {
+                foreach (System.Management.ManagementObject method in searcher.Get())
+                {
+                    method.InvokeMethod("WmiSetBrightness", new object[] { 1, (byte)level });
+                }
+            }
+        }
+        catch
+        {
+            // no backlight to set
+        }
+    }
+
+    // ------------------------------------------------------------------- wi-fi
+    // "<1 connected | 0 off | -1 no radio>\t<ssid>". The SSID is the one field netsh
+    // labels the same way in every language.
+    private static string SsidFromNetsh()
+    {
+        try
+        {
+            ProcessStartInfo info = new ProcessStartInfo("netsh", "wlan show interfaces");
+            info.UseShellExecute = false;
+            info.RedirectStandardOutput = true;
+            info.CreateNoWindow = true;
+            using (Process process = Process.Start(info))
+            {
+                if (process == null) return "";
+                string text = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(1200);
+                foreach (string line in text.Split('\n'))
+                {
+                    string trimmed = line.Trim();
+                    if (!trimmed.StartsWith("SSID") || trimmed.StartsWith("BSSID")) continue;
+                    int colon = trimmed.IndexOf(':');
+                    if (colon > 0) return trimmed.Substring(colon + 1).Trim();
+                }
+            }
+        }
+        catch
+        {
+            // netsh missing or refused: the state alone is still worth showing
+        }
+        return "";
+    }
+
+    public static string Wifi()
+    {
+        try
+        {
+            bool radio = false;
+            foreach (System.Net.NetworkInformation.NetworkInterface adapter in
+                System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (adapter.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211) continue;
+                radio = true;
+                if (adapter.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up)
+                {
+                    return "1\t" + SsidFromNetsh();
+                }
+            }
+            return radio ? "0\t" : "-1\t";
+        }
+        catch
+        {
+            return "-1\t";
+        }
+    }
+
     // Reading stdin is one thread, and everything slow used to run on it: the
     // notification area's UI Automation walk, the window list, the executable and
     // window icon reads, the GPU counter read, a screenshot. A press queued behind
@@ -1023,6 +1245,7 @@ public class JarvisWinHook
             return true;
         }
         if (text == "windows" || text == "game" || text == "gpu" ||
+            text == "audio" || text == "brightness" || text == "wifi" ||
             text.StartsWith("icons ") || text.StartsWith("exeicon ") ||
             text.StartsWith("hostexe ") || text.StartsWith("shot "))
         {
@@ -1094,6 +1317,21 @@ public class JarvisWinHook
         else if (text == "gpu")
         {
             Console.WriteLine("GPU\t" + GpuLoad());
+            Console.Out.Flush();
+        }
+        else if (text == "audio")
+        {
+            Console.WriteLine("AUDIO\t" + Audio());
+            Console.Out.Flush();
+        }
+        else if (text == "brightness")
+        {
+            Console.WriteLine("BRIGHT\t" + Brightness());
+            Console.Out.Flush();
+        }
+        else if (text == "wifi")
+        {
+            Console.WriteLine("WIFI\t" + Wifi());
             Console.Out.Flush();
         }
     }
@@ -1168,6 +1406,20 @@ public class JarvisWinHook
                 else if (text == "winkey off")
                 {
                     WatchWin = false;
+                }
+                else if (text.StartsWith("volume "))
+                {
+                    int percent;
+                    if (int.TryParse(text.Substring(7), out percent)) SetVolume(percent);
+                }
+                else if (text == "mute")
+                {
+                    ToggleMute();
+                }
+                else if (text.StartsWith("brightness set "))
+                {
+                    int percent;
+                    if (int.TryParse(text.Substring(15), out percent)) SetBrightness(percent);
                 }
                 else if (text.StartsWith("minimize "))
                 {

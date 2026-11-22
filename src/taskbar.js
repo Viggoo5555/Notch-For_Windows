@@ -484,7 +484,12 @@ function buildTray() {
       button.appendChild(dot);
     }
     button.addEventListener('click', () => {
-      if (api) api.trayClick(item.i);
+      if (!api) return;
+      // The name travels with the press: volume, the radio and the backlight are
+      // answered by Notch's own panel, which needs to know which one this is,
+      // and where the button sits so the panel opens above it.
+      const box = button.getBoundingClientRect();
+      api.trayClick(item.i, { name: item.name, left: box.left + box.width / 2 });
     });
     trayEl.appendChild(button);
   }

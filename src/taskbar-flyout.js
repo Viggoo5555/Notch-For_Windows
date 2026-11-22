@@ -39,6 +39,8 @@ let style = 'glass';
 // 'windows' is an app's window list; 'tray' is Notch's own notification panel,
 // which lists every icon the shell holds instead.
 let kind = 'windows';
+// The readings the quick panel is drawn from: volume, backlight and the radio.
+let quick = null;
 
 const trayIconCache = new Map();
 
@@ -70,8 +72,109 @@ function initials(text) {
     .toUpperCase();
 }
 
+// A labelled row of the quick panel: a title on the left, whatever reads its
+// value on the right, and one control under them.
+function quickBlock(title, readout, control, wide) {
+  const box = document.createElement('div');
+  box.className = 'qs-block';
+  const head = document.createElement('div');
+  head.className = 'qs-head';
+  const name = document.createElement('span');
+  name.className = 'qs-name';
+  name.textContent = title;
+  head.appendChild(name);
+  for (const node of [readout, control]) if (node) head.appendChild(node);
+  box.appendChild(head);
+  if (wide) box.appendChild(wide);
+  return box;
+}
+
+function quickReadout(text) {
+  const span = document.createElement('span');
+  span.className = 'qs-value';
+  span.textContent = text;
+  return span;
+}
+
+function quickButton(text, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'qs-btn';
+  button.textContent = text;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+// A slider that follows the thumb at once and writes to the helper at most every
+// 60 ms: a drag is a stream of values and the endpoint only needs the last one.
+function quickSlider(what, value, onMove) {
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = '0';
+  input.max = '100';
+  input.step = '1';
+  input.className = 'qs-slider';
+  input.value = String(Math.max(0, Math.min(100, Number(value) || 0)));
+  input.setAttribute('aria-label', what === 'volume' ? 'Volume' : 'Brightness');
+  let timer = 0;
+  input.addEventListener('input', () => {
+    const next = Number(input.value);
+    onMove(next);
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = 0;
+      if (api) api.setQuick({ what, value: Number(input.value) });
+    }, 60);
+  });
+  return input;
+}
+
+function renderQuick() {
+  list.replaceChildren();
+  const data = quick || {};
+  if (data.volume !== null && data.volume !== undefined) {
+    const readout = quickReadout(data.mute ? 'Muted' : `${data.volume}%`);
+    const mute = quickButton(data.mute ? 'Unmute' : 'Mute', () => {
+      if (!api) return;
+      api.mute();
+      const nowMuted = mute.textContent === 'Mute';
+      mute.textContent = nowMuted ? 'Unmute' : 'Mute';
+      readout.textContent = nowMuted ? 'Muted' : `${data.volume}%`;
+    });
+    const slider = quickSlider('volume', data.volume, (next) => {
+      readout.textContent = `${next}%`;
+      if (mute.textContent === 'Unmute') mute.textContent = 'Mute';
+    });
+    list.appendChild(quickBlock('Volume', readout, mute, slider));
+  }
+  if (data.brightness !== null && data.brightness !== undefined) {
+    const readout = quickReadout(`${data.brightness}%`);
+    const slider = quickSlider('brightness', data.brightness, (next) => {
+      readout.textContent = `${next}%`;
+    });
+    list.appendChild(quickBlock('Brightness', readout, null, slider));
+  }
+  const state =
+    data.wifi === 'on'
+      ? data.ssid
+        ? `Connected · ${data.ssid}`
+        : 'Connected'
+      : data.wifi === 'off'
+        ? 'Off'
+        : 'No Wi-Fi adapter';
+  const settings = quickButton('Network settings', () => {
+    if (api) api.openQuick('wifi');
+  });
+  settings.classList.add('qs-wide');
+  list.appendChild(quickBlock('Wi-Fi', quickReadout(state), null, settings));
+}
+
 function render() {
   list.replaceChildren();
+  if (kind === 'quick') {
+    renderQuick();
+    return;
+  }
   if (!rows.length) {
     const empty = document.createElement('div');
     empty.className = 'fx-empty';
@@ -114,7 +217,7 @@ function render() {
         button.appendChild(badge);
       }
       button.addEventListener('click', () => {
-        if (api) api.trayPick(row.i);
+        if (api) api.trayPick(row.i, { name: row.name });
       });
     } else {
       button.addEventListener('click', () => {
@@ -178,6 +281,7 @@ if (api) {
       kind = data.kind;
       root.dataset.kind = kind;
     }
+    if (data && data.quick) quick = data.quick;
     if (data && data.style) {
       style = data.style;
       root.dataset.style = style;

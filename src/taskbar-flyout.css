@@ -174,3 +174,81 @@ body {
   color: rgba(236, 241, 250, 0.6);
   font-size: 11.5px;
 }
+
+/* ------------------------------------------------------- the quick panel */
+
+/* Volume, backlight and the radio: a block each, so the sheet reads like the
+   quick settings it stands in for without being a wall of sliders. */
+.qs-block {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  min-height: 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.qs-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: rgba(236, 241, 250, 0.94);
+  font-size: 11.5px;
+}
+
+.qs-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.qs-value {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(236, 241, 250, 0.62);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.qs-btn {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(236, 241, 250, 0.92);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.qs-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.qs-btn:active {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.qs-wide {
+  width: 100%;
+  padding: 5px 8px;
+}
+
+.qs-slider {
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  accent-color: #9ecbff;
+  cursor: pointer;
+}
