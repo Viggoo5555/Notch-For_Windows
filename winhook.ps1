@@ -250,6 +250,9 @@ public class JarvisWinHook
     private static bool _winDown = false;
     private static int _slot = 0;
     private static bool _slotUp = false;
+    // The press Windows was given for a chord, and which Windows key it was.
+    private static bool _chord = false;
+    private static uint _winVk = 0;
 
     // 1..9 and 0 (tenth), from either the number row or the numpad, so the same
     // key Windows uses to open a taskbar app opens ours.
@@ -1011,15 +1014,14 @@ public class JarvisWinHook
         return input;
     }
 
-    // Shift in between makes Windows treat the release as a chord, so Start stays
-    // shut, while the Win up still lands and clears the modifier state.
-    private static void ReleaseWin(uint vk)
+    // A chord is the only thing Windows is ever given a real Windows press for,
+    // and it gets one of each: down when the other key arrives, up when the key
+    // comes back up. Marked as ours, so the hook itself ignores it.
+    private static void SendWin(uint vk, bool up)
     {
-        INPUT[] inputs = new INPUT[3];
-        inputs[0] = KeyInput(VK_SHIFT, false);
-        inputs[1] = KeyInput(vk, true);
-        inputs[2] = KeyInput(VK_SHIFT, true);
-        SendInput(3, inputs, Marshal.SizeOf(typeof(INPUT)));
+        INPUT[] inputs = new INPUT[1];
+        inputs[0] = KeyInput(vk, up);
+        SendInput(1, inputs, Marshal.SizeOf(typeof(INPUT)));
     }
 
     // An exception on this thread ends the process, and the Windows key, the taskbar
@@ -1054,14 +1056,22 @@ public class JarvisWinHook
 
                 if (isWin && down)
                 {
+                    // Swallowed, both halves yet to come: Windows never sees a press
+                    // of its own, so nothing it does with one — Start opening on it,
+                    // or on the release — can happen. Before this the press was let
+                    // through and only the release was taken, which is why the menu
+                    // kept opening: the shell had already been told about the key.
                     _other = false;
                     _winDown = true;
                     _slot = 0;
                     _slotUp = false;
+                    _chord = false;
+                    _winVk = info.vkCode;
+                    return (IntPtr)1;
                 }
-                else if (!isWin && down)
+                else if (!isWin && down && _winDown)
                 {
-                    int slot = _winDown ? SlotFor(info.vkCode) : 0;
+                    int slot = SlotFor(info.vkCode);
                     if (slot > 0)
                     {
                         // Win+number is ours: the number never reaches the shell,
@@ -1071,7 +1081,13 @@ public class JarvisWinHook
                         _other = true;
                         return (IntPtr)1;
                     }
-                    // A chord is in progress: let Windows have it.
+                    // A real chord (Win+E, Win+D, Win+L): hand over the press it
+                    // never got, then let the key itself through.
+                    if (!_chord)
+                    {
+                        _chord = true;
+                        SendWin(_winVk, false);
+                    }
                     _other = true;
                 }
                 else if (!isWin && up && _slotUp && SlotFor(info.vkCode) == _slot)
@@ -1081,24 +1097,27 @@ public class JarvisWinHook
                 }
                 else if (isWin && up)
                 {
+                    bool chord = _chord;
+                    int slot = _slot;
                     _winDown = false;
-                    if (_slot > 0)
+                    _slot = 0;
+                    _slotUp = false;
+                    _other = false;
+                    _chord = false;
+                    // The release is always swallowed too; only a chord gets a
+                    // synthetic one, to clear the press it was given.
+                    if (chord) SendWin(info.vkCode, true);
+                    if (slot > 0)
                     {
-                        int slot = _slot;
-                        _slot = 0;
                         Console.WriteLine("slot " + slot);
                         Console.Out.Flush();
-                        ReleaseWin(info.vkCode);
-                        return (IntPtr)1;
                     }
-                    if (!_other)
+                    else if (!chord)
                     {
                         Console.WriteLine("win");
                         Console.Out.Flush();
-                        ReleaseWin(info.vkCode);
-                        return (IntPtr)1;
                     }
-                    _other = false;
+                    return (IntPtr)1;
                 }
             }
         }

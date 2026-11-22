@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.40.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.40/Notch-Setup-1.2.40.exe)**
+**[Notch-Setup-1.2.41.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.41/Notch-Setup-1.2.41.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -363,6 +363,14 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.41** — the Windows key is Notch's, not Windows'. The hook used to let the
+press through and take only the release, which left the shell already told about
+the key — so Start kept opening (once it worked, then it never did again). The
+press and the release are both swallowed now, so a lone tap cannot reach Windows
+at all; a real chord (Win+E, Win+D, Win+L, Win+Shift+S) is handed a synthetic
+press of its own at the moment the other key arrives, so those still work, and
+Win+number never leaves the app. `winhook.ps1` is the only file that changed.
 
 **v1.2.40** — the bar is the user's taskbar, not a guess at it. The pins are now the
 apps Windows itself has pinned, read from Explorer's taskbar-pins folder and put
