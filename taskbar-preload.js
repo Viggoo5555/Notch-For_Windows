@@ -16,7 +16,7 @@ contextBridge.exposeInMainWorld('taskbarAPI', {
   start: () => ipcRenderer.send('taskbar:start'),
   system: (kind) => ipcRenderer.send('taskbar:system', kind),
   trayClick: (index) => ipcRenderer.send('taskbar:tray', index),
-  overflow: () => ipcRenderer.send('taskbar:overflow'),
+  overflow: (payload) => ipcRenderer.send('taskbar:overflow', payload),
   resize: (payload) => ipcRenderer.send('taskbar:size', payload),
   hit: (payload) => ipcRenderer.send('taskbar:hit', payload),
   hoverGroup: (payload) => ipcRenderer.send('taskbar:hover', payload),
@@ -28,4 +28,6 @@ contextBridge.exposeInMainWorld('taskbarAPI', {
   onFlyoutBackdrop: (callback) => ipcRenderer.on('flyout:backdrop', (_event, data) => callback(data)),
   flyoutReady: () => ipcRenderer.send('flyout:ready'),
   pick: (hwnd) => ipcRenderer.send('flyout:pick', hwnd),
+  // A row of Notch's own notification panel: the shell's icon behind it.
+  trayPick: (index) => ipcRenderer.send('flyout:tray', index),
 });

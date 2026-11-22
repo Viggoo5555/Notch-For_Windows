@@ -4,6 +4,7 @@
 // list in its own small window above the bar.
 
 import { LiquidGlass } from './vendor/liquidglass.js';
+import { keyOutIcon } from './tray-icon.js';
 
 const root = document.querySelector('#tbRoot');
 const bar = document.querySelector('#tbBar');
@@ -401,48 +402,6 @@ function buildApps() {
   }
 }
 
-// Tray icons are pixels lifted off the notification area, so the taskbar they
-// sit on comes with them. Drop that background: sample the corners, then make
-// anything close to it transparent.
-async function keyOutIcon(src) {
-  const image = new Image();
-  image.src = src;
-  await image.decode();
-  const canvas = document.createElement('canvas');
-  canvas.width = image.width;
-  canvas.height = image.height;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return src;
-  ctx.drawImage(image, 0, 0);
-  const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const pixels = frame.data;
-  const corners = [
-    0,
-    (canvas.width - 1) * 4,
-    (canvas.height - 1) * canvas.width * 4,
-    ((canvas.height - 1) * canvas.width + canvas.width - 1) * 4,
-  ];
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  for (const index of corners) {
-    r += pixels[index];
-    g += pixels[index + 1];
-    b += pixels[index + 2];
-  }
-  r /= corners.length;
-  g /= corners.length;
-  b /= corners.length;
-  for (let i = 0; i < pixels.length; i += 4) {
-    const distance =
-      Math.abs(pixels[i] - r) + Math.abs(pixels[i + 1] - g) + Math.abs(pixels[i + 2] - b);
-    if (distance < 40) pixels[i + 3] = 0;
-    else if (distance < 96) pixels[i + 3] = Math.round((pixels[i + 3] * (distance - 40)) / 56);
-  }
-  ctx.putImageData(frame, 0, 0);
-  return canvas.toDataURL('image/png');
-}
-
 const trayIconCache = new Map();
 
 function useTrayIcon(img, src) {
@@ -483,9 +442,9 @@ const FALLBACK_TRAY = [
   },
 ];
 
-// The chevron at the head of the tray is Windows' own ^: it opens the panel of
-// notification icons the shell keeps hidden, so every icon is reachable even
-// when the bar has no room for it.
+// The chevron at the head of the tray opens Notch's own notification panel: every
+// icon the shell holds, the ones behind Windows' overflow flyout as well, listed
+// in one place above the bar.
 function overflowButton() {
   const button = document.createElement('button');
   button.type = 'button';
@@ -495,7 +454,11 @@ function overflowButton() {
   button.innerHTML =
     '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.4 12.6 10 8l4.6 4.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>';
   button.addEventListener('click', () => {
-    if (api) api.overflow();
+    if (!api) return;
+    // Where the button sits, so the panel opens above it rather than above the
+    // middle of the screen.
+    const box = button.getBoundingClientRect();
+    api.overflow({ left: box.left + box.width / 2 });
   });
   return button;
 }

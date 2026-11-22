@@ -389,6 +389,52 @@ public class JarvisWinHook
     // the taskbar draws its own clock, and the sliver is not an icon.
     private static List<AutomationElement> _tray = new List<AutomationElement>();
 
+    // The icons the bar has no room for live in the shell's overflow flyout, which
+    // is a window of its own rather than part of the bar. It is walked as well, so
+    // the panel Notch draws lists everything the notification area holds; its rows
+    // are marked, because there is nothing on screen to photograph for them.
+    private static readonly string[] OverflowClasses =
+    {
+        "NotifyIconOverflowWindow",            // Windows 10, and 11 before 22H2
+        "TopLevelWindowForOverflowXamlIsland", // Windows 11 after it
+    };
+
+    // `seen` is what the bar already listed: an icon Windows 11 keeps in the bar's
+    // own tree but out of sight can also be found in the overflow flyout, and the
+    // panel must list it once.
+    private static void AppendTrayIcons(StringBuilder output, AutomationElement root, string prefix, HashSet<string> seen)
+    {
+        AutomationElementCollection items = root.FindAll(
+            TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.AutomationIdProperty, "SystemTrayIcon"));
+        foreach (AutomationElement element in items)
+        {
+            try
+            {
+                string cls = element.Current.ClassName ?? "";
+                System.Windows.Rect box = element.Current.BoundingRectangle;
+                // An icon whose bar is hidden still exists to be pressed, so it is
+                // still listed: there is simply no picture to go with it, because
+                // there are no pixels left to photograph.
+                string name = (element.Current.Name ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
+                if (name.Length > 0)
+                {
+                    if (prefix.Length > 0 && seen.Contains(name)) continue;
+                    seen.Add(name);
+                }
+                output.Append(_tray.Count).Append('\t')
+                    .Append((int)box.X).Append('\t').Append((int)box.Y).Append('\t')
+                    .Append((int)box.Width).Append('\t').Append((int)box.Height).Append('\t')
+                    .Append(prefix).Append(cls).Append('\t').Append(name).Append('\n');
+                _tray.Add(element);
+            }
+            catch
+            {
+                // an icon that vanished mid-walk: skip it
+            }
+        }
+    }
+
     public static void ListTray()
     {
         _tray.Clear();
@@ -399,32 +445,14 @@ public class JarvisWinHook
             AutomationElement shell = AutomationElement.RootElement.FindFirst(
                 TreeScope.Descendants,
                 new PropertyCondition(AutomationElement.ClassNameProperty, "Shell_TrayWnd"));
-            if (shell != null)
+            HashSet<string> seen = new HashSet<string>();
+            if (shell != null) AppendTrayIcons(output, shell, "", seen);
+            foreach (string overflowClass in OverflowClasses)
             {
-                AutomationElementCollection items = shell.FindAll(
-                    TreeScope.Descendants,
-                    new PropertyCondition(AutomationElement.AutomationIdProperty, "SystemTrayIcon"));
-                foreach (AutomationElement element in items)
-                {
-                    try
-                    {
-                        string cls = element.Current.ClassName ?? "";
-                        System.Windows.Rect box = element.Current.BoundingRectangle;
-                        // An icon whose bar is hidden still exists to be pressed, so
-                        // it is still listed: there is simply no picture to go with
-                        // it, because there are no pixels left to photograph.
-                        string name = (element.Current.Name ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
-                        output.Append(_tray.Count).Append('\t')
-                            .Append((int)box.X).Append('\t').Append((int)box.Y).Append('\t')
-                            .Append((int)box.Width).Append('\t').Append((int)box.Height).Append('\t')
-                            .Append(cls).Append('\t').Append(name).Append('\n');
-                        _tray.Add(element);
-                    }
-                    catch
-                    {
-                        // an icon that vanished mid-walk: skip it
-                    }
-                }
+                IntPtr handle = FindWindow(overflowClass, null);
+                if (handle == IntPtr.Zero) continue;
+                AutomationElement flyout = AutomationElement.FromHandle(handle);
+                if (flyout != null) AppendTrayIcons(output, flyout, "Ov:", seen);
             }
         }
         catch
@@ -471,6 +499,10 @@ public class JarvisWinHook
         {
             System.Windows.Rect box = element.Current.BoundingRectangle;
             if (box.Width <= 0 || box.Height <= 0) return false;
+            // An icon the shell keeps in its overflow flyout has no pixels on
+            // screen; clicking where its rectangle says would land on whatever is
+            // there instead. It gets Invoke, and nothing else.
+            if (element.Current.IsOffscreen) return false;
             SetCursorPos((int)(box.X + box.Width / 2), (int)(box.Y + box.Height / 2));
             mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
             mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);

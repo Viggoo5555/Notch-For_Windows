@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.53.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.53/Notch-Setup-1.2.53.exe)**
+**[Notch-Setup-1.2.54.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.54/Notch-Setup-1.2.54.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -65,8 +65,11 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   focus the first ten buttons. Optional auto-hide keeps the bar off-screen until you
   touch the bottom edge or open the launcher. Attached is one bar along the whole
   bottom edge: the apps stay centred on the screen while the notification tray,   the battery and the clock hold the right edge, the way a taskbar should, and a click on
-  a tray icon is passed to that icon. A chevron leads the tray, as on Windows: it opens
-  the notification icons the shell keeps hidden, every one of them clickable there.
+  a tray icon is passed to that icon. A chevron leads the tray, as on Windows, but what
+  it opens is Notch's own notification panel: every icon the notification area holds —
+  the ones on the bar and the ones the shell keeps in its overflow flyout — in one
+  glass list above the bar, each named, each one pressed through the same helper the
+  bar's own icons use. A second press on the chevron, or moving away, closes it.
   Right-click a button to pin it to the bar or take it off again, and drag a pin to
   put it where you want it — the order is kept between restarts.
 - **Library and store** — the library scans Steam, Epic and your own shortcuts, shows
@@ -305,7 +308,8 @@ taskbar-preload.js         bridge for the taskbar islands
 src/index.html             notch pill + expanded panel (src/app.js, src/styles.css)
 src/launcher.html          the search sheet (src/launcher.js, src/launcher.css)
 src/taskbar.html           pins and open windows (src/taskbar.js, src/taskbar.css)
-src/taskbar-flyout.html    the list of an app's windows, in liquid glass
+src/taskbar-flyout.html    the window list and the notification panel, in liquid glass
+src/tray-icon.js           drops the bar's background out of a tray icon
 src/widget.html            the detached floating card
 src/assistant.html         Jarvis chat and voice UI (src/assistant*.js)
 src/assistant-stt.worker.js  Whisper in a worker, on WebGPU or WASM
@@ -373,6 +377,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.54** — the notification area is Notch's own now. A press on the chevron no
+longer falls through to Windows' overflow flyout: it opens a liquid-glass panel
+above the bar listing every icon the notification area holds — the ones on the bar
+and the ones the shell keeps out of sight in its overflow flyout, which is walked
+too — each with its name, and pressing a row presses that icon through the same
+helper the bar's own icons use. The panel wears the bar's surface (liquid, frosted
+or black), stays while the pointer is over it or the chevron, closes when the
+pointer leaves or an icon is pressed, and marks the icons Windows draws no picture
+of as `hidden`. Icons still come off a screenshot of the real bar where there is
+one; the key-out that drops the bar's background now lives in `src/tray-icon.js`
+and is shared by the bar and the panel.
 
 **v1.2.53** — a press on the bar is answered at once. The helper reads its commands
 on one thread, and the slow ones sat in front of a press: the notification area's

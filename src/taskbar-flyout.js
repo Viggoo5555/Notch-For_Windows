@@ -4,6 +4,7 @@
 // main process sampled behind it.
 
 import { LiquidGlass } from './vendor/liquidglass.js';
+import { keyOutIcon } from './tray-icon.js';
 
 const root = document.querySelector('#fxRoot');
 const pane = document.querySelector('#fxPane');
@@ -35,6 +36,30 @@ let rows = [];
 let instance = null;
 let starting = false;
 let style = 'glass';
+// 'windows' is an app's window list; 'tray' is Notch's own notification panel,
+// which lists every icon the shell holds instead.
+let kind = 'windows';
+
+const trayIconCache = new Map();
+
+// A tray icon is lifted off a screenshot of Windows' own bar, so it comes with
+// that bar's background; it is dropped here the way the bar drops it.
+function useTrayIcon(img, src) {
+  if (trayIconCache.has(src)) {
+    img.src = trayIconCache.get(src);
+    return;
+  }
+  img.src = src;
+  keyOutIcon(src)
+    .then((clean) => {
+      if (!clean) return;
+      trayIconCache.set(src, clean);
+      img.src = clean;
+    })
+    .catch(() => {
+      /* keep the raw crop */
+    });
+}
 
 function initials(text) {
   return String(text || '?')
@@ -47,29 +72,55 @@ function initials(text) {
 
 function render() {
   list.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'fx-empty';
+    empty.textContent = kind === 'tray' ? 'Nothing in the tray' : 'No windows';
+    list.appendChild(empty);
+    return;
+  }
   for (const row of rows) {
+    const tray = kind === 'tray';
+    const text = String(row.title || row.name || (tray ? 'System tray' : 'Window'));
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'fx-row';
-    button.title = row.title || 'Window';
+    button.title = text;
     if (row.icon) {
       const img = document.createElement('img');
-      img.src = row.icon;
       img.alt = '';
+      img.decoding = 'async';
+      if (tray) useTrayIcon(img, row.icon);
+      else img.src = row.icon;
       button.appendChild(img);
     } else {
       const label = document.createElement('span');
       label.className = 'fx-letters';
-      label.textContent = initials(row.title);
+      label.textContent = initials(text);
       button.appendChild(label);
     }
     const title = document.createElement('span');
     title.className = 'fx-title';
-    title.textContent = row.title || 'Window';
+    title.textContent = text;
     button.appendChild(title);
-    button.addEventListener('click', () => {
-      if (api) api.pick(row.hwnd);
-    });
+    if (tray) {
+      // An icon Windows keeps in its overflow area is still listed, and says so:
+      // there is no picture of it to show, and the shell sometimes refuses a
+      // press on one that is not on screen.
+      if (row.hidden) {
+        const badge = document.createElement('span');
+        badge.className = 'fx-badge';
+        badge.textContent = 'hidden';
+        button.appendChild(badge);
+      }
+      button.addEventListener('click', () => {
+        if (api) api.trayPick(row.i);
+      });
+    } else {
+      button.addEventListener('click', () => {
+        if (api) api.pick(row.hwnd);
+      });
+    }
     list.appendChild(button);
   }
 }
@@ -123,6 +174,10 @@ source.addEventListener('load', () => {
 if (api) {
   api.onRows((data) => {
     rows = data && Array.isArray(data.rows) ? data.rows : [];
+    if (data && data.kind) {
+      kind = data.kind;
+      root.dataset.kind = kind;
+    }
     if (data && data.style) {
       style = data.style;
       root.dataset.style = style;

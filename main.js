@@ -6401,6 +6401,10 @@ let taskbarMouseTimer = null;
 // ------------------------------------------------------------------ tray
 
 let trayItems = [];
+// Every icon the notification area holds, the ones Windows keeps behind its
+// overflow flyout included. This is what the panel behind the chevron lists;
+// `trayItems` stays the bar's own row, which is what the bar draws.
+let trayAll = [];
 let trayTimer = null;
 let trayBusy = false;
 let trayListBuffer = null;
@@ -6418,6 +6422,9 @@ const trayIconByName = new Map();
 // stacks its thumbnails under one button.
 let flyoutWin = null;
 let flyoutKey = null;
+// What the small window above the bar is showing: 'windows' is the hover list of
+// an app's windows, 'tray' is Notch's own notification panel.
+let flyoutKind = '';
 let flyoutPoll = null;
 let flyoutOutside = 0;
 let flyoutBounds = null;
@@ -7127,7 +7134,12 @@ async function refreshTray(force) {
     const rows = [];
     let clockLeft = null;
     for (const line of raw) {
-      const [index, x, y, w, h, cls, ...rest] = String(line).split('\t');
+      const [index, x, y, w, h, rawClass, ...rest] = String(line).split('\t');
+      // The helper marks the icons it found in the shell's overflow flyout: they
+      // are part of the notification area but they are not on screen, so there
+      // are no pixels to lift for them.
+      const hidden = String(rawClass || '').startsWith('Ov:');
+      const cls = hidden ? rawClass.slice(3) : rawClass;
       const name = rest.join(' ').trim();
       if (cls === 'SystemTray.OmniButton') {
         // The chevron's own place marks the clock; with the bar hidden it has no
@@ -7143,6 +7155,7 @@ async function refreshTray(force) {
         w: Number(w),
         h: Number(h),
         name: name.split(/\s{2,}/)[0],
+        hidden,
       });
     }
     // The battery lives in the tray. Its tooltip carries the charge, and the bar
@@ -7178,6 +7191,15 @@ async function refreshTray(force) {
     } else if (force) {
       sendTaskbarUpdate();
     }
+    // Read after the capture, not before: an icon lifted off the bar just now is
+    // in hand for the panel as well.
+    trayAll = rows.map((row) => ({
+      i: row.i,
+      name: row.name || 'System tray',
+      icon: previous.get(`${row.name}|${row.x}|${row.y}`) || trayIconByName.get(row.name) || null,
+      hidden: !!row.hidden,
+    }));
+    refreshTrayPanel();
   } finally {
     trayBusy = false;
   }
@@ -7328,6 +7350,7 @@ function stopFlyoutPoll() {
 function hideFlyout() {
   stopFlyoutPoll();
   flyoutKey = null;
+  flyoutKind = '';
   flyoutBounds = null;
   if (flyoutWin && !flyoutWin.isDestroyed() && flyoutWin.isVisible()) flyoutWin.hide();
 }
@@ -7387,6 +7410,7 @@ function showFlyout(app, left) {
   const win = createFlyout();
   flyoutBounds = { x, y, width, height };
   flyoutKey = app.key;
+  flyoutKind = 'windows';
   flyoutLeft = left;
   win.setBounds({ x, y, width, height }, false);
   if (!win.isVisible()) win.showInactive();
@@ -7396,6 +7420,48 @@ function showFlyout(app, left) {
   // moment before it arrives.
   if (mode.style === 'glass') sendRegionShot(win, 'flyout:backdrop');
   startFlyoutPoll();
+}
+
+// Notch's own notification area: everything the shell holds in its tray, hidden
+// icons included, listed above the bar. A row is a real icon of the shell's, so
+// pressing it goes through the same helper press as the bar's own icons do.
+function showTrayPanel(left) {
+  if (!taskbarWin || taskbarWin.isDestroyed()) return;
+  const bar = taskbarWin.getBounds();
+  const rows = trayAll.map((row) => ({
+    i: row.i,
+    name: row.name || 'System tray',
+    icon: row.icon || null,
+    hidden: !!row.hidden,
+  }));
+  const width = 272;
+  // One row per icon, and the panel never grows past the room above the bar: a
+  // tray with more icons than that scrolls.
+  const wantHeight = 10 + Math.max(1, rows.length) * 30;
+  const height = Math.max(120, Math.min(wantHeight, bar.y - 18));
+  const x = Math.round(
+    Math.min(Math.max(bar.x + left - width / 2, bar.x + 8), bar.x + bar.width - width - 8),
+  );
+  const y = Math.round(bar.y - height - 6);
+  const win = createFlyout();
+  flyoutBounds = { x, y, width, height };
+  flyoutKey = null;
+  flyoutKind = 'tray';
+  flyoutLeft = left;
+  win.setBounds({ x, y, width, height }, false);
+  if (!win.isVisible()) win.showInactive();
+  const mode = taskbarMode();
+  win.webContents.send('flyout:rows', { kind: 'tray', rows, width, height, style: mode.style });
+  if (mode.style === 'glass') sendRegionShot(win, 'flyout:backdrop');
+  startFlyoutPoll();
+}
+
+// The tray changes under an open panel (an icon appears, one goes away), so the
+// panel is redrawn from the list that just arrived.
+function refreshTrayPanel() {
+  if (flyoutKind !== 'tray' || !flyoutWin || flyoutWin.isDestroyed()) return;
+  if (!flyoutWin.isVisible()) return;
+  showTrayPanel(flyoutLeft);
 }
 
 // A pin and a running app are one button, and several windows of the same app
@@ -7528,7 +7594,9 @@ function sendTaskbarUpdate() {
   // The apps island stays even with nothing on it now: the Start button lives
   // there, and a Start menu that comes and goes is not a taskbar. The tray
   // island keeps the clock, and the attached bar holds both.
-  if (!taskbarApps.length) hideFlyout();
+  // An empty bar takes its window list away with it; the notification panel is
+  // not the bar's to close, so it stays.
+  if (!taskbarApps.length && flyoutKind !== 'tray') hideFlyout();
   if (!taskbarWin.isVisible()) {
     taskbarWin.showInactive();
     sendTaskbarBackdrop();
@@ -7936,7 +8004,7 @@ function releaseTrayClickPassThrough() {
   syncTaskbarMouse(cursorDip());
 }
 
-ipcMain.on('taskbar:tray', (_event, index) => {
+function pressTrayIcon(index) {
   const value = Math.trunc(Number(index) || 0);
   if (!hookProc || !hookReady || !hookProc.stdin || hookProc.stdin.destroyed) {
     hookLogNote(`tray press ${value}: no helper running`);
@@ -7968,7 +8036,9 @@ ipcMain.on('taskbar:tray', (_event, index) => {
       hookLogNote('tray press: the helper did not answer');
     }
   }, 1100);
-});
+}
+
+ipcMain.on('taskbar:tray', (_event, index) => pressTrayIcon(index));
 
 // Right-click on a button is where a pin is made or broken, the way Windows'
 // own bar offers it. A pin takes the executable it was pinned from, so it stays
@@ -8017,36 +8087,18 @@ ipcMain.on('taskbar:reorder', (_event, payload) => {
   reorderPinnedApps(payload && payload.order);
 });
 
-// The chevron opens Windows' own panel of hidden notification icons: the shell
-// draws those icons and hangs their menus off them, so pressing the shell's
-// chevron is what gives every one of them back.
-ipcMain.on('taskbar:overflow', () => {
-  if (hookProc && hookProc.stdin && !hookProc.stdin.destroyed) {
-    try {
-      hookProc.stdin.write('trayoverflow\n');
-      return;
-    } catch {
-      /* fall through to the helper process */
-    }
+// The chevron opens Notch's own notification panel instead of Windows' overflow
+// flyout: every icon in the notification area in one list, named, and pressed
+// through the same helper that presses the bar's own icons. A second press on the
+// chevron while it is open closes it again.
+ipcMain.on('taskbar:overflow', (_event, payload) => {
+  const left = Number(payload && payload.left);
+  if (!Number.isFinite(left)) return;
+  if (flyoutKind === 'tray') {
+    hideFlyout();
+    return;
   }
-  // No keyboard hook to ask: the same helper presses the chevron on its own.
-  const exe = hookExe();
-  execFile(
-    exe || 'powershell',
-    exe
-      ? ['-Overflow']
-      : [
-          '-NoProfile',
-          '-NonInteractive',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-File',
-          path.join(__dirname, 'winhook.ps1'),
-          '-Overflow',
-        ],
-    { windowsHide: true, timeout: 12000 },
-    () => {},
-  );
+  showTrayPanel(left);
 });
 
 ipcMain.on('flyout:pick', (_event, hwnd) => {
@@ -8054,7 +8106,18 @@ ipcMain.on('flyout:pick', (_event, hwnd) => {
   activateTaskbarWindow(Number(hwnd));
 });
 
+// A row of the notification panel: the icon is the shell's, so the panel gets out
+// of the way and the helper presses it where it lives.
+ipcMain.on('flyout:tray', (_event, index) => {
+  hideFlyout();
+  pressTrayIcon(index);
+});
+
 ipcMain.on('flyout:ready', () => {
+  if (flyoutKind === 'tray') {
+    showTrayPanel(flyoutLeft);
+    return;
+  }
   if (flyoutKey) {
     const app = findTaskbarApp(flyoutKey);
     if (app) showFlyout(app, flyoutLeft);

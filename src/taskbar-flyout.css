@@ -78,6 +78,23 @@ body {
   flex-direction: column;
   gap: 2px;
   height: 100%;
+  /* A tray with more icons than the panel has room for scrolls rather than
+     squeezing every row down to nothing. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.fx-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.fx-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+}
+
+.fx-list::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .fx-row {
@@ -85,7 +102,7 @@ body {
   align-items: center;
   gap: 9px;
   flex: 1 1 0;
-  min-height: 0;
+  min-height: 26px;
   padding: 0 9px;
   border: 0;
   border-radius: 8px;
@@ -134,4 +151,26 @@ body {
   white-space: nowrap;
   text-overflow: ellipsis;
   pointer-events: none;
+}
+
+/* The icons Windows keeps in its overflow area have no pixels to show, so the row
+   says so instead of pretending to be an empty one. */
+.fx-badge {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(236, 241, 250, 0.6);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.fx-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: rgba(236, 241, 250, 0.6);
+  font-size: 11.5px;
 }
