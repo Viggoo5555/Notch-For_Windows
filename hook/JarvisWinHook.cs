@@ -407,14 +407,11 @@ public class JarvisWinHook
                 ((InvokePattern)pattern).Invoke();
                 return true;
             }
-            // The shell's tray buttons usually offer their click as a default
-            // action rather than Invoke, and that action still works when the bar
-            // they sit on is hidden.
-            if (element.TryGetCurrentPattern(LegacyIAccessiblePattern.Pattern, out pattern))
-            {
-                ((LegacyIAccessiblePattern)pattern).DoDefaultAction();
-                return true;
-            }
+            // A default action would be the next thing to try, but
+            // LegacyIAccessiblePattern is not in the reference assembly this hook
+            // is compiled against, and a type that does not exist is a build error
+            // for the whole helper. The physical click below covers the same tray
+            // buttons; it is the one that has always been there.
         }
         catch
         {
