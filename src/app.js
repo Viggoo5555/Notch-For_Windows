@@ -264,22 +264,91 @@ function renderDetailSystem(s, cpu, ramPct, diskPct) {
 
 // ---------------------------------------------------------------- game library
 
+// The library is the whole shelf, not the first dozen, but only what is near the
+// viewport is ever in the document: two columns, 64 px rows and an 8 px gap, so
+// one step of the scroll is one row of two games. A top and a bottom spacer keep
+// the scrollbar honest about the length of the whole list, and a wheel scroll
+// that turns rows over draws the ones it arrives at. The card and the full view
+// both draw from here.
+const GAME_ROW = 64 + 8;
+const GAME_MARGIN = 2;
+
+const virtualLists = new WeakMap();
+
+function virtualGames(container, games) {
+  let list = virtualLists.get(container);
+  if (!list) {
+    container.replaceChildren();
+    const spaceTop = document.createElement('div');
+    spaceTop.className = 'game-space';
+    const grid = document.createElement('div');
+    grid.className = 'game-grid';
+    const spaceBottom = document.createElement('div');
+    spaceBottom.className = 'game-space';
+    container.append(spaceTop, grid, spaceBottom);
+    list = { games, spaceTop, grid, spaceBottom, frame: 0 };
+    list.paint = () => {
+      const rows = Math.ceil(list.games.length / 2);
+      if (!rows) {
+        list.spaceTop.style.height = '0px';
+        list.spaceBottom.style.height = '0px';
+        list.grid.replaceChildren();
+        return;
+      }
+      const viewH = container.clientHeight || 240;
+      const first = Math.max(
+        0,
+        Math.min(rows - 1, Math.floor(container.scrollTop / GAME_ROW) - GAME_MARGIN),
+      );
+      const last = Math.min(
+        rows - 1,
+        Math.max(first, Math.ceil((container.scrollTop + viewH) / GAME_ROW) + GAME_MARGIN),
+      );
+      list.spaceTop.style.height = `${first * GAME_ROW}px`;
+      list.spaceBottom.style.height = `${(rows - 1 - last) * GAME_ROW}px`;
+      list.grid.replaceChildren();
+      for (let index = first * 2; index < Math.min(list.games.length, (last + 1) * 2); index += 1) {
+        list.grid.appendChild(gameCard(list.games[index]));
+      }
+    };
+    // One listener for the life of the box: the list is redrawn on every
+    // keystroke, and a listener per redraw would pile them up.
+    container.addEventListener(
+      'scroll',
+      () => {
+        if (list.frame) return;
+        list.frame = requestAnimationFrame(() => {
+          list.frame = 0;
+          list.paint();
+        });
+      },
+      { passive: true },
+    );
+    // The panel grows and shrinks under the pointer, so the window of rows has to
+    // follow its height as well as its scroll.
+    if (typeof ResizeObserver === 'function') {
+      new ResizeObserver(() => list.paint()).observe(container);
+    }
+    virtualLists.set(container, list);
+  }
+  list.games = games;
+  list.paint();
+}
+
 function renderGames() {
   const list = $('#gameList');
   const query = state.filter.trim().toLowerCase();
   const filtered = query
     ? state.games.filter((game) => game.name.toLowerCase().includes(query))
     : state.games;
-  const visible = filtered.slice(0, 12);
 
-  list.replaceChildren();
-  for (const game of visible) list.appendChild(gameCard(game));
+  virtualGames(list, filtered);
 
   $('#gameCount').textContent = state.games.length ? String(state.games.length) : '';
 
   const empty = $('#gameEmpty');
-  empty.hidden = visible.length > 0;
-  if (!visible.length) {
+  empty.hidden = filtered.length > 0;
+  if (!filtered.length) {
     if (!state.games.length) {
       $('#emptyTitle').textContent = isDemo ? 'Demo library' : 'No games found';
       $('#emptyHint').textContent = isDemo
@@ -1598,8 +1667,10 @@ function renderDetailLibrary(body) {
   }
   const list = document.createElement('div');
   list.className = 'game-list detail-games';
-  for (const game of state.games) list.appendChild(gameCard(game));
   body.appendChild(list);
+  // The same window onto the shelf as the card: scrolling to the bottom draws
+  // the rows it reaches instead of holding every game at once.
+  virtualGames(list, state.games);
 }
 
 // ------------------------------------------------------------------- store

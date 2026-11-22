@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.56.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.56/Notch-Setup-1.2.56.exe)**
+**[Notch-Setup-1.2.57.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.57/Notch-Setup-1.2.57.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -80,7 +80,9 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   windows; a pin that is not running offers Open instead. Drag a pin to put it where
   you want it — the order is kept between restarts.
 - **Library and store** — the library scans Steam, Epic and your own shortcuts, shows
-  the cover art, and launches a game with a click; add a shortcut by hand if a
+  the cover art, and launches a game with a click; the card holds the whole shelf and
+  scrolls it under the pointer, and only the rows around the viewport are ever drawn,
+  so three hundred games scroll as lightly as a dozen; add a shortcut by hand if a
   launcher keeps it hidden, and a hovered card has a small cross that takes a game
   out of the library for good (a rescan will not bring it back). The bag icon beside
   three named buttons at the top of that view opens **Store** inside
@@ -384,6 +386,16 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.57** — the library scrolls all the way down in the notch itself. The card used
+to stop at twelve games, so the rest of the shelf only existed after opening the full
+view with a click; the card now holds the whole library, and a wheel over it — with
+the panel merely hovered, nothing clicked — walks from the first game to the last.
+Nothing draws the whole shelf either: the list is a top spacer, the two or three
+rows around the viewport and a bottom spacer, and scrolling draws the rows it
+arrives at, so a library of three hundred games costs what a library of ten does.
+The full view uses the same window, and the row count follows the panel as it grows
+and shrinks.
 
 **v1.2.56** — the three things the notification area is really reached for are
 Notch's own. Pressing the volume, the Wi-Fi or the brightness icon — in the bar or in
