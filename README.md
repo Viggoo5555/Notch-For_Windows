@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.62.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.62/Notch-Setup-1.2.62.exe)**
+**[Notch-Setup-1.2.63.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.63/Notch-Setup-1.2.63.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -136,15 +136,16 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   megabytes of weights in the listening window, and the only way to give those back
   is to let go of the model entirely — which then has to be loaded again (about ten
   seconds) before the wake word works.
-- **Keep awake** — one card in the panel, next to Library and Focus. Press it and
-  the screen and the PC stay up until you press it again; the card says which it is,
-  it survives a restart, and off means Windows decides again. The small power glyph
-  in its corner opens *Windows power & sleep*, because the sleep timer is Windows'
-  own setting and not one an overlay should rewrite. Below 10% on battery the card
-  steps aside and says so rather than draining the laptop. The same switch is on the
-  tray, on **Ctrl+Alt+K** and in Jarvis: *keep awake*, *let it sleep*.
-- **Clipboard** — a card with the whole clipboard history in it, scrolled with the
-  wheel inside the box; press any line to copy it again.
+- **Keep awake** — a coffee cup in the panel header, beside the camera and the pin.
+  Press it and the screen and the PC stay up until you press it again: dim when
+  Windows decides, accent with a dot under it while it holds the machine up, and
+  remembered across restarts. Its right button opens *Windows power & sleep*, because
+  the sleep timer is Windows' own setting and not one an overlay should rewrite (the
+  tray's *Windows power settings…* row goes to the same page). Below 10% on battery it
+  steps aside rather than draining the laptop. The same switch is on the tray, on
+  **Ctrl+Alt+K** and in Jarvis: *keep awake*, *let it sleep*.
+- **Clipboard** — a card under System with the whole clipboard history in it,
+  scrolled with the wheel inside the box; press any line to copy it again.
 - **Widget** — drag the panel away from the notch and it becomes a floating card you
   can drop anywhere and keep open.
 - **Performance overlay** — pull the System tile out of the panel and the card you
@@ -405,6 +406,15 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.63** — keep awake is a coffee cup. The card that held it is gone: a small cup
+sits in the panel header beside the camera and the pin, dim when Windows decides and
+accent with a dot under it while it holds the machine up. Press it to keep the screen
+and the PC on, press it again to hand them back, right-press it for Windows' power &
+sleep page. The switch is still on the tray and on **Ctrl+Alt+K**, and the battery
+guard is unchanged. The panel's bottom row is the clipboard's card now — the whole
+history scrolling inside it, in the right-hand column under System — and the library
+card grew a row to take the space it left.
 
 **v1.2.62** — keep awake is a widget. The menu block that grew last round — two
 switches, a length and a settings row — is gone: in its place is one card in the

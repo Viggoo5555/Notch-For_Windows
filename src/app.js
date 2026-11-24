@@ -749,25 +749,19 @@ function toggleMenu() {
 
 // --------------------------------------------------------------- keep awake
 
-// One widget, one switch: the card is the press target and main is the only
-// thing holding the machine up, so what it shows is what main reported.
+// One small cup, one switch. Main is the only thing holding the machine up, so
+// the cup reports what main sent rather than what was asked for.
 function renderAwake() {
   const on = !!state.settings.keepAwake;
-  const tile = $('#awakeTile');
-  if (!tile) return;
-  tile.classList.toggle('is-on', on);
-  const button = $('#awakeToggle');
-  if (button) button.setAttribute('aria-pressed', on ? 'true' : 'false');
-  const meta = $('#awakeState');
-  if (meta) meta.textContent = on ? (state.awake.lowBattery ? 'battery low' : 'on') : 'off';
-  const copy = $('#awakeCopy');
-  if (copy) {
-    copy.textContent = on
-      ? state.awake.lowBattery
-        ? 'Battery is low — the screen may still sleep'
-        : 'The screen and the PC stay on'
-      : 'Windows decides when this PC sleeps';
-  }
+  const button = $('#awakeBtn');
+  if (!button) return;
+  button.classList.toggle('is-on', on);
+  button.setAttribute('aria-pressed', on ? 'true' : 'false');
+  button.title = on
+    ? state.awake.lowBattery
+      ? 'Keep awake is on, but the battery is low — the screen may still sleep'
+      : 'Keep awake is on — press to let Windows decide again'
+    : 'Keep awake is off — Windows decides when this PC sleeps. Press to keep it on';
 }
 
 function paintAwake(data) {
@@ -2621,18 +2615,15 @@ function bindEvents() {
     toast(state.login ? 'Notch will start with Windows' : 'Removed from startup');
   });
 
-  // The keep-awake widget is its own switch: the whole card toggles, except the
-  // small button that opens Windows' power & sleep page.
-  const awakeTile = $('#awakeTile');
-  if (awakeTile) {
-    awakeTile.addEventListener('click', (event) => {
-      if (event.target.closest('#awakePowerBtn')) return;
+  // The cup is the switch; the right button on it is Windows' own power page.
+  const awakeBtn = $('#awakeBtn');
+  if (awakeBtn) {
+    awakeBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
       toggleAwake();
     });
-  }
-  const awakePower = $('#awakePowerBtn');
-  if (awakePower) {
-    awakePower.addEventListener('click', (event) => {
+    awakeBtn.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
       event.stopPropagation();
       if (api.openPowerSettings) api.openPowerSettings();
       toast('Opening Windows power settings');
