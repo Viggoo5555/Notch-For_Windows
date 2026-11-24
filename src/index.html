@@ -98,10 +98,24 @@
               <span>Start with Windows</span>
               <input type="checkbox" id="loginToggle" />
             </label>
-            <label class="menu-row">
-              <span>Keep the screen awake</span>
-              <input type="checkbox" id="awakeToggle" />
+            <div class="menu-sect">Keep awake</div>
+            <label class="menu-row" title="The display does not turn off">
+              <span>Screen stays on</span>
+              <input type="checkbox" id="screenToggle" />
             </label>
+            <label class="menu-row" title="The PC does not go to sleep">
+              <span>PC stays awake</span>
+              <input type="checkbox" id="pcToggle" />
+            </label>
+            <button class="menu-row" id="powerFor" type="button" title="Press to step through: Never, 30 min, 1 hour, 2 hours, 4 hours">
+              <span>For</span>
+              <span class="menu-key" id="powerForLabel">Never</span>
+            </button>
+            <div class="menu-note" id="powerLeft" hidden></div>
+            <button class="menu-row" id="powerSettingsBtn" type="button" title="Sleep timers are a Windows setting">
+              <span>Windows power settings</span>
+              <span class="menu-key">›</span>
+            </button>
             <button class="menu-row" id="settingsBtn" type="button">
               <span>Settings</span>
               <span class="menu-key">›</span>

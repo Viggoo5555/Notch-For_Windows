@@ -91,7 +91,21 @@ const state = {
     taskbarAutoHide: false,
     hideWinTaskbar: true,
     windowsKey: true,
-    keepAwake: false,
+    keepScreen: false,
+    keepWake: false,
+    keepFor: 0,
+    keepUntil: 0,
+    focusKeepsAwake: true,
+  },
+  // What the power holds actually achieved, as main reports it: the switches,
+  // the window, and whether the machine is being held this moment.
+  power: {
+    keepScreen: false,
+    keepWake: false,
+    keepFor: 0,
+    keepUntil: 0,
+    left: 0,
+    leftLabel: '',
   },
   filter: '',
   clips: [],
@@ -196,6 +210,9 @@ function tickClock() {
   $('#clock').textContent = time;
   $('#pillDate').textContent = shortDateFormat.format(now);
   $('#today').textContent = longDateFormat.format(now);
+  // The open menu carries how long the hold has left, which only the clock knows
+  // is now a minute shorter.
+  if (state.open) paintPowerLeft();
 }
 
 // --------------------------------------------------------------------- stats
@@ -629,6 +646,9 @@ function ensureFocusTicker() {
   clearInterval(focusTimer);
   focusTimer = null;
   if (focus.running) focusTimer = setInterval(tickFocus, 1000);
+  // A focus session holds the screen while it runs, so the lock screen does not
+  // arrive in the middle of one.
+  if (api.focusActive) api.focusActive(focus.running);
 }
 
 function startFocus() {
@@ -743,6 +763,77 @@ function toggleMenu() {
   menu.hidden = !menu.hidden;
 }
 
+// --------------------------------------------------------------- keep awake
+
+// The lengths the menu and the sheet offer, in minutes; 0 is "until you switch
+// it off", which is what Never means here.
+const POWER_LENGTHS = [
+  [0, 'Never'],
+  [30, '30 min'],
+  [60, '1 hour'],
+  [120, '2 hours'],
+  [240, '4 hours'],
+];
+
+function powerLengthName(minutes) {
+  const found = POWER_LENGTHS.find(([value]) => value === Number(minutes));
+  return found ? found[1] : `${minutes} min`;
+}
+
+function powerLengthLabel(minutes) {
+  return powerLengthName(minutes).toLowerCase();
+}
+
+function powerLeftText(until) {
+  const left = Math.max(0, Number(until) - Date.now());
+  const minutes = Math.ceil(left / 60000);
+  if (minutes < 1) return 'less than a minute left';
+  if (minutes < 60) return `${minutes} min left`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min left` : `${hours} h left`;
+}
+
+// How long is left, or that it is on with no end: the line under the switches.
+function paintPowerLeft() {
+  const note = $('#powerLeft');
+  if (!note) return;
+  const until = Number(state.power.keepUntil) || 0;
+  const on = !!(state.power.keepScreen || state.power.keepWake);
+  // A hold the app has dropped on a dying battery says why instead of looking
+  // like a switch that stopped working.
+  note.textContent = on && state.power.lowBattery ? 'Paused \u2014 the battery is low' : until ? powerLeftText(until) : '';
+  note.hidden = !note.textContent;
+}
+
+function powerLeftSummary() {
+  const s = state.settings;
+  if (!s.keepScreen && !s.keepWake) return 'off';
+  const until = Number(s.keepUntil) || 0;
+  return until ? powerLeftText(until) : 'until you switch it off';
+}
+
+// Writes the state main reported into every place that shows it. The same shape
+// arrives from the menu's own switches and from Jarvis, so nothing has to be kept
+// in step by hand.
+function applyPower(data) {
+  if (!data || typeof data !== 'object') return;
+  const keepScreen = !!(data.keepScreen ?? state.settings.keepScreen);
+  const keepWake = !!(data.keepWake ?? state.settings.keepWake);
+  const keepFor = Number(data.keepFor ?? state.settings.keepFor) || 0;
+  const keepUntil = Number(data.keepUntil ?? state.settings.keepUntil) || 0;
+  state.power = { ...state.power, ...data, keepScreen, keepWake, keepFor, keepUntil };
+  state.settings = { ...state.settings, keepScreen, keepWake, keepFor, keepUntil };
+  const screen = $('#screenToggle');
+  if (screen) screen.checked = keepScreen;
+  const pc = $('#pcToggle');
+  if (pc) pc.checked = keepWake;
+  const length = $('#powerForLabel');
+  if (length) length.textContent = powerLengthName(keepFor);
+  paintPowerLeft();
+  if (state.settingsOpen) renderSettings();
+}
+
 // ------------------------------------------------------------------ settings
 
 const SETTINGS_SCHEMA = [
@@ -850,6 +941,13 @@ const SETTINGS_SCHEMA = [
     ],
   },
   { key: 'taskbarAutoHide', label: 'Auto-hide', type: 'toggle' },
+  { group: 'Power' },
+  { key: 'keepScreen', label: 'Screen stays on', type: 'toggle' },
+  { key: 'keepWake', label: 'PC stays awake', type: 'toggle' },
+  { key: 'keepFor', label: 'For', type: 'keepFor' },
+  { key: 'powerLeft', label: 'Time left', type: 'status', text: () => powerLeftSummary() },
+  { key: 'focusKeepsAwake', label: 'Focus keeps it awake', type: 'toggle' },
+  { key: 'powerSettings', label: 'Windows', type: 'action', action: 'openPowerSettings', button: 'Power settings' },
   { group: 'Start menu' },
   { key: 'windowsKey', label: 'Windows key opens it', type: 'toggle' },
   { key: 'winHook', label: 'Key hook', type: 'status', text: () => state.winHook },
@@ -1348,6 +1446,24 @@ function renderSettings() {
       input.checked = !!s[item.key];
       input.addEventListener('change', () => updateSetting(item.key, input.checked));
       row.appendChild(input);
+    } else if (item.type === 'keepFor') {
+      // The length is a setting of its own: main turns it into the moment the
+      // window ends, so picking one while a hold is on restarts it from now.
+      const seg = document.createElement('div');
+      seg.className = 'seg';
+      for (const [minutes, label] of POWER_LENGTHS) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.classList.toggle('on', Number(s.keepFor) === minutes);
+        button.addEventListener('click', () => {
+          updateSetting('keepFor', minutes);
+          toast(minutes ? `Awake for ${label.toLowerCase()}` : 'Awake until you switch it off');
+          renderSettings();
+        });
+        seg.appendChild(button);
+      }
+      row.appendChild(seg);
     } else if (item.type === 'segment') {
       const seg = document.createElement('div');
       seg.className = 'seg';
@@ -1377,6 +1493,10 @@ function renderSettings() {
         } else if (item.action === 'copyHookLog') {
           const length = await api.copyHookLog();
           toast(length ? 'Key hook log copied — paste it in the chat' : 'No hook log yet');
+        } else if (item.action === 'openPowerSettings') {
+          // Sleep timers are Windows' own setting; this is the row that says so.
+          if (api.powerSettings) api.powerSettings();
+          toast('Opening Windows power settings');
         } else if (item.action === 'syncPins') {
           // Windows' pins, in Windows' order: the bar is rebuilt from them.
           const result = await api.syncPins();
@@ -2576,11 +2696,43 @@ function bindEvents() {
     toast(state.login ? 'Notch will start with Windows' : 'Removed from startup');
   });
 
-  $('#awakeToggle').addEventListener('change', async (event) => {
-    const on = await api.keepAwake(event.target.checked);
-    // The main process is the one that holds the blocker, so it says what it got.
-    event.target.checked = !!on;
-    toast(on ? 'The screen stays awake' : 'The screen can sleep again');
+  // Two holds and a length. Main derives the window and answers with the state it
+  // actually got, so a switch never shows something the machine is not doing.
+  const powerSwitch = (id, key, onText, offText) => {
+    $(`#${id}`).addEventListener('change', async (event) => {
+      const data = await api.power({ [key]: event.target.checked });
+      applyPower(data);
+      event.target.checked = !!(data && data[key]);
+      toast(event.target.checked ? onText : offText);
+    });
+  };
+  powerSwitch('screenToggle', 'keepScreen', 'The screen stays on', 'The screen can sleep again');
+  powerSwitch('pcToggle', 'keepWake', 'The PC stays awake', 'The PC can sleep again');
+
+  // One row, stepped through rather than a dropdown: a native menu in a
+  // frameless always-on-top window closes the panel out from under it.
+  $('#powerFor').addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const current = Number(state.power.keepFor) || 0;
+    const at = POWER_LENGTHS.findIndex(([value]) => value === current);
+    const nextAt =
+      at >= 0
+        ? (at + 1) % POWER_LENGTHS.length
+        : Math.max(0, POWER_LENGTHS.findIndex(([value]) => value > current));
+    const minutes = POWER_LENGTHS[nextAt][0];
+    const data = await api.power({ keepFor: minutes });
+    applyPower(data);
+    const holding = !!(data && (data.keepScreen || data.keepWake));
+    if (!holding) {
+      toast(minutes ? `A length of ${powerLengthLabel(minutes)} is set for next time` : 'No length set');
+      return;
+    }
+    toast(minutes ? `Awake for ${powerLengthLabel(minutes)}` : 'Awake until you switch it off');
+  });
+
+  $('#powerSettingsBtn').addEventListener('click', () => {
+    if (api.powerSettings) api.powerSettings();
+    toast('Opening Windows power settings');
   });
 
   // Library's own actions live in its full view now, so every card head is the
@@ -2639,6 +2791,9 @@ function bindEvents() {
     state.stats = stats;
     if (state.open) renderStats();
   });
+  // The holds are kept in main, so every surface reads the state it reports back
+  // rather than the switch it just moved.
+  on('onPower', (data) => applyPower(data));
   on('onProcesses', (data) => {
     state.processes = data;
     if (state.detail === 'system') renderProcesses();
@@ -2767,12 +2922,13 @@ async function boot() {
     if (Array.isArray(data.clips)) state.clips = data.clips;
     state.login = !!data.login;
     $('#loginToggle').checked = state.login;
-    if ($('#awakeToggle')) $('#awakeToggle').checked = !!state.settings.keepAwake;
   } catch {
     toast('Could not read system data');
   }
 
   applySettings();
+  // The menu and the sheet start on the holds the machine already has.
+  applyPower(state.settings);
   paintUpdate();
 
   // Asked once on start as well as from the schedule in main: the drawer then has
@@ -2845,6 +3001,7 @@ function createDemoBridge() {
   };
 
   const watchers = { stats: [], clips: [] };
+  const demoPower = { keepScreen: false, keepWake: false, keepFor: 0 };
 
   const drift = (value, amount, min, max) =>
     Math.max(min, Math.min(max, value + (Math.random() - 0.5) * amount));
@@ -2874,6 +3031,18 @@ function createDemoBridge() {
     focus() {},
     quit() {},
     setLogin: async () => false,
+    power: async (patch) => {
+      Object.assign(demoPower, patch || {});
+      const on = demoPower.keepScreen || demoPower.keepWake;
+      return {
+        ...demoPower,
+        keepUntil: on && demoPower.keepFor ? Date.now() + demoPower.keepFor * 60000 : 0,
+        left: 0,
+        leftLabel: '',
+      };
+    },
+    powerSettings: async () => true,
+    focusActive() {},
     rescan: async () => games,
     addGame: async () => games,
     removeGame: async (id) => {

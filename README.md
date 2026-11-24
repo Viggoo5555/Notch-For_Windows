@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.60.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.60/Notch-Setup-1.2.60.exe)**
+**[Notch-Setup-1.2.61.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.61/Notch-Setup-1.2.61.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -99,8 +99,8 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
 - **Jarvis works Notch itself** — the assistant owns the app it lives in, not just
   the machine around it: *Jarvis, make it mint*, *frosted glass*, *turn the taskbar
   on*, *open the library*, *show the performance overlay*, *focus for 25 minutes*,
-  *launch Hades II*, *rescan the library*, *taskbar auto-hide*, *start with Windows*,
-  *quit Notch*. The reply is one short line and the change is already on screen, and
+  *launch Hades II*, *rescan the library*, *taskbar auto-hide*, *keep the pc awake for
+  two hours*, *start with Windows*, *quit Notch*. The reply is one short line and the change is already on screen, and
   the model is told the whole list, so it does not say it cannot.
 - **Jarvis** — an assistant panel with a chat model picker, push-to-talk, and a
   "Hey Jarvis" wake word that keeps listening while the window is hidden — and the
@@ -136,10 +136,23 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   megabytes of weights in the listening window, and the only way to give those back
   is to let go of the model entirely — which then has to be loaded again (about ten
   seconds) before the wake word works.
-- **Keep the screen awake** — one switch in the notch menu (the ⚙ button on the
-  panel), for a long download, a video or a game on the second screen. It holds the
-  display on until it is switched off, survives a restart, and *Jarvis, keep the
-  screen awake* does the same; saying it again lets the screen sleep.
+- **Keep awake** — two holds, because a screen and a computer are different things
+  to keep up, and both live in the notch menu (the ⚙ button on the panel).
+  **Screen stays on** holds the display; **PC stays awake** lets the display dim on
+  its own while the machine keeps working — a long download, a render, a game on the
+  second screen. Either can be held **for 30 minutes, an hour, two or four**, or on
+  **Never**, which keeps it up until it is switched off. A window is a moment, not a
+  countdown: a laptop that sleeps for an hour does not wake with its hour still to
+  run, a window that ran out while the app was closed is over rather than held
+  forever, and the holds survive a restart. The same three switches sit under a
+  **Keep awake** submenu on the tray, and **Ctrl+Alt+K** turns both on or both off
+  from anywhere and says which in a balloon. A focus session holds the screen while
+  it runs, so the lock screen does not arrive in the middle of one, and below 10% on
+  battery both holds stand down instead of draining the laptop — the menu says why.
+  Changing Windows' own sleep timer is not something an app should do behind your
+  back, so the row that would do it opens *Windows power & sleep* instead. Jarvis
+  knows the lot: *keep the pc awake*, *keep the screen on for two hours*, *let it
+  sleep*, *open power settings*.
 - **Widget** — drag the panel away from the notch and it becomes a floating card you
   can drop anywhere and keep open.
 - **Performance overlay** — pull the System tile out of the panel and the card you
@@ -247,7 +260,7 @@ on a graphics card Whisper small hears Danish properly.
 npm run dist
 ```
 
-writes `dist/Notch-Setup-1.2.15.exe`, the installer said above; it needs no Node.js on
+writes `dist/Notch-Setup-<version>.exe`, the installer said above; it needs no Node.js on
 the target machine. `npm run dist:installer` is the same build when the portable is
 not wanted, and releases carry only the installer.
 
@@ -271,8 +284,8 @@ npm run dev            # PORT=4173 by default, HOST=0.0.0.0 to serve it wider
 
 The same pages are checked without starting Windows: `npm run check` reads every
 preload, every IPC channel and every element id the pages ask for, and fails on a
-bridge method that is not there; `npm test` holds the launcher's ranking and its
-calculator to their rules. Both run in CI before a build, so a release cannot
+bridge method that is not there; `npm test` holds the launcher's ranking, its
+calculator and the keep-awake window to their rules. Both run in CI before a build, so a release cannot
 carry a dead button.
 
 ## Shortcuts
@@ -284,6 +297,7 @@ carry a dead button.
 | `Win+1` … `Win+9`, `Win+0` | open or focus the matching taskbar button |
 | `Ctrl+Alt+N` | pin the notch panel open |
 | `Ctrl+Alt+J` | open / close Jarvis |
+| `Ctrl+Alt+K` | keep the screen and the PC awake, or let them sleep again |
 | `Ctrl+Alt+Q` | quit |
 | `↑` `↓` `Home` `End` `PgUp` `PgDn` | move through the launcher |
 | `↵` | open the highlighted row |
@@ -311,6 +325,9 @@ Panel → menu (the sliders icon) → Settings. Everything is stored in
 - **Voice** — speak replies, language (match what I write, Danish, English), the
   voice itself (studio, fast, or a Windows voice), speed, test button, and the
   "Hey Jarvis" wake word
+- **Power** — the two holds (screen, PC), how long they run for (**Never** or a
+  length), whether a focus session keeps the screen on, and a button into Windows'
+  power & sleep settings
 - **Start menu** — whether the Windows key opens this launcher
 - **Start with Windows** — run at login (from the panel menu)
 
@@ -336,9 +353,10 @@ src/voicehud.html          the ring visualiser drawn while Jarvis listens
 src/glass.js               liquid-glass presets for every surface
 src/core/rank.mjs          the launcher's search ranking, on its own
 src/core/calc.mjs          the launcher's calculator, on its own
+src/core/power.js          keep-awake: the two holds, the window, and spoken lengths
 src/vendor/                ybouane/liquidglass build, used as-is
 scripts/check.js           wiring check: bridges, channels, element ids, glass imports
-test/                      the ranking and the calculator, under node:test
+test/                      the ranking, the calculator and the keep-awake window
 ```
 
 Four details are worth knowing because they explain the odd bits:
@@ -399,6 +417,33 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.61** — the machine can be told not to sleep, and it is told properly. The one
+*keep the screen awake* switch is two holds now, because a screen and a computer are
+different things to keep up: **Screen stays on** holds the display, and **PC stays
+awake** lets the display dim while the machine keeps working. Either can be held
+**for 30 minutes, an hour, two or four**, or on **Never**, which keeps it up until it
+is switched off. A window is a moment rather than a countdown — a laptop that sleeps
+for an hour does not wake with its hour still to run — and a window that ended while
+the app was closed is over instead of held forever. The restarted app also starts
+holding the machine again by itself: before this the switch was remembered and only
+re-applied when something touched the settings, so a hold could read *on* in the menu
+while Windows was free to sleep. The holds are on three surfaces — the notch menu, a
+**Keep awake** submenu on the tray, and **Ctrl+Alt+K** from anywhere, which turns
+both on or both off and says so in a balloon. A focus session holds the screen while
+it runs, so the lock screen does not arrive in the middle of one. Below 10% on
+battery both holds stand down and the menu says why, rather than draining the laptop
+dry. The one thing an app cannot honestly do — change the sleep timer Windows keeps —
+is a row that opens *Windows power & sleep* instead of pretending, and Jarvis
+understands the whole set: *keep the pc awake*, *keep the screen on for two hours*,
+*let it sleep*, *open power settings*.
+
+Also fixed: the update check was registered twice, so every install asked GitHub for
+the latest release two times at start-up and two more every six hours after that.
+The decisions behind the holds are a new `src/core/power.js` — which hold a setting
+asks for, what a spoken length means, how long a window has left — with nine
+`node:test` cases over it, so the arithmetic of a timer is checked on every release
+instead of by waiting for one to run out (`npm test` runs 23 now).
 
 **v1.2.60** — the launcher got faster, the preview works, and the app is checked
 before it ships. App icons are now kept between runs (`app-icons.json` beside the

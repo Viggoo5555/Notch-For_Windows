@@ -1141,6 +1141,11 @@ html.demo .glass-backdrop {
   z-index: 6;
   animation: menuIn 0.24s var(--spring-micro) both;
   transform-origin: 100% 0;
+  /* The keep-awake block made the menu taller than the panel on a short list of
+     widgets; it scrolls rather than leaving its last row off the edge. */
+  max-height: 330px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 @keyframes menuIn {
@@ -1175,6 +1180,28 @@ html.demo .glass-backdrop {
   color: var(--faint);
   font-size: 11px;
   letter-spacing: 0.04em;
+}
+
+/* The keep-awake block: a heading, the two switches, the length they run for
+   and one line saying how long is left. */
+.menu-sect {
+  margin: 7px 10px 3px;
+  color: var(--faint);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.menu-note {
+  margin: 0 10px 4px;
+  color: var(--faint);
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+}
+
+.menu-note[hidden] {
+  display: none;
 }
 
 .menu input[type="checkbox"] {
