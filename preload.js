@@ -18,13 +18,11 @@ contextBridge.exposeInMainWorld('notchAPI', {
   focus: () => ipcRenderer.send('notch:focus'),
   quit: () => ipcRenderer.send('notch:quit'),
   setLogin: (value) => ipcRenderer.invoke('notch:login', !!value),
-  // Two holds — the screen and the system — with a length; main derives the
-  // window and answers with the state it ended up in.
-  power: (patch) => ipcRenderer.invoke('notch:power', patch || {}),
-  powerSettings: () => ipcRenderer.invoke('notch:power-settings'),
-  // A focus session asks for the screen to stay on while it runs.
-  focusActive: (value) => ipcRenderer.send('notch:focus-active', !!value),
-  onPower: (callback) => ipcRenderer.on('notch:power', (_event, data) => callback(data)),
+  // The one switch: on keeps the screen and the machine up, off hands them back
+  // to Windows. Main answers with the state it actually got.
+  keepAwake: (value) => ipcRenderer.invoke('notch:awake', !!value),
+  openPowerSettings: () => ipcRenderer.invoke('notch:power-settings'),
+  onAwake: (callback) => ipcRenderer.on('notch:awake', (_event, data) => callback(data)),
   rescan: () => ipcRenderer.invoke('notch:rescan'),
   // The store pages through Steam's search: one answer per screenful.
   storePage: (options) => ipcRenderer.invoke('notch:store-page', options || {}),

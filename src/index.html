@@ -98,24 +98,6 @@
               <span>Start with Windows</span>
               <input type="checkbox" id="loginToggle" />
             </label>
-            <div class="menu-sect">Keep awake</div>
-            <label class="menu-row" title="The display does not turn off">
-              <span>Screen stays on</span>
-              <input type="checkbox" id="screenToggle" />
-            </label>
-            <label class="menu-row" title="The PC does not go to sleep">
-              <span>PC stays awake</span>
-              <input type="checkbox" id="pcToggle" />
-            </label>
-            <button class="menu-row" id="powerFor" type="button" title="Press to step through: Never, 30 min, 1 hour, 2 hours, 4 hours">
-              <span>For</span>
-              <span class="menu-key" id="powerForLabel">Never</span>
-            </button>
-            <div class="menu-note" id="powerLeft" hidden></div>
-            <button class="menu-row" id="powerSettingsBtn" type="button" title="Sleep timers are a Windows setting">
-              <span>Windows power settings</span>
-              <span class="menu-key">›</span>
-            </button>
             <button class="menu-row" id="settingsBtn" type="button">
               <span>Settings</span>
               <span class="menu-key">›</span>
@@ -220,7 +202,25 @@
             </div>
           </section>
 
-          <section class="tile tile-clip" style="--i: 3" data-detail="clip">
+          <section class="tile tile-awake" style="--i: 3" id="awakeTile">
+            <div class="tile-head">
+              <span class="tile-title">Keep awake</span>
+              <span class="tile-meta" id="awakeState">off</span>
+              <span class="spacer"></span>
+              <button class="mini-btn" id="awakePowerBtn" type="button" aria-label="Windows power settings" title="Windows power settings">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 2.2v5.2" />
+                  <path d="M11.6 4.2a5 5 0 1 1-7.2 0" />
+                </svg>
+              </button>
+            </div>
+            <button class="awake-switch" id="awakeToggle" type="button" aria-pressed="false" title="Keep the screen and the PC on">
+              <span class="awake-track"><span class="awake-knob"></span></span>
+              <span class="awake-copy" id="awakeCopy">Windows decides when this PC sleeps</span>
+            </button>
+          </section>
+
+          <section class="tile tile-clip" style="--i: 4" data-detail="clip">
             <div class="tile-head">
               <span class="tile-title">Clipboard</span>
               <span class="tile-meta" id="clipMeta"></span>

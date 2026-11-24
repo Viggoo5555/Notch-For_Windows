@@ -1141,11 +1141,6 @@ html.demo .glass-backdrop {
   z-index: 6;
   animation: menuIn 0.24s var(--spring-micro) both;
   transform-origin: 100% 0;
-  /* The keep-awake block made the menu taller than the panel on a short list of
-     widgets; it scrolls rather than leaving its last row off the edge. */
-  max-height: 330px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 @keyframes menuIn {
@@ -1180,28 +1175,6 @@ html.demo .glass-backdrop {
   color: var(--faint);
   font-size: 11px;
   letter-spacing: 0.04em;
-}
-
-/* The keep-awake block: a heading, the two switches, the length they run for
-   and one line saying how long is left. */
-.menu-sect {
-  margin: 7px 10px 3px;
-  color: var(--faint);
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-
-.menu-note {
-  margin: 0 10px 4px;
-  color: var(--faint);
-  font-size: 10.5px;
-  letter-spacing: 0.01em;
-}
-
-.menu-note[hidden] {
-  display: none;
 }
 
 .menu input[type="checkbox"] {
@@ -1325,7 +1298,83 @@ html.demo .glass-backdrop {
 }
 
 .tile-clip {
-  grid-column: span 12;
+  /* A card, not a strip: as close to square as the 108 px row makes it. */
+  grid-column: span 4;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The keep-awake card is one switch, so the whole card is the press target. */
+.tile-awake {
+  grid-column: span 8;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+
+.tile-awake.is-on {
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 15%, transparent),
+    rgba(255, 255, 255, 0.03)
+  );
+}
+
+.awake-switch {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  flex: 1 1 auto;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.awake-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.14);
+  transition:
+    background 0.24s ease,
+    border-color 0.24s ease;
+}
+
+.awake-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.42);
+  transition: transform 0.26s var(--spring-micro);
+}
+
+.tile-awake.is-on .awake-track {
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.tile-awake.is-on .awake-knob {
+  transform: translateX(22px);
+}
+
+.tile-awake.is-on .awake-copy {
+  color: var(--ink);
 }
 
 .tile-head {
@@ -1862,25 +1911,36 @@ html.demo .glass-backdrop {
 
 /* -------------------------------------------------------------- clipboard */
 
+/* One square card with a list that scrolls inside it, rather than a wide strip
+   of chips: the nth clip in a hundred is one wheel away. */
 .clips {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   margin-top: 8px;
-  height: 60px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
 .clips::-webkit-scrollbar {
-  display: none;
+  width: 6px;
+}
+
+.clips::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .clip {
   flex: 0 0 auto;
-  width: 168px;
-  height: 60px;
-  padding: 9px 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.055);
   background: rgba(255, 255, 255, 0.03);
@@ -1899,7 +1959,7 @@ html.demo .glass-backdrop {
 
 .clip span {
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;

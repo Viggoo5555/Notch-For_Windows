@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.61.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.61/Notch-Setup-1.2.61.exe)**
+**[Notch-Setup-1.2.62.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.62/Notch-Setup-1.2.62.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -99,8 +99,8 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
 - **Jarvis works Notch itself** — the assistant owns the app it lives in, not just
   the machine around it: *Jarvis, make it mint*, *frosted glass*, *turn the taskbar
   on*, *open the library*, *show the performance overlay*, *focus for 25 minutes*,
-  *launch Hades II*, *rescan the library*, *taskbar auto-hide*, *keep the pc awake for
-  two hours*, *start with Windows*, *quit Notch*. The reply is one short line and the change is already on screen, and
+  *launch Hades II*, *rescan the library*, *taskbar auto-hide*, *keep awake*,
+  *start with Windows*, *quit Notch*. The reply is one short line and the change is already on screen, and
   the model is told the whole list, so it does not say it cannot.
 - **Jarvis** — an assistant panel with a chat model picker, push-to-talk, and a
   "Hey Jarvis" wake word that keeps listening while the window is hidden — and the
@@ -136,23 +136,15 @@ the overlay's corner are kept. Nothing else is needed — the first start asks n
   megabytes of weights in the listening window, and the only way to give those back
   is to let go of the model entirely — which then has to be loaded again (about ten
   seconds) before the wake word works.
-- **Keep awake** — two holds, because a screen and a computer are different things
-  to keep up, and both live in the notch menu (the ⚙ button on the panel).
-  **Screen stays on** holds the display; **PC stays awake** lets the display dim on
-  its own while the machine keeps working — a long download, a render, a game on the
-  second screen. Either can be held **for 30 minutes, an hour, two or four**, or on
-  **Never**, which keeps it up until it is switched off. A window is a moment, not a
-  countdown: a laptop that sleeps for an hour does not wake with its hour still to
-  run, a window that ran out while the app was closed is over rather than held
-  forever, and the holds survive a restart. The same three switches sit under a
-  **Keep awake** submenu on the tray, and **Ctrl+Alt+K** turns both on or both off
-  from anywhere and says which in a balloon. A focus session holds the screen while
-  it runs, so the lock screen does not arrive in the middle of one, and below 10% on
-  battery both holds stand down instead of draining the laptop — the menu says why.
-  Changing Windows' own sleep timer is not something an app should do behind your
-  back, so the row that would do it opens *Windows power & sleep* instead. Jarvis
-  knows the lot: *keep the pc awake*, *keep the screen on for two hours*, *let it
-  sleep*, *open power settings*.
+- **Keep awake** — one card in the panel, next to Library and Focus. Press it and
+  the screen and the PC stay up until you press it again; the card says which it is,
+  it survives a restart, and off means Windows decides again. The small power glyph
+  in its corner opens *Windows power & sleep*, because the sleep timer is Windows'
+  own setting and not one an overlay should rewrite. Below 10% on battery the card
+  steps aside and says so rather than draining the laptop. The same switch is on the
+  tray, on **Ctrl+Alt+K** and in Jarvis: *keep awake*, *let it sleep*.
+- **Clipboard** — a card with the whole clipboard history in it, scrolled with the
+  wheel inside the box; press any line to copy it again.
 - **Widget** — drag the panel away from the notch and it becomes a floating card you
   can drop anywhere and keep open.
 - **Performance overlay** — pull the System tile out of the panel and the card you
@@ -284,8 +276,8 @@ npm run dev            # PORT=4173 by default, HOST=0.0.0.0 to serve it wider
 
 The same pages are checked without starting Windows: `npm run check` reads every
 preload, every IPC channel and every element id the pages ask for, and fails on a
-bridge method that is not there; `npm test` holds the launcher's ranking, its
-calculator and the keep-awake window to their rules. Both run in CI before a build, so a release cannot
+bridge method that is not there; `npm test` holds the launcher's ranking and its
+calculator to their rules. Both run in CI before a build, so a release cannot
 carry a dead button.
 
 ## Shortcuts
@@ -297,7 +289,7 @@ carry a dead button.
 | `Win+1` … `Win+9`, `Win+0` | open or focus the matching taskbar button |
 | `Ctrl+Alt+N` | pin the notch panel open |
 | `Ctrl+Alt+J` | open / close Jarvis |
-| `Ctrl+Alt+K` | keep the screen and the PC awake, or let them sleep again |
+| `Ctrl+Alt+K` | keep awake on / off |
 | `Ctrl+Alt+Q` | quit |
 | `↑` `↓` `Home` `End` `PgUp` `PgDn` | move through the launcher |
 | `↵` | open the highlighted row |
@@ -325,9 +317,6 @@ Panel → menu (the sliders icon) → Settings. Everything is stored in
 - **Voice** — speak replies, language (match what I write, Danish, English), the
   voice itself (studio, fast, or a Windows voice), speed, test button, and the
   "Hey Jarvis" wake word
-- **Power** — the two holds (screen, PC), how long they run for (**Never** or a
-  length), whether a focus session keeps the screen on, and a button into Windows'
-  power & sleep settings
 - **Start menu** — whether the Windows key opens this launcher
 - **Start with Windows** — run at login (from the panel menu)
 
@@ -353,10 +342,9 @@ src/voicehud.html          the ring visualiser drawn while Jarvis listens
 src/glass.js               liquid-glass presets for every surface
 src/core/rank.mjs          the launcher's search ranking, on its own
 src/core/calc.mjs          the launcher's calculator, on its own
-src/core/power.js          keep-awake: the two holds, the window, and spoken lengths
 src/vendor/                ybouane/liquidglass build, used as-is
 scripts/check.js           wiring check: bridges, channels, element ids, glass imports
-test/                      the ranking, the calculator and the keep-awake window
+test/                      the ranking and the calculator, under node:test
 ```
 
 Four details are worth knowing because they explain the odd bits:
@@ -417,6 +405,18 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.62** — keep awake is a widget. The menu block that grew last round — two
+switches, a length and a settings row — is gone: in its place is one card in the
+panel, beside Library and Focus. Press it and the screen and the PC stay up until you
+press it again; the card says which it is, survives a restart, and **off** means
+Windows decides again. The small power glyph in its corner opens Windows' own power &
+sleep page, because the sleep timer is Windows' setting and not one an overlay should
+quietly rewrite. Below 10% on battery the card steps aside and says so instead of
+draining the laptop. The same switch is still on the tray and on **Ctrl+Alt+K**, and
+what the card shows is the state main reports it actually got. The clipboard is a card
+too, and it scrolls: the row of chips that ran off the right edge is one box holding
+the whole list, a wheel away from anything in it.
 
 **v1.2.61** — the machine can be told not to sleep, and it is told properly. The one
 *keep the screen awake* switch is two holds now, because a screen and a computer are

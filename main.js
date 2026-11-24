@@ -23,13 +23,6 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const { scanGames } = require('./games');
-const {
-  awakeNeeds,
-  keepLeft,
-  keepLeftLabel,
-  keepWindowPatch,
-  parseKeepDuration,
-} = require('./src/core/power');
 const zlib = require('node:zlib');
 const { execFile, execFileSync, spawn } = require('node:child_process');
 
@@ -120,17 +113,9 @@ const DEFAULT_SETTINGS = {
   // out of the way. Only ever applied with Notch's bar showing.
   hideWinTaskbar: true,
   windowsKey: true,
-  // Keep the machine up. Two holds: the screen staying on, and the system staying
-  // awake with the screen free to dim on its own. keepFor is the length asked
-  // for in minutes (0 = until it is switched off, which is "never") and
-  // keepUntil is the moment that window runs out.
-  keepScreen: false,
-  keepWake: false,
-  keepFor: 0,
-  keepUntil: 0,
-  // A focus session holds the screen while it runs, so the lock screen does not
-  // arrive in the middle of one.
-  focusKeepsAwake: true,
+  // One switch, one widget: while it is on the display never sleeps and the
+  // machine stays up with it. Off, Windows decides again.
+  keepAwake: false,
 };
 
 let prefs = { login: false, customGames: [], settings: { ...DEFAULT_SETTINGS } };
@@ -145,16 +130,14 @@ function loadPrefs() {
   const stored = prefs.settings || {};
   prefs.settings = { ...DEFAULT_SETTINGS, ...stored };
   prefs.settings.assistant = { ...ASSISTANT_DEFAULTS, ...(stored.assistant || {}) };
-  // 1.2.60 and earlier had one switch called keepAwake and it only ever held the
-  // display. The two switches that replace it start where that one left off.
-  if (typeof stored.keepScreen !== 'boolean' && typeof stored.keepWake !== 'boolean' && stored.keepAwake) {
-    prefs.settings.keepScreen = true;
-  }
-  delete prefs.settings.keepAwake;
-  // A window written by a hand-edited file is still a moment in time, not a
-  // countdown: anything unreadable is no window at all.
-  if (!Number.isFinite(Number(prefs.settings.keepUntil))) prefs.settings.keepUntil = 0;
-  if (!Number.isFinite(Number(prefs.settings.keepFor))) prefs.settings.keepFor = 0;
+  // 1.2.61 briefly had two holds and a length; either being on is the one switch
+  // that replaced them, so nobody loses the hold they had.
+  if (stored.keepScreen || stored.keepWake) prefs.settings.keepAwake = true;
+  delete prefs.settings.keepScreen;
+  delete prefs.settings.keepWake;
+  delete prefs.settings.keepFor;
+  delete prefs.settings.keepUntil;
+  delete prefs.settings.focusKeepsAwake;
   if (!Array.isArray(prefs.pinned)) prefs.pinned = [];
   if (!Array.isArray(prefs.recent)) prefs.recent = [];
   // Older builds stored a live-glass on/off switch; carry the choice over.
@@ -863,9 +846,9 @@ function readBattery() {
       const value = Number.parseInt(String(stdout).trim(), 10);
       if (!Number.isFinite(value)) return;
       battery = value;
-      // The holds stand down below 10% on battery, so a battery that fell that
+      // The switch stands down below 10% on battery, so a battery that fell that
       // far has to be noticed without waiting for something else to happen.
-      if (prefs.settings.keepScreen || prefs.settings.keepWake) syncKeepAwake();
+      if (prefs.settings.keepAwake) syncKeepAwake();
     },
   );
 }
@@ -2109,30 +2092,18 @@ async function runNotchAction(raw) {
     range(/\bhover delay\b[^0-9]{0,20}(\d{1,3})/, 'hoverDelay', 0, 400, 'Hover delay');
   if (numbered) return numbered;
 
-  // Keep awake: one order can name either hold — the screen, the PC — both, and a
-  // length. "keep the pc awake" is about the machine, not the display.
+  // Keep awake: the one switch, on or off, however it is put.
   const keepOrder =
     /\bkeep\b[^.]*\bawake\b|\bstay awake\b|\bkeep (?:the )?(?:screen|display|monitor|pc|computer) on\b|\b(?:screen|display|monitor|pc|computer|maskine|skærm)\b[^.]*\b(?:awake|stays? on)\b|\bhold (?:it|the screen)\b|\bvågen\b/.test(
       low,
     );
   if (keepOrder) {
-    const wantsScreen = /\b(?:screen|display|monitor|skærm)\b/.test(low);
-    const wantsPc = /\b(?:pc|computer|laptop|machine|maskine)\b/.test(low);
-    const minutes = parseKeepDuration(low);
     if (wantsOff(low) || /\b(?:let (?:it|the screen|the pc) sleep|sleep again|sove)\b/.test(low)) {
-      applySettingsPatch({ keepScreen: false, keepWake: false, keepFor: 0 });
-      return yes('The screen and the PC can sleep again.', 'Skærmen og computeren må sove igen.');
+      setKeepAwake(false);
+      return yes('Windows decides when this PC sleeps again.', 'Windows bestemmer igen over strømmen.');
     }
-    const both = !wantsScreen && !wantsPc;
-    const patch = {};
-    if (wantsScreen || both) patch.keepScreen = true;
-    if (wantsPc || both) patch.keepWake = true;
-    if (minutes) patch.keepFor = minutes;
-    applySettingsPatch(patch);
-    const length = minutes ? ` for ${minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} hours` : `${minutes} minutes`}` : ' until you switch it off';
-    const held = wantsScreen && !wantsPc ? 'The screen stays on' : wantsPc && !wantsScreen ? 'The PC stays awake' : 'The screen stays on and the PC stays awake';
-    const heldDa = wantsScreen && !wantsPc ? 'Skærmen bliver tændt' : wantsPc && !wantsScreen ? 'Computeren bliver vågen' : 'Skærmen bliver tændt og computeren vågen';
-    return yes(`${held}${length}.`, `${heldDa}${minutes ? ` i ${minutes} minutter` : ''}.`);
+    setKeepAwake(true);
+    return yes('The screen and the PC stay on.', 'Skærmen og computeren bliver ved.');
   }
 
   // Switches: "turn the taskbar on", "hide glow", "slå taskbaren til".
@@ -5044,14 +5015,8 @@ function buildTray() {
   tray.setToolTip('Notch');
   const rebuild = () => {
     if (!tray) return;
-    // A hovered tray icon says the state of the holds without opening anything.
-    const power = powerState();
-    const holding = power.keepScreen || power.keepWake;
-    tray.setToolTip(
-      !holding
-        ? 'Notch'
-        : `Notch \u2014 ${power.keepScreen ? 'screen stays on' : 'PC stays awake'}${power.leftLabel ? `, ${power.leftLabel}` : ''}`,
-    );
+    // A hovered tray icon says whether the machine is being held.
+    tray.setToolTip(prefs.settings.keepAwake ? 'Notch \u2014 keep awake is on' : 'Notch');
     tray.setContextMenu(
       Menu.buildFromTemplate([
         {
@@ -5081,50 +5046,19 @@ function buildTray() {
         },
         { type: 'separator' },
         {
-          // The holds are also reachable from the tray, so a long download does
-          // not need the panel opened at all.
+          // The same switch is on the tray, so a long download does not need the
+          // panel opened at all.
           label: 'Keep awake',
-          submenu: [
-            {
-              label: 'Screen stays on',
-              type: 'checkbox',
-              checked: !!prefs.settings.keepScreen,
-              click: (item) => {
-                setPower({ keepScreen: item.checked });
-                rebuild();
-              },
-            },
-            {
-              label: 'PC stays awake',
-              type: 'checkbox',
-              checked: !!prefs.settings.keepWake,
-              click: (item) => {
-                setPower({ keepWake: item.checked });
-                rebuild();
-              },
-            },
-            { type: 'separator' },
-            ...[
-              [0, 'Until I switch it off'],
-              [30, 'For 30 minutes'],
-              [60, 'For 1 hour'],
-              [120, 'For 2 hours'],
-              [240, 'For 4 hours'],
-            ].map(([minutes, label]) => ({
-              label,
-              type: 'radio',
-              checked: (Number(prefs.settings.keepFor) || 0) === minutes,
-              click: () => {
-                setPower({ keepFor: minutes });
-                rebuild();
-              },
-            })),
-            { type: 'separator' },
-            {
-              label: 'Windows power settings…',
-              click: () => shell.openExternal('ms-settings:powersleep').catch(() => {}),
-            },
-          ],
+          type: 'checkbox',
+          checked: !!prefs.settings.keepAwake,
+          click: (item) => {
+            setKeepAwake(item.checked);
+            rebuild();
+          },
+        },
+        {
+          label: 'Windows power settings…',
+          click: () => shell.openExternal('ms-settings:powersleep').catch(() => {}),
         },
         {
           label: 'Start with Windows',
@@ -6023,13 +5957,7 @@ ipcMain.handle('notch:login', (_event, value) => {
 // Jarvis did: saved, applied to every surface, and handed back to the panel so
 // what it shows matches what was asked for.
 function applySettingsPatch(patch) {
-  // Any change to a keep-awake switch derives the window it means before it is
-  // stored, so the menu, the sheet and Jarvis cannot leave them out of step.
-  let incoming = patch || {};
-  if ('keepScreen' in incoming || 'keepWake' in incoming || 'keepFor' in incoming) {
-    incoming = { ...incoming, ...keepWindowPatch(prefs.settings, incoming) };
-  }
-  prefs.settings = { ...DEFAULT_SETTINGS, ...prefs.settings, ...incoming };
+  prefs.settings = { ...DEFAULT_SETTINGS, ...prefs.settings, ...(patch || {}) };
   savePrefs();
   // The launcher window is loaded already, so its motion choice arrives by message.
   if (launcherWin && !launcherWin.isDestroyed()) {
@@ -6061,14 +5989,9 @@ function applySettingsPatch(patch) {
 
 ipcMain.handle('notch:set-settings', (_event, patch) => applySettingsPatch(patch));
 
-// Keep the machine up: two holds, one for the display and one for the system,
-// each held exactly as long as the settings say. A window that ran out while the
-// app was closed is cleared on the first sync rather than held forever.
-let displayBlocker = null;
-let systemBlocker = null;
-let awakeTimer = null;
-// A running focus session holds the screen; the panel says when one starts.
-let focusAwake = false;
+// One hold, one switch: while it is on the display never sleeps, and Windows
+// keeps the machine up with it, so a single blocker is the whole of it.
+let awakeBlocker = null;
 
 function releaseBlocker(id) {
   if (id === null) return null;
@@ -6093,36 +6016,24 @@ function lowBatteryNow() {
   return onBattery && Number(battery) <= 10;
 }
 
-// What the menu and the sheet show: the switches, the window, and whether the
-// machine is actually being held this moment.
-function powerState() {
-  const s = prefs.settings;
-  const left = keepLeft(s.keepUntil);
+// What the widget shows: the switch, whether the machine is really being held,
+// and whether the battery is the reason it is not.
+function awakeState() {
   return {
-    keepScreen: !!s.keepScreen,
-    keepWake: !!s.keepWake,
-    keepFor: Number(s.keepFor) || 0,
-    keepUntil: Number(s.keepUntil) || 0,
-    focusKeepsAwake: s.focusKeepsAwake !== false,
-    focus: focusAwake,
-    left,
-    leftLabel: left ? keepLeftLabel(s.keepUntil) : '',
-    screenHeld: displayBlocker !== null,
-    systemHeld: systemBlocker !== null,
+    on: !!prefs.settings.keepAwake,
+    held: awakeBlocker !== null,
     lowBattery: lowBatteryNow(),
   };
 }
 
-// One chord, one balloon: Ctrl+Alt+K without a panel in the way needs to say
-// what it just did.
+// A balloon for the chord and the tray, where there is no widget in sight.
 function announceAwake() {
-  const state = powerState();
-  const on = state.keepScreen || state.keepWake;
+  const on = !!prefs.settings.keepAwake;
   const message = !on
-    ? 'Sleep is back on.'
-    : state.lowBattery
-      ? 'Battery is low, so the holds wait.'
-      : state.leftLabel || 'Awake until you switch it off.';
+    ? 'Windows decides when this machine sleeps again.'
+    : lowBatteryNow()
+      ? 'Battery is low, so the screen may still sleep.'
+      : 'The screen and the PC stay on until you switch it off.';
   try {
     if (tray && typeof tray.displayBalloon === 'function') {
       tray.displayBalloon({ title: 'Keep awake', content: message, iconType: 'info' });
@@ -6132,85 +6043,36 @@ function announceAwake() {
   }
 }
 
-function notifyAwakeEnded() {
-  if (!isWin) return;
-  try {
-    if (!Notification.isSupported()) return;
-    new Notification({
-      title: 'Keep awake has finished',
-      body: 'The screen and the PC can sleep again. Switch it back on in the notch menu.',
-    }).show();
-  } catch {
-    /* a notification is not worth failing for */
-  }
-}
-
-function syncKeepAwake(options) {
-  const now = Date.now();
-  const needs = awakeNeeds(
-    {
-      keepScreen: prefs.settings.keepScreen,
-      keepWake: prefs.settings.keepWake,
-      keepUntil: prefs.settings.keepUntil,
-      focus: focusAwake && prefs.settings.focusKeepsAwake !== false,
-    },
-    now,
-  );
-  if (needs.expired) {
-    // The moment has passed: the switches go back to off, and the sync below
-    // hands the machine back to Windows.
-    prefs.settings = { ...prefs.settings, keepScreen: false, keepWake: false, keepFor: 0, keepUntil: 0 };
-    savePrefs();
-    if (win && !win.isDestroyed()) win.webContents.send('notch:settings', prefs.settings);
-  }
-
-  // Both holds step aside while the battery is low; a focus session does not get
-  // to drain the machine either.
-  const low = lowBatteryNow();
-  const holdDisplay = needs.display && !low;
-  const holdSystem = needs.system && !low;
-
-  if (holdDisplay && displayBlocker === null) {
+function syncKeepAwake() {
+  // Below 10% on battery the switch steps aside rather than taking the machine
+  // down with it; the widget says why.
+  const want = !!prefs.settings.keepAwake && !lowBatteryNow();
+  if (want && awakeBlocker === null) {
     try {
-      displayBlocker = powerSaveBlocker.start('prevent-display-sleep');
+      awakeBlocker = powerSaveBlocker.start('prevent-display-sleep');
     } catch {
-      displayBlocker = null;
+      awakeBlocker = null;
     }
-  } else if (!holdDisplay) {
-    displayBlocker = releaseBlocker(displayBlocker);
+  } else if (!want) {
+    awakeBlocker = releaseBlocker(awakeBlocker);
   }
-
-  if (holdSystem && systemBlocker === null) {
-    try {
-      systemBlocker = powerSaveBlocker.start('prevent-app-suspension');
-    } catch {
-      systemBlocker = null;
-    }
-  } else if (!holdSystem) {
-    systemBlocker = releaseBlocker(systemBlocker);
-  }
-
-  clearTimeout(awakeTimer);
-  awakeTimer = null;
-  const until = Number(prefs.settings.keepUntil) || 0;
-  if (until > now) {
-    // A timer does not run through sleep, so this is only a nudge: every sync
-    // reads the clock itself and the belt is the check, not the timer.
-    awakeTimer = setTimeout(() => syncKeepAwake({ announce: true }), Math.min(until - now + 250, 2147483000));
-  }
-
-  const state = powerState();
-  if (win && !win.isDestroyed()) win.webContents.send('notch:power', state);
-  if (options && options.announce && displayBlocker === null && systemBlocker === null) {
-    notifyAwakeEnded();
-  }
+  const state = awakeState();
+  if (win && !win.isDestroyed()) win.webContents.send('notch:awake', state);
   return state;
 }
 
-ipcMain.handle('notch:power', (_event, patch) => setPower(patch || {}));
+// One way in for the switch, whichever surface asked: the widget, the tray, the
+// chord or Jarvis.
+function setKeepAwake(value) {
+  applySettingsPatch({ keepAwake: !!value });
+  if (globalThis.__rebuildTray) globalThis.__rebuildTray();
+  return awakeState();
+}
 
-// The sleep timer itself is a Windows setting no app should be changing behind
-// the user's back, so the row opens it instead of pretending.
+ipcMain.handle('notch:awake', (_event, value) => setKeepAwake(value));
+
+// Sleep timers are Windows' own settings: the widget's button opens them rather
+// than having an overlay quietly rewrite them.
 ipcMain.handle('notch:power-settings', async () => {
   try {
     await shell.openExternal('ms-settings:powersleep');
@@ -6219,21 +6081,6 @@ ipcMain.handle('notch:power-settings', async () => {
     return false;
   }
 });
-
-// A running focus session is a reason to hold the screen even with every switch
-// off, so the panel says when one starts and stops.
-ipcMain.on('notch:focus-active', (_event, value) => {
-  const next = !!value;
-  if (next === focusAwake) return;
-  focusAwake = next;
-  syncKeepAwake();
-});
-
-// One way in for a change to a keep-awake switch, whichever surface asked.
-function setPower(patch) {
-  applySettingsPatch(patch || {});
-  return powerState();
-}
 
 // Pick an image to sit behind the notch permanently. The file is copied into
 // userData so moving or deleting the original does not break the backdrop.
@@ -9417,12 +9264,10 @@ if (!app.requestSingleInstanceLock()) {
       if (win && !win.isDestroyed()) win.webContents.send('notch:toggle-pin');
     });
     globalShortcut.register('Control+Alt+J', () => toggleJarvis());
-    // Both holds in one chord, with a balloon to say what it did: Ctrl+Alt+K.
+    // The switch in one chord, with a balloon to say what it did: Ctrl+Alt+K.
     globalShortcut.register('Control+Alt+K', () => {
-      const on = !!(prefs.settings.keepScreen || prefs.settings.keepWake);
-      setPower({ keepScreen: !on, keepWake: !on });
+      setKeepAwake(!prefs.settings.keepAwake);
       announceAwake();
-      if (globalThis.__rebuildTray) globalThis.__rebuildTray();
     });
     globalShortcut.register('Control+Alt+Q', () => app.quit());
     globalShortcut.register('Control+Alt+S', () => takeScreenshot());
@@ -9478,10 +9323,7 @@ if (!app.requestSingleInstanceLock()) {
     stopWidgetStats();
     clearTimeout(pointerTimer);
     pointerTimer = null;
-    clearTimeout(awakeTimer);
-    awakeTimer = null;
-    displayBlocker = releaseBlocker(displayBlocker);
-    systemBlocker = releaseBlocker(systemBlocker);
+    awakeBlocker = releaseBlocker(awakeBlocker);
     if (tray) {
       tray.destroy();
       tray = null;
