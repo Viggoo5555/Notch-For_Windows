@@ -11,7 +11,7 @@ installed in a few clicks, no browser, no web service.
 
 ## Download
 
-**[Notch-Setup-1.2.63.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.63/Notch-Setup-1.2.63.exe)**
+**[Notch-Setup-1.2.64.exe](https://github.com/Viggoo5555/Notch-For_Windows/releases/download/v1.2.64/Notch-Setup-1.2.64.exe)**
 — the installer, about 341 MB.
 
 1. Run it. Windows may warn that the publisher is unknown (the build is not
@@ -406,6 +406,15 @@ listening is [Whisper](https://github.com/openai/whisper) run through
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 ## Release
+
+**v1.2.64** — one press on a pinned app opens it. The press already started the
+app, but Windows does not hand the foreground to a window started from a process
+that does not have it, so the app opened behind whatever was in front and the bar
+looked as if it had ignored the press; the press after that worked, because by
+then the app was a window the bar knew and the helper brought it forward. The
+press now watches for the window its launch opens — or for one the app already
+had that the last poll had not listed yet — and brings that forward the same way,
+so a pinned app that is not running comes up in front on the first press.
 
 **v1.2.63** — keep awake is a coffee cup. The card that held it is gone: a small cup
 sits in the panel header beside the camera and the pin, dim when Windows decides and

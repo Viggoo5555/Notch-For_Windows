@@ -7496,6 +7496,7 @@ function findTaskbarApp(key) {
 // about did nothing at all.
 function taskbarPress(payload) {
   const data = payload && typeof payload === 'object' ? payload : { key: payload };
+  cancelLaunchWatch();
   const key = String(data.key || '');
   const app = findTaskbarApp(key);
   const handles = Array.isArray(data.windows)
@@ -7517,6 +7518,7 @@ function taskbarPress(payload) {
   }
   if (launchPinnedTarget(target, exe)) {
     rememberRecent(target);
+    watchLaunchedApp(target, exe);
     hookLogNote(`press ${key || '?'}: launched ${target}`);
   } else {
     hookLogNote(`press ${key || '?'}: could not launch ${target}`);
@@ -7559,6 +7561,68 @@ function launchPinnedTarget(target, exe) {
     });
   }
   return true;
+}
+
+// A press on a pin that is not running starts its app. Windows is the one that
+// decides what a window started from a process without the foreground may do
+// about it, and the answer is often nothing: the app opens behind the window that
+// had the foreground, which reads as a press that did nothing at all. The press
+// after it worked, because by then the app was a window the bar knew and the
+// helper brought it forward. So the launch is watched here: the window it opens
+// — or one the app already had that the last poll had not listed yet — is brought
+// forward the same way, and one press is enough.
+const LAUNCH_WATCH_MS = 15000;
+let launchWatchToken = 0;
+
+// One press supersedes the last one's watch: a window that appears a second later
+// belongs to the newest press, not to the app pressed before it.
+function cancelLaunchWatch() {
+  launchWatchToken += 1;
+}
+
+// The window of the app the press started, by the executable the pin holds or,
+// for a pin whose executable could not be read, by the name of the file it opens.
+function launchedWindow(rows, wanted, wantedBase) {
+  for (const row of rows || []) {
+    const [handle, pidText, , exe] = String(row).split('\t');
+    const hwnd = Number(handle);
+    if (!hwnd || Number(pidText) === process.pid) continue;
+    const path = String(exe || '').trim().toLowerCase();
+    if (!path) continue;
+    if (wanted && path === wanted) return hwnd;
+    if (wantedBase && path.split(/[\\/]/).pop() === wantedBase) return hwnd;
+  }
+  return 0;
+}
+
+function watchLaunchedApp(target, exe) {
+  cancelLaunchWatch();
+  const token = launchWatchToken;
+  const wanted = String(exe || '').trim().toLowerCase();
+  let wantedBase = wanted.split(/[\\/]/).pop() || '';
+  if (!wantedBase) {
+    // A shortcut names the app it starts, and that is the executable the window
+    // list reports. A packaged app or a URL names nothing this can match.
+    const name = String(target || '').trim().toLowerCase().split(/[\\/]/).pop() || '';
+    if (name && !/^[a-z][a-z0-9+.-]*:/i.test(name)) {
+      wantedBase = `${name.replace(/\.lnk$/, '')}.exe`;
+    }
+  }
+  if (!wanted && !wantedBase) return;
+  const deadline = Date.now() + LAUNCH_WATCH_MS;
+  const check = async () => {
+    const rows = await requestWindowList(1200);
+    if (token !== launchWatchToken) return;
+    const hwnd = launchedWindow(rows, wanted, wantedBase);
+    if (hwnd) {
+      cancelLaunchWatch();
+      activateTaskbarWindow(hwnd);
+      return;
+    }
+    if (Date.now() >= deadline) return;
+    setTimeout(check, 350);
+  };
+  setTimeout(check, 250);
 }
 
 ipcMain.on('taskbar:press', (_event, payload) => taskbarPress(payload));
